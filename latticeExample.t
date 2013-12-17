@@ -22,7 +22,7 @@ local C = terralib.includecstring [[
 --    of type 'real' can change (it may be double, or it may be a special autodiff number type)
 local function latticeModel()
 	local size = 100
-	local temp = 0.1
+	local temp = 0.0001
 	local RealGrid = image.Image(real, 1)
 	return terra()
 		var lattice = RealGrid.stackAlloc(100, 100)
@@ -62,7 +62,7 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 1000
+local numsamps = 2000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
 local terra doInference()
