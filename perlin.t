@@ -7,21 +7,29 @@ local m = terralib.require("mem")
 local util = terralib.require("util")
 local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
+local ConvSimConstraint = terralib.require("convolutionSim")
+
+local Vec2d = Vec(double, 2)
+local DoubleGrid = image.Image(double, 1)
 
 -- C standard library stuff
 local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
 
+-- Target images
+local tgtImage = DoubleGrid.methods.load(image.Format.PNG, "targets/stanfordS_34_50.png")
+-- local tgtImage = DoubleGrid.methods.load(image.Format.PNG, "targets/cal_50_40.png")
 
 local function perlinModel()
 
-	local size = 100
-	local scale = 12
+	local size = 200
+	local scale = 16
+	local temp = 0.1
 	local RealGrid = image.Image(real, 1)
 	local Vec2Grid = image.Image(real, 2)
 	local Vec2 = Vec(real, 2)
-	local Vec2d = Vec(double, 2)
+	local ConvSimConstraintT = ConvSimConstraint(real)
 
 	local randGrad = pfn(terra(v: &Vec2)
 		var ang = uniform(0.0, [2*math.pi], {structural=false, hasPrior=false})
@@ -37,12 +45,16 @@ local function perlinModel()
 		end
 	end)
 
+	-- Convolutional constraint: make the Stanford S appear as many places as possible
+	local tgtImageEnergy = ConvSimConstraintT(tgtImage, 0, size - tgtImage.width, 4,
+														0, size - tgtImage.height, 4)
+
 	return terra()
 		-- Sample random gradients
 		var gradients = Vec2Grid.stackAlloc(scale+1, scale+1)
 		for j=0,gradients.height do
 			for i=0,gradients.width do
-				randGrad(gradients(i,j))
+				randGrad(&gradients(i,j))
 			end
 		end
 		-- Generate noise image
@@ -66,10 +78,10 @@ local function perlinModel()
 				p10(0) = x_1; p10(1) = y_0
 				p11(0) = x_1; p11(1) = y_1
 				-- Dot product displacement vectors with random gradients
-				var d00 = (p - p00):dot(@gradients(x_0, y_0))
-				var d01 = (p - p01):dot(@gradients(x_0, y_1))
-				var d10 = (p - p10):dot(@gradients(x_1, y_0))
-				var d11 = (p - p11):dot(@gradients(x_1, y_1))
+				var d00 = gradients(x_0, y_0):dot(p - p00)
+				var d01 = gradients(x_0, y_1):dot(p - p01)
+				var d10 = gradients(x_1, y_0):dot(p - p10)
+				var d11 = gradients(x_1, y_1):dot(p - p11)
 				-- Bicubic interpolation
 				var horiz_0 = ease(d00, d10, x - x_0)
 				var horiz_1 = ease(d01, d11, x - x_0)
@@ -80,21 +92,26 @@ local function perlinModel()
 				image(i,j)(0) = final
 			end
 		end
-		-- TODO: constraints of some kind
+		
+		-- Apply convolutional image constraint
+		factor(-tgtImageEnergy(&image)/temp);
+
 		m.destruct(gradients)
 		return image
 	end
 end
 
+---------------------------------------------------------------------
+
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 2000
+local numsamps = 1000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
-	-- return [mcmc(perlinModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	return [forwardSample(perlinModel, numsamps)]
+	return [mcmc(perlinModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	-- return [forwardSample(perlinModel, numsamps)]
 end
 -- Garbage collect the returned vector of samples
 --    (i.e. free the memory when it is safe to do so)
@@ -106,7 +123,6 @@ io.flush()
 -- We render every frame of a 1000 frame sequence. We want to linearly adjust downward
 --    for longer sequences
 local frameSkip = math.ceil(numsamps / 1000.0)
-local DoubleGrid = image.Image(double, 1)
 local terra renderFrames()
 	var framename : int8[1024]
 	var framenumber = 0

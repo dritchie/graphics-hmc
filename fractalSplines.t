@@ -15,26 +15,26 @@ local C = terralib.includecstring [[
 local function fractalSplineModel()
 
 	local size = 100
-	local temp = 1.0
+	local temp = 0.001
 	local rigidity = 1.0
 	local tension = 0.5
 	local RealGrid = image.Image(real, 1)
 
 	-- Discrete derivatives
 	local Dx = macro(function(f, x, y, h)
-		return `(@f(x+1,y) - @f(x-1,y))/(2*h)
+		return `(f(x+1,y) - f(x-1,y))/(2*h)
 	end)
 	local Dy = macro(function(f, x, y, h)
-		return `(@f(x,y+1) - @f(x,y-1))/(2*h)
+		return `(f(x,y+1) - f(x,y-1))/(2*h)
 	end)
 	local Dxx = macro(function(f, x, y, h)
-		return `(@f(x+1,y) - 2.0*@f(x,y) + @f(x-1,y))/(2*h*h)
+		return `(f(x+1,y) - 2.0*f(x,y) + f(x-1,y))/(2*h*h)
 	end)
 	local Dyy = macro(function(f, x, y, h)
-		return `(@f(x,y+1) - 2.0*@f(x,y) + @f(x,y-1))/(2*h*h)
+		return `(f(x,y+1) - 2.0*f(x,y) + f(x,y-1))/(2*h*h)
 	end)
 	local Dxy = macro(function(f, x, y, h)
-		return `(@f(x+1,y+1) - @f(x+1,y) - @f(x,y+1) + @f(x,y))/(h*h)
+		return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
 	end)
 
 	return terra()
