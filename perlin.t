@@ -7,10 +7,11 @@ local m = terralib.require("mem")
 local util = terralib.require("util")
 local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
-local ConvSimConstraint = terralib.require("convolutionSim")
+local imSimConstraints = terralib.require("imageSimConstraints")
 
 local Vec2d = Vec(double, 2)
 local DoubleGrid = image.Image(double, 1)
+local DoubleAlphaGrid = image.Image(double, 2)
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -18,18 +19,20 @@ local C = terralib.includecstring [[
 ]]
 
 -- Target images
-local tgtImage = DoubleGrid.methods.load(image.Format.PNG, "targets/stanfordS_34_50.png")
+local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 -- local tgtImage = DoubleGrid.methods.load(image.Format.PNG, "targets/cal_50_40.png")
 
 local function perlinModel()
 
 	local size = 200
 	local scale = 16
-	local temp = 0.1
+	local temp = 0.001
 	local RealGrid = image.Image(real, 1)
 	local Vec2Grid = image.Image(real, 2)
 	local Vec2 = Vec(real, 2)
-	local ConvSimConstraintT = ConvSimConstraint(real)
+	local ConvSimConstraintT = imSimConstraints.ConvolutionalSimConstraint(real)
+	local TransformedSimConstraintT = imSimConstraints.TransformedSimConstraint(real)
+	local DirectSimConstraintT = imSimConstraints.DirectSimConstraint(real)
 
 	local randGrad = pfn(terra(v: &Vec2)
 		var ang = uniform(0.0, [2*math.pi], {structural=false, hasPrior=false})
@@ -45,9 +48,12 @@ local function perlinModel()
 		end
 	end)
 
-	-- Convolutional constraint: make the Stanford S appear as many places as possible
-	local tgtImageEnergy = ConvSimConstraintT(tgtImage, 0, size - tgtImage.width, 4,
-														0, size - tgtImage.height, 4)
+	-- -- Convolutional constraint: make the image appear as many places as possible
+	-- local tgtImageEnergy = ConvSimConstraintT(tgtImage, 0, size - tgtImage.width, 4,
+	-- 													0, size - tgtImage.height, 4)
+	-- -- Transformed similarity constraint: make the image appear somewhere
+	-- local tgtImageEnergy = TransformedSimConstraintT(tgtImage)
+	-- local tgtImageEnergy = DirectSimConstraintT(tgtImage)
 
 	return terra()
 		-- Sample random gradients
@@ -93,8 +99,12 @@ local function perlinModel()
 			end
 		end
 		
-		-- Apply convolutional image constraint
-		factor(-tgtImageEnergy(&image)/temp);
+		-- Apply image constraint
+		-- factor(-tgtImageEnergy(&image)/temp);
+		-- var center = Vec2.stackAlloc(gaussian(0.0, 0.25, {structural=false}),
+		-- 							 gaussian(0.0, 0.25, {structural=false}))
+		-- var center = Vec2.stackAlloc(0.5, 0.5)
+		-- factor(-tgtImageEnergy(&image, center)/temp)
 
 		m.destruct(gradients)
 		return image
@@ -118,6 +128,10 @@ end
 local samples = m.gc(doInference())
 
 -- Render the set of gathered samples into a movie
+local moviename = arg[1] or "movie"
+local moviefilename = string.format("renders/%s.mp4", moviename)
+local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
+local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
 io.write("Rendering video...")
 io.flush()
 -- We render every frame of a 1000 frame sequence. We want to linearly adjust downward
@@ -127,7 +141,7 @@ local terra renderFrames()
 	var framename : int8[1024]
 	var framenumber = 0
 	for i=0,numsamps,frameSkip do
-		C.sprintf(framename, "renders/movie_%06d.png", framenumber)
+		C.sprintf(framename, movieframebasename, framenumber)
 		framenumber = framenumber + 1
 		-- Quantize image to 8 bits per channel when saving
 		var imagePtr = &samples(i).value
@@ -135,8 +149,8 @@ local terra renderFrames()
 	end
 end
 renderFrames()
-util.wait("ffmpeg -threads 0 -y -r 30 -i renders/movie_%06d.png -c:v libx264 -r 30 -pix_fmt yuv420p renders/movie.mp4 2>&1")
-util.wait("rm -f renders/movie_*.png")
+util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
+util.wait(string.format("rm -f %s", movieframewildcard))
 print("done.")
 
 
