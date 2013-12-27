@@ -128,9 +128,54 @@ local fractalSplineModel = templatize(function(real)
 	end
 end)
 
+local DoubleGrid = image.Image(double, 1);
+local TEST_IMAGE = (terra()
+  var t = DoubleGrid.stackAlloc(100, 100)
+	for y=0,100 do
+		for x=0,100 do
+			if (x+y) > 100 then
+				t(x, y)(0) = 1.0
+			else
+				t(x, y)(0) = 0.0
+			end
+		end
+	end
+	return t
+end)()
+
+-- Render the set of gathered samples into a movie
+-- TODO: Factor out to utils
+local function renderSamplesToMovie(samples, numsamps, moviename)
+	local moviefilename = string.format("renders/%s.mp4", moviename)
+	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
+	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
+	io.write("Rendering video...")
+	io.flush()
+	-- We render every frame of a 1000 frame sequence. We want to linearly adjust downward
+	--    for longer sequences
+	local frameSkip = math.ceil(numsamps / 1000.0)
+	local terra renderFrames()
+		var framename : int8[1024]
+		var framenumber = 0
+		for i=0,numsamps,frameSkip do
+			C.sprintf(framename, movieframebasename, framenumber)
+			framenumber = framenumber + 1
+			-- Quantize image to 8 bits per channel when saving
+			var imagePtr = &samples(i).value
+			[DoubleGrid.save(uint8)](imagePtr, image.Format.PNG, framename)
+		end
+	end
+	renderFrames()
+	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
+	util.wait(string.format("rm -f %s", movieframewildcard))
+	print("done.")
+end
+
 return
 {
 	TerrainMap = TerrainMap,
 	HeightConstraint = HeightConstraint,
-	fractalSplineModel = fractalSplineModel
+	fractalSplineModel = fractalSplineModel,
+	renderSamplesToMovie = renderSamplesToMovie,
+	TEST_IMAGE = TEST_IMAGE
 }
