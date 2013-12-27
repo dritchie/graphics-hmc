@@ -16,22 +16,26 @@ local C = terralib.includecstring [[
 
 local DoubleAlphaGrid = image.Image(double, 2)
 local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
+-- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/circle_20.png")
 
 local function fractalSplineModel()
 
 	local size = 100
 	local splineTemp = 10.0
 	local imageSimTemp = 0.00000001
-	-- local imageSimTemp = 0.000000001
 	local rigidity = 1.0
 	local tension = 0.5
 	local Vec2 = Vec(real, 2)
 	local RealGrid = image.Image(real, 1)
 	local DirectSimConstraint = imSimConstraints.DirectSimConstraint(real)
 	local TransformedSimConstraint = imSimConstraints.TransformedSimConstraint(real)
+	local ConvolutionalSimConstraint = imSimConstraints.ConvolutionalSimConstraint(real)
 
 	-- local tgtImageEnergyFn = DirectSimConstraint(tgtImage)
 	local tgtImageEnergyFn = TransformedSimConstraint(tgtImage)
+	-- local tgtImageEnergyFn = ConvolutionalSimConstraint(tgtImage,
+	-- 													0, size - tgtImage.width, 4,
+	-- 													0, size - tgtImage.height, 4)
 
 	-- Discrete derivatives
 	local Dx = macro(function(f, x, y, h)
@@ -50,7 +54,9 @@ local function fractalSplineModel()
 		return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
 	end)
 
+	local iters = global(int, 0)
 	return terra()
+		iters = iters + 1
 		var lattice = RealGrid.stackAlloc(100, 100)
 		-- Priors
 		for y=0,size do
@@ -75,8 +81,16 @@ local function fractalSplineModel()
 		-- Image target constraint
 		-- factor(-tgtImageEnergyFn(&lattice)/imageSimTemp)
 		-- var center = Vec2.stackAlloc(0.5, 0.5)
-		var center = Vec2.stackAlloc(gaussian(0.5, 0.25, {structural=false, mass=50.0}),
-									 gaussian(0.5, 0.25, {structural=false, mass=50.0}))
+		var mass = 1.0
+		if iters < 1000 then mass = 100000.0 end
+		var cx = gaussian(0.5, 0.25, {structural=false, mass=mass})
+		var cy = gaussian(0.5, 0.25, {structural=false, mass=mass})
+		var center = Vec2.stackAlloc(cx, cy)
+		var circCenter = Vec2.stackAlloc(0.5, 0.5)
+		var circRadius = 0.45
+		var err = circCenter:dist(center) - circRadius
+		err = err*err
+		factor(-err/imageSimTemp)
 		-- C.printf("center: (%g, %g)           \n", ad.val(center(0)), ad.val(center(1)))
 		factor(-tgtImageEnergyFn(&lattice, center)/imageSimTemp)
 		return lattice
@@ -85,9 +99,10 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 4000
+local numsamps = 2000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
+-- local kernel = HMC({numSteps=20, targetAcceptRate=0.65})
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(fractalSplineModel, kernel, {numsamps=numsamps, verbose=verbose})]
