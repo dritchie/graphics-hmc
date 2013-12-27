@@ -5,20 +5,33 @@ terralib.require("prob")
 local image = terralib.require("image")
 local m = terralib.require("mem")
 local util = terralib.require("util")
+local Vec = terralib.require("linalg").Vec
+local ad = terralib.require("ad")
+local imSimConstraints = terralib.require("imageSimConstraints")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
 
+local DoubleAlphaGrid = image.Image(double, 2)
+local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
 local function fractalSplineModel()
 
 	local size = 100
-	local temp = 0.001
+	local splineTemp = 10.0
+	local imageSimTemp = 0.00000001
+	-- local imageSimTemp = 0.000000001
 	local rigidity = 1.0
 	local tension = 0.5
+	local Vec2 = Vec(real, 2)
 	local RealGrid = image.Image(real, 1)
+	local DirectSimConstraint = imSimConstraints.DirectSimConstraint(real)
+	local TransformedSimConstraint = imSimConstraints.TransformedSimConstraint(real)
+
+	-- local tgtImageEnergyFn = DirectSimConstraint(tgtImage)
+	local tgtImageEnergyFn = TransformedSimConstraint(tgtImage)
 
 	-- Discrete derivatives
 	local Dx = macro(function(f, x, y, h)
@@ -56,16 +69,23 @@ local function fractalSplineModel()
 				var dxy = Dxy(lattice, x, y, h)
 				var energy = 0.5 * rigidity *
 					((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
-				factor(-energy(0)/temp)
+				factor(-energy(0)/splineTemp)
 			end
 		end
+		-- Image target constraint
+		-- factor(-tgtImageEnergyFn(&lattice)/imageSimTemp)
+		-- var center = Vec2.stackAlloc(0.5, 0.5)
+		var center = Vec2.stackAlloc(gaussian(0.5, 0.25, {structural=false, mass=50.0}),
+									 gaussian(0.5, 0.25, {structural=false, mass=50.0}))
+		-- C.printf("center: (%g, %g)           \n", ad.val(center(0)), ad.val(center(1)))
+		factor(-tgtImageEnergyFn(&lattice, center)/imageSimTemp)
 		return lattice
 	end
 end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 2000
+local numsamps = 4000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
 local terra doInference()
