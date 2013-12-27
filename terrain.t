@@ -52,19 +52,17 @@ local TerrainMap = templatize(function(real)
   
   local struct MapT
   {
-		grid : RealGrid,
-		dim : uint
+		grid : RealGrid
   }
 
-  terra MapT:__construct(d: uint)
-  	self.dim = d
-  	self.grid = RealGrid.stackAlloc(d, d)
+  terra MapT:__construct(w: uint, h: uint)
+  	self.grid = RealGrid.stackAlloc(w, h)
   end
 
   -- Return value at uv coordinates
   terra MapT:getPixelByUV(u: real, v: real)
-  	var x = [int](cmath.round(u * self.dim))
-		var y = [int](cmath.round(v * self.dim))
+  	var x = [int](cmath.round(u * self.grid.width))
+		var y = [int](cmath.round(v * self.grid.height))
 		return self.grid(x, y)
   end
   
@@ -93,22 +91,24 @@ end)
 local fractalSplineModel = templatize(function(real)
   local TerrainMapT = TerrainMap(real)
 
-  return function(tgtImage, size, temp, rigidity, tension, c)
+  return function(tgtImage, temp, rigidity, tension, c)
 		return terra()
-			var terrainMap = TerrainMapT.stackAlloc(size)
+		  var width = tgtImage.width
+		  var height = tgtImage.height 
+			var terrainMap = TerrainMapT.stackAlloc(width, height)
 			var lattice = terrainMap.grid
 
 			-- Priors
-			for y=0,size do
-				for x=0,size do
+			for y=0,height do
+				for x=0,width do
 					lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
 				end
 			end
 
 			-- Variational spline derivative constraints
-			var h = 1.0 / size
-			for y = 1, size-1 do
-				for x = 1, size-1 do
+			var h = 1.0 / cmath.fmax(width, height)
+			for y = 1, height-1 do
+				for x = 1, width-1 do
 					var dx = Dx(lattice, x, y, h)
 					var dy = Dy(lattice, x, y, h)
 					var dxx = Dxx(lattice, x, y, h)

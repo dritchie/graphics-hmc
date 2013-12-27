@@ -25,7 +25,7 @@ local hEnergy = HeightConstraintT(0.4, 0.6,
 
 -- Target images
 local DoubleGrid = image.Image(double, 1);
-local tgtImage = (terra()
+local testTgtImage = (terra()
   var t = DoubleGrid.stackAlloc(100, 100) --methods.load(image.Format.PNG, "targets/stanfordS_34_50.png")
 	for y=0,100 do
 		for x=0,100 do
@@ -38,6 +38,16 @@ local tgtImage = (terra()
 	end
 	return t
 end)()
+local tgtImage = DoubleGrid.methods.load(image.Format.PNG, "targets/stanfordS_34_50.png")
+-- local test = terra()
+-- 	for y = 0, tgtImage.height do
+-- 	 for x = 0, tgtImage.width do
+-- 	 	var v = tgtImage(x, y)(0)
+-- 	 	C.printf("%f\n", v)
+-- 	 end
+-- 	end
+-- end
+--test()
 
 -- Fractal Spline Model
 local function fractalSplineModel()
@@ -48,7 +58,7 @@ local function fractalSplineModel()
 	local c = 1000000
 	local FractalSplineModelT = terrain.fractalSplineModel(real)
 
-	return FractalSplineModelT(tgtImage, size, temp, rigidity, tension, c)
+	return FractalSplineModelT(tgtImage, temp, rigidity, tension, c)
 end
 
 -- Do HMC inference on the model
