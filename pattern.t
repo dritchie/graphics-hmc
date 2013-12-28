@@ -29,7 +29,7 @@ local Pattern = templatize(function(real)
 
 	terra PatternInfo:__construct()
 		self.vars = nil
-		self.adjacencies:__construct()
+		m.init(self.adjacencies)
 		self.templateId = 0
 		self.backgroundId = 0
 		self.numGroups = 0
@@ -58,21 +58,20 @@ local Pattern = templatize(function(real)
 	terra PatternInfo:__construct(numGroups:uint, adj:Adjacencies, bid:uint, tid:uint)
 		--C.printf("%d, %d, %d, %d", numGroups, adj.size(), bid, tid)
 		self.backgroundId = bid
-		
-		self.adjacencies:__construct()
-		self.adjacencies:__copy(&adj)
+
+		self.adjacencies = m.copy(adj)
 
 		self.templateId = tid
 		self.numGroups = numGroups
 		self.vars = [&Color](C.malloc(self.numGroups * sizeof(Color)))
 		for x=0,numGroups do
-			self:getVarPtr(x):__construct()
+			m.init(@self:getVarPtr(x))
 		end
 	end
 
 	terra PatternInfo:__destruct()
 		C.free(self.vars)
-		self.adjacencies:__destruct()
+		m.destruct(self.adjacencies)
 	end
 
 	terra PatternInfo:__copy(other: &PatternInfo)
@@ -81,7 +80,7 @@ local Pattern = templatize(function(real)
 		for x=0,self.numGroups do
 			@self:getVarPtr(x) = m.copy(@other:getVarPtr(x))
 		end
-		self.adjacencies:__copy(&other.adjacencies)
+		self.adjacencies = m.copy(other.adjacencies)
 		self.templateId = other.templateId
 		self.backgroundId = other.backgroundId
 	end

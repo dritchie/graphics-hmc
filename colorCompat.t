@@ -43,6 +43,7 @@ local function colorCompatModel()
 		var backgroundId = 0
 		
 		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid)
+		m.destruct(adjacencies)
 
 		-- Priors
 		for i=0,numGroups do
