@@ -76,6 +76,7 @@ local Pattern = templatize(function(real)
 	end
 
 	terra PatternInfo:__copy(other: &PatternInfo)
+		self.numGroups = other.numGroups
 		self.vars = [&Color](C.malloc(self.numGroups*sizeof(Color)))
 		for x=0,self.numGroups do
 			@self:getVarPtr(x) = m.copy(@other:getVarPtr(x))

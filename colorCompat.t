@@ -25,7 +25,7 @@ local function colorCompatModel()
 	
 	--local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
 	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
-	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
+	--local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
 	
 	return terra()
 		var numGroups = 5
