@@ -5,6 +5,7 @@ local util = terralib.require("util")
 local ad = terralib.require("ad")
 local Vec = terralib.require("linalg").Vec
 local image = terralib.require("image")
+local rand = terralib.require("prob.random")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
@@ -45,7 +46,7 @@ local bilerp = macro(function(image, x, y, Vec2)
 	end
 end)
 
-local softmaxTightness = 20.0
+local softmaxTightness = 40.0
 local softmax = macro(function(x, y)
 	local t = softmaxTightness
 	local invt = 1.0/t
@@ -79,24 +80,32 @@ local ConvSimConstraint = templatize(function(real)
 									diff = diff*diff*alpha	-- weight by alpha
 									mse = mse + diff
 									totalWeight = totalWeight + alpha
+								else
+									var diff = image(x,y)(0)
+									diff = diff*diff
+									totalWeight = totalWeight + 1.0
 								end
 							end
 						end
 					end
 					if totalWeight > 0.0 then
 						mse = mse / totalWeight
+						-- mse = ad.math.exp(-mse)
+						mse = [rand.gaussian_logprob(real)](mse, 0.0, 0.05)
+						mse = ad.math.exp(mse)
 					end
-					-- energy = energy + mse
-					if energy == 0.0 then
-						energy = mse
-					else
-						energy = softmax(energy, mse)
-						-- energy = ad.math.fmax(energy, mse)
-					end
+					energy = energy + mse
+					-- if energy == 0.0 then
+					-- 	energy = mse
+					-- else
+					-- 	energy = softmax(energy, mse)
+					-- 	-- energy = ad.math.fmax(energy, mse)
+					-- end
 				end
 			end
 			-- C.printf("%g            \n", ad.val(energy))
-			return energy
+			-- return energy
+			return -ad.math.log(energy)
 		end
 	end
 end)
