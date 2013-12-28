@@ -193,6 +193,7 @@ end)
 
 --Prefer perceptual difference of some amount
 local BinaryPerceptualConstraint = templatize(function(real)
+	local Color = Vec(real, 3)
 	local RealPattern = Pattern(real)
 	local ColorList = Vector(Color)
 	return terra(pattern: &RealPattern)

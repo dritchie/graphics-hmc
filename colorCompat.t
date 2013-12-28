@@ -23,9 +23,9 @@ local function colorCompatModel()
 	local temp = 0.01
 	local RealPattern = Pattern(real)
 	
-	--local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
+	local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
 	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
-	--local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
+	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
 	
 	return terra()
 		var numGroups = 5
@@ -53,10 +53,10 @@ local function colorCompatModel()
 		end
 
 		-- Constraints
-		var lightness = 0.0 --lightnessFn(&pattern)
+		var lightness = lightnessFn(&pattern)
 		var saturation = saturationFn(&pattern)
-		C.printf("sat %f\n", saturation)
-		var diff = 0.0--diffFn(&pattern)
+		--C.printf("sat %f\n", saturation)
+		var diff = 0--diffFn(&pattern)
 		--C.printf("diff %f\n", diff)
 
 		factor((lightness+saturation+diff)/temp)
@@ -80,19 +80,26 @@ end
 local samples = m.gc(doInference())
 
 -- Write out links to the colorlovers images
-io.write("Rendering video...")
+io.write("Saving samples to file...")
 io.flush()
+local terra ToByte(num:double)
+	var value = [int](C.floor(C.fmax(C.fmin(num*255+0.5, 255), 0)))
+	if (value > 255 or value < 0) then
+		C.printf("%d\n", value)
+	end
+	return value
+end
 local terra SaveToFile()
-	var file_ptr = C.fopen("colorSamples.txt", "a");
+	var file_ptr = C.fopen("colorSamples.txt", "w");
 	for i=0,numsamps do
 		var pattern = samples(i).value
 		var tid = pattern.templateId
     	C.fprintf(file_ptr, "http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png\n", tid,
-    			  pattern(0)(0), pattern(0)(1), pattern(0)(2),
-    			  pattern(1)(0), pattern(1)(1), pattern(1)(2),
-    			  pattern(2)(0), pattern(2)(1), pattern(2)(2),		  
-    			  pattern(3)(0), pattern(3)(1), pattern(3)(2),
-    			  pattern(4)(0), pattern(4)(1), pattern(4)(2)   			  
+    			  ToByte(pattern(0)(0)), ToByte(pattern(0)(1)), ToByte(pattern(0)(2)),
+    			  ToByte(pattern(1)(0)), ToByte(pattern(1)(1)), ToByte(pattern(1)(2)),
+    			  ToByte(pattern(2)(0)), ToByte(pattern(2)(1)), ToByte(pattern(2)(2)),		  
+    			  ToByte(pattern(3)(0)), ToByte(pattern(3)(1)), ToByte(pattern(3)(2)),
+    			  ToByte(pattern(4)(0)), ToByte(pattern(4)(1)), ToByte(pattern(4)(2))   			  
     	)
     end
     C.fclose(file_ptr)
