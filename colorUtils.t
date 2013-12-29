@@ -200,19 +200,19 @@ local BinaryPerceptualConstraint = templatize(function(real)
 		var mu = 0.3
 		var sigma = 0.2
 		var totalScore = real(0.0)
-		var labs = ColorList.stackAlloc(pattern.numGroups, Color.stackAlloc(0,0,0))
+		--var black = Color.stackAlloc(0,0,0)
+		--var labs = ColorList.stackAlloc(pattern.numGroups, black)
 		--convert colors to lab
-		for i=0,pattern.numGroups do
-			labs:set(i, [RGBtoLAB(real)](pattern(i)))
-		end
+		--for i=0,pattern.numGroups do
+		--	labs:set(i, [RGBtoLAB(real)](pattern(i)))
+		--end
 
 		var maxDist = ad.math.sqrt(100.0*100.0+200.0*200.0+200.0*200.0)
-
 		for i=0,pattern.adjacencies.size do
 			var adj = pattern.adjacencies:get(i)
-			var first = adj:get(0)
-			var second = adj:get(1)
-			var dist = labs:get(first):dist(labs:get(second))/maxDist
+			var first = [RGBtoLAB(real)](pattern(adj:get(0)))
+			var second = [RGBtoLAB(real)](pattern(adj:get(1)))
+			var dist = first:dist(second)/maxDist
 			--C.printf("dist %g\n", ad.val(dist))
 			var score = [gaussian_logprob(real)](dist, mu, sigma)
 			totalScore = totalScore + score

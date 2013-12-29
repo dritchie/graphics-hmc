@@ -18,7 +18,6 @@ local C = terralib.includecstring [[
 ]]
 
 
-
 local function colorCompatModel()
 	local temp = 0.01
 	local RealPattern = Pattern(real)
@@ -55,9 +54,7 @@ local function colorCompatModel()
 		-- Constraints
 		var lightness = lightnessFn(&pattern)
 		var saturation = saturationFn(&pattern)
-		--C.printf("sat %f\n", saturation)
-		var diff = 0--diffFn(&pattern)
-		--C.printf("diff %f\n", diff)
+		var diff = diffFn(&pattern)
 
 		factor((lightness+saturation+diff)/temp)
 
@@ -68,7 +65,7 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 10
+local numsamps = 2000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
 local terra doInference()
