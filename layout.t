@@ -19,98 +19,103 @@ local Color3d = Vec(double, 3)
 local RGBImage = image.Image(uint8, 3)
 
 
-local polar2rect = macro(function(polarVec)
-	local VecT = polarVec:gettype()
-	return quote
-		var r = polarVec(0)
-		var theta = polarVec(1)
-	in
-		VecT.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
-	end
-end)
-
-local softEq = macro(function(x, target, softness)
-	local xtype = x:gettype()
-	return `[rand.gaussian_logprob(xtype)](x, target, softness)
-end)
-
-local ngaussian = macro(function(m, sd)
-	return `gaussian(m, sd, {structural=false})
-end)
-local ngammaMS = macro(function(m, s)
-	return `gammaMeanShape(m, s, {structural=false})
-end)
-local nuniformNoPrior = macro(function(lo, hi)
-	return `uniform(lo, hi, {structural=false, hasPrior=false})
-end)
-
-
 local Plate = templatize(function(real)
 	local Vec2 = Vec(real, 2)
-	local struct PlateT
-	{
-		polarPos: Vec2,
-		pos: Vec2,
-		size: real
-	}
-	terra PlateT:__construct()
-		m.init(self.polarPos)
-		m.init(self.pos)
-		self.size = 0.0
-	end
-	terra PlateT:__construct(parentSize: real)
-		self.size = ngammaMS(parentSize/10.0, 10.0)
-		var maxRadius = parentSize - self.size
-		self.polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, [2*math.pi]),
-									    nuniformNoPrior(0.0, maxRadius))
-		self.pos = polar2rect(self.polarPos)
-		-- Factor: plate is on the table
-		var rdiff = self.polarPos(1) - maxRadius
-		if rdiff > 0.0 then
-			factor(softEq(rdiff, 0.0, self.size/5.0))
-		end
-	end
-	PlateT.methods.__construct = pfn(PlateT.methods.__construct, {ismethod=true})
-	m.addConstructors(PlateT)
+	local struct PlateT { pos: Vec2, size: real }
 	return PlateT
 end)
 
 local Table = templatize(function(real)
 	local Vec2 = Vec(real, 2)
-	local PlateT = Plate(real)
-	local struct TableT
-	{
-		plates: Vector(PlateT),
-		pos: Vec2,
-		size: real
-	}
+	local struct TableT { pos: Vec2, size: real, plates: Vector(Plate(real)) }
 	terra TableT:__construct() : {}
-		m.init(self.plates)
 		m.init(self.pos)
 		self.size = 0.0
-	end
-	terra TableT:__construct(numPlates: int, pos: Vec2) : {}
-		self.pos = pos
-		self.size = ngammaMS(10.0, 10.0)
 		m.init(self.plates)
-		for i=0,numPlates do
-			self.plates:push(PlateT.stackAlloc(self.size))
-		end
-		-- Factor: plates don't overlap
-		-- Factor: plates fill up most of the table
 	end
-	TableT.methods.__construct = pfn(TableT.methods.__construct, {ismethod=true})
+	terra TableT:__construct(pos: Vec2, size: real) : {}
+		self.pos = pos
+		self.size = size
+		m.init(self.plates)
+	end
+	terra TableT:__destruct()
+		m.destruct(self.plates)
+	end
+	terra TableT:__copy(other: &TableT)
+		self.pos = other.pos
+		self.size = other.size
+		self.plates = m.copy(other.plates)
+	end
 	m.addConstructors(TableT)
 	return TableT
 end)
+
 
 local roomWidth = 100
 local roomHeight = 100
 local function layoutModel()
 	local numPlates = 1
+	local Vec2 = Vec(real, 2)
+	local PlateT = Plate(real)
+	local TableT = Table(real)
+
+	--------------------------------------------
+
+	local polar2rect = macro(function(polarVec)
+		return quote
+			var r = polarVec(0)
+			var theta = polarVec(1)
+		in
+			Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
+		end
+	end)
+
+	local softEq = macro(function(x, target, softness)
+		return `[rand.gaussian_logprob(real)](x, target, softness)
+	end)
+
+	local ngaussian = macro(function(m, sd)
+		return `gaussian(m, sd, {structural=false})
+	end)
+	local ngammaMS = macro(function(m, s)
+		return `gammaMeanShape(m, s, {structural=false})
+	end)
+	local nuniformNoPrior = macro(function(lo, hi)
+		return `uniform(lo, hi, {structural=false, hasPrior=false})
+	end)
+
+	--------------------------------------------
+
+	local makePlate = pfn(terra(parent: &TableT)
+		var size = ngammaMS(parent.size/10.0, 10.0)
+		var maxRadius = parent.size - size
+		var polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, [2*math.pi]),
+									   nuniformNoPrior(0.0, maxRadius))
+		var pos = parent.pos + polar2rect(polarPos)
+		-- Factor: plate is on the table
+		var rdiff = polarPos(1) - maxRadius
+		if rdiff > 0.0 then
+			factor(softEq(rdiff, 0.0, size/10.0))
+		end
+		return PlateT { pos, size }
+	end)
+
+	local makeTable = pfn(terra(numPlates: int, pos: Vec2)
+		var size = ngammaMS(10.0, 10.0)
+		var t = TableT.stackAlloc(pos, size)
+		for i=0,numPlates do
+			t.plates:push(makePlate(&t))
+		end
+		-- Factor: plates don't overlap
+		-- Factor: plates fill up most of the table
+		return t
+	end)
+
+	--------------------------------------------
+
 	return terra()
-		var pos = Vec2d.stackAlloc(roomWidth/2.0, roomHeight/2.0)
-		return [Table(real)].stackAlloc(numPlates, pos)
+		var pos = Vec2.stackAlloc(roomWidth/2.0, roomHeight/2.0)
+		return makeTable(numPlates, pos)
 	end
 end
 
@@ -128,7 +133,7 @@ local terra drawCircle(pos: Vec2d, rad: double, color: Color3d, subdivs: int) : 
 	gl.glEnd()
 	gl.glPopMatrix()
 end
-local terra drawCircle(pos: Vec2d, rad: double, color: Color3d) : {}
+terra drawCircle(pos: Vec2d, rad: double, color: Color3d) : {}
 	drawCircle(pos, rad, color, 16)
 end
 
@@ -140,21 +145,22 @@ local function renderSamples(samples, moviename)
 	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
 	io.write("Rendering video...")
 	io.flush()
+	local numsamps = samples.size
 	local frameSkip = math.ceil(numsamps / 1000.0)
 	local terra renderFrames()
 		-- init opengl context (via glut window; sort of hacky)
 		var argc = 0
 		gl.glutInit(&argc, nil)
-		gl.glutInitWindowSize(0, 0)
+		gl.glutInitWindowSize(imageWidth, imageHeight)
 		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
 		gl.glutCreateWindow("Render")
+		gl.glViewport(0, 0, imageWidth, imageHeight)
 
 		-- Set up transforms
 		gl.glMatrixMode(gl.mGL_PROJECTION())
 		gl.glLoadIdentity()
-		gl.gluOrtho2d(roomWidth, roomHeight)
+		gl.gluOrtho2D(0, roomWidth, 0, roomHeight)
 		gl.glMatrixMode(gl.mGL_MODELVIEW())
-		gl.glLoadIdentity()
 
 		-- Render all frames, save to image, write to disk
 		var im = RGBImage.stackAlloc(imageWidth, imageHeight)
@@ -166,7 +172,8 @@ local function renderSamples(samples, moviename)
 			C.sprintf(framename, movieframebasename, framenumber)
 			framenumber = framenumber + 1
 			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
-			gl.glClear(mGL_COLOR_BUFFER_BIT())
+			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
+			gl.glLoadIdentity()
 			var table = &samples(i).value
 			drawCircle(table.pos, table.size, tableColor)
 			for i=0,table.plates.size do
@@ -176,7 +183,7 @@ local function renderSamples(samples, moviename)
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
 				gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
-			[RGBImage.save()](im, image.Format.PNG, framename)
+			[RGBImage.save()](&im, image.Format.PNG, framename)
 		end
 	end
 	renderFrames()
@@ -196,5 +203,7 @@ local terra doInference()
 end
 local samples = m.gc(doInference())
 
+local moviename = arg[1] or "movie"
+renderSamples(samples, moviename)
 
 
