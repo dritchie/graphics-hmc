@@ -221,12 +221,44 @@ local BinaryPerceptualConstraint = templatize(function(real)
 	end
 end)
 
+local BinaryLightnessConstraint = templatize(function(real)
+	local Color = Vec(real, 3)
+	local RealPattern = Pattern(real)
+	local ColorList = Vector(Color)
+	return terra(pattern: &RealPattern)
+		var mu = 0.2
+		var sigma = 0.4
+		var mu_background = 0.3
+		var sigma_background = 0.4
+		var totalScore = real(0.0)
+
+		var maxDist = 100.0
+		for i=0,pattern.adjacencies.size do
+			var adj = pattern.adjacencies:get(i)
+			var first = [RGBtoLAB(real)](pattern(adj:get(0)))(0)
+			var second = [RGBtoLAB(real)](pattern(adj:get(1)))(0)
+			var dist = ad.math.fabs(first-second)/maxDist
+
+			if (adj:get(0)==pattern.backgroundId or adj:get(1)==pattern.backgroundId) then
+				var score = [gaussian_logprob(real)](dist, mu_background, sigma_background)
+				totalScore = totalScore + score
+			else
+				var score = [gaussian_logprob(real)](dist, mu, sigma)
+				totalScore = totalScore + score
+			end
+			
+		end
+		return totalScore
+	end
+end)
+
 return {
 	LABtoRGB = LABtoRGB,
 	RGBtoLAB = RGBtoLAB,
 	UnaryLightnessConstraint = UnaryLightnessConstraint,
 	UnarySaturationConstraint = UnarySaturationConstraint,
-	BinaryPerceptualConstraint = BinaryPerceptualConstraint
+	BinaryPerceptualConstraint = BinaryPerceptualConstraint,
+	BinaryLightnessConstraint = BinaryLightnessConstraint
 }
 
 

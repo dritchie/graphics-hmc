@@ -25,6 +25,7 @@ local function colorCompatModel()
 	local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
 	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
 	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
+	local lightnessDiffFn = ColorUtils.BinaryLightnessConstraint(real)
 	
 	return terra()
 		var numGroups = 5
@@ -52,11 +53,12 @@ local function colorCompatModel()
 		end
 
 		-- Constraints
-		var lightness = lightnessFn(&pattern)
+		var lightness = 0 --lightnessFn(&pattern) --Unary lightness might be more arbitrary
 		var saturation = saturationFn(&pattern)
 		var diff = diffFn(&pattern)
+		var lightnessDiff = lightnessDiffFn(&pattern) 
 
-		factor((lightness+saturation+diff)/temp)
+		factor((lightness+saturation+diff+lightnessDiff)/temp)
 
 		return pattern
 	end
@@ -65,7 +67,7 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 2000
+local numsamps = 10000
 local verbose = true
 local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
 local terra doInference()
