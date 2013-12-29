@@ -190,7 +190,7 @@ end
 local numsamps = 1000
 local verbose = true
 -- local kernel = HMC({numSteps=1})
-local kernel = HMC({numSteps=20, targetAcceptRate=0.65})
+local kernel = HMC({numSteps=20})
 local terra doInference()
 	return [mcmc(layoutModel, kernel, {numsamps=numsamps, verbose=verbose})]
 end

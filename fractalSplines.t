@@ -108,7 +108,7 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local verbose = true
 -- local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
-local kernel = HMC({numSteps=20, targetAcceptRate=0.65})
+local kernel = HMC({numSteps=20})
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(fractalSplineModel, kernel, {numsamps=numsamps, verbose=verbose})]
