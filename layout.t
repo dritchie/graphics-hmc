@@ -70,9 +70,33 @@ local function layoutModel()
 		end
 	end)
 
+	--------------------------------------------
+
 	local softEq = macro(function(x, target, softness)
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
+	local upperBound = macro(function(val, bound, softness)
+		return quote
+			if val > bound then
+				factor(softEq(val-bound, 0.0, softness))
+			end 
+		end
+	end)
+	local lowerBound = macro(function(val, bound, softness)
+		return quote
+			if val < bound then
+				factor(softEq(bound-val, 0.0, softness))
+			end 
+		end
+	end)
+	local bound = macro(function(val, lo, hi, softness)
+		return quote
+			lowerBound(val, lo, softness)
+			upperBound(val, hi, softness)
+		end
+	end)
+
+	--------------------------------------------
 
 	local ngaussian = macro(function(m, sd)
 		return `gaussian(m, sd, {structural=false})
@@ -87,21 +111,18 @@ local function layoutModel()
 	--------------------------------------------
 
 	local makePlate = pfn(terra(parent: &TableT)
-		var size = ngammaMS(parent.size/10.0, 10.0)
+		var size = ngammaMS(parent.size/5.0, 100.0)
 		var maxRadius = parent.size - size
-		var polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, [2*math.pi]),
-									   nuniformNoPrior(0.0, maxRadius))
+		var polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, maxRadius),
+									   nuniformNoPrior(0.0, [2*math.pi]))
+		-- Soft bound: stay on the table!
+		bound(polarPos(0), 0.0, maxRadius, 0.1)
 		var pos = parent.pos + polar2rect(polarPos)
-		-- Factor: plate is on the table
-		var rdiff = polarPos(1) - maxRadius
-		if rdiff > 0.0 then
-			factor(softEq(rdiff, 0.0, size/10.0))
-		end
 		return PlateT { pos, size }
 	end)
 
 	local makeTable = pfn(terra(numPlates: int, pos: Vec2)
-		var size = ngammaMS(10.0, 10.0)
+		var size = ngammaMS(10.0, 100.0)
 		var t = TableT.stackAlloc(pos, size)
 		for i=0,numPlates do
 			t.plates:push(makePlate(&t))
