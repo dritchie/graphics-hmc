@@ -22,6 +22,7 @@ local RGBImage = image.Image(uint8, 3)
 local Plate = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local struct PlateT { pos: Vec2, size: real }
+	terra PlateT:area() return [math.pi]*self.size*self.size end
 	return PlateT
 end)
 
@@ -46,6 +47,7 @@ local Table = templatize(function(real)
 		self.size = other.size
 		self.plates = m.copy(other.plates)
 	end
+	terra TableT:area() return [math.pi]*self.size*self.size end
 	m.addConstructors(TableT)
 	return TableT
 end)
@@ -54,21 +56,40 @@ end)
 local roomWidth = 100
 local roomHeight = 100
 local function layoutModel()
-	local numPlates = 1
+	local numPlates = 4
 	local Vec2 = Vec(real, 2)
 	local PlateT = Plate(real)
 	local TableT = Table(real)
 
 	--------------------------------------------
 
-	local polar2rect = macro(function(polarVec)
-		return quote
-			var r = polarVec(0)
-			var theta = polarVec(1)
-		in
-			Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
+	local terra polar2rect(polarVec: Vec2)
+		var r = polarVec(0)
+		var theta = polarVec(1)
+		return Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
+	end
+
+	local terra intersectArea(p1: &PlateT, p2: &PlateT)
+		var r = p1.size
+		var R = p2.size
+		var d = p1.pos:dist(p2.pos)
+		if d > r+R then
+			return real(0.0)
 		end
-	end)
+		-- C.printf("%g, %g, %g           \n", ad.val(r), ad.val(R), ad.val(d))
+		if R < r then
+			r = p2.size
+			R = p1.size
+		end
+		var d2 = d*d
+		var r2 = r*r
+		var R2 = R*R
+		var x1 = r2*ad.math.acos((d2 + r2 - R2)/(2*d*r))
+		var x2 = R2*ad.math.acos((d2 + R2 - r2)/(2*d*R))
+		var x3 = 0.5*ad.math.sqrt((-d+r+R)*(d+r-R)*(d-r+R)*(d+r+R))
+		-- C.printf("%g, %g, %g            \n", ad.val(x1), ad.val(x2), ad.val(x3))
+		return x1 + x2 - x3
+	end
 
 	--------------------------------------------
 
@@ -95,14 +116,20 @@ local function layoutModel()
 			upperBound(val, hi, softness)
 		end
 	end)
+	local lowerClamp = macro(function(val, lo)
+		return `ad.math.fmax(val, lo)
+	end)
+	local upperClamp = macro(function(val, hi)
+		return `ad.math.fmin(val, hi)
+	end)
+	local clamp = macro(function(val, lo, hi)
+		return `lowerClamp(upperClamp(val, hi), lo)
+	end)
 
 	--------------------------------------------
 
 	local ngaussian = macro(function(m, sd)
 		return `gaussian(m, sd, {structural=false})
-	end)
-	local ngammaMS = macro(function(m, s)
-		return `gammaMeanShape(m, s, {structural=false})
 	end)
 	local nuniformNoPrior = macro(function(lo, hi)
 		return `uniform(lo, hi, {structural=false, hasPrior=false})
@@ -110,8 +137,13 @@ local function layoutModel()
 
 	--------------------------------------------
 
-	local makePlate = pfn(terra(parent: &TableT)
-		var size = ngammaMS(parent.size/5.0, 100.0)
+	local makePlate = pfn(terra(parent: &TableT, sizePrior: real)
+		-- Skew size toward the prior, but make sure it's positive
+		-- Soft bound to guide gradients, plus hard clamp afterwards to
+		--    make sure value is consitent with program semantics
+		var size = ngaussian(sizePrior, 0.25)
+		lowerBound(size, 1.0, 0.1)
+		size = lowerClamp(size, 0.0)
 		var maxRadius = parent.size - size
 		var polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, maxRadius),
 									   nuniformNoPrior(0.0, [2*math.pi]))
@@ -122,13 +154,30 @@ local function layoutModel()
 	end)
 
 	local makeTable = pfn(terra(numPlates: int, pos: Vec2)
-		var size = ngammaMS(10.0, 100.0)
+		var size = ngaussian(10.0, 1.0)
+		lowerBound(size, 5.0, 0.1)
+		size = lowerClamp(size, 0.0)
 		var t = TableT.stackAlloc(pos, size)
+		-- Size of the child plates should all be similar, so we'll
+		--   correlate them through this variable.
+		var sizePrior = ngaussian(size/5.0, 0.5)
 		for i=0,numPlates do
-			t.plates:push(makePlate(&t))
+			t.plates:push(makePlate(&t, sizePrior))
 		end
 		-- Factor: plates don't overlap
-		-- Factor: plates fill up most of the table
+		for i=0,numPlates-1 do
+			var p1 = t.plates:getPointer(i)
+			for j=i+1,numPlates do
+				var p2 = t.plates:getPointer(j)
+				factor(softEq(intersectArea(p1, p2), 0.0, 0.1))
+			end
+		end
+		-- Factor: plates occupy a large portion of table area
+		var areasum = real(0.0)
+		for i=0,numPlates do
+			areasum = areasum + t.plates(i):area()
+		end
+		factor(softEq(areasum/t:area(), 0.7, 0.05))
 		return t
 	end)
 
