@@ -234,8 +234,8 @@ local function layoutModel()
 		var pos = Vec2.stackAlloc(nuniformNoPrior(0.0, roomWidth),
 								  nuniformNoPrior(0.0, roomHeight))
 		var t = makeTable(numPlates, pos)
-		bound(pos(0), t.size, roomWidth-t.size, 1.0)
-		bound(pos(1), t.size, roomHeight-t.size, 1.0)
+		-- bound(pos(0), t.size, roomWidth-t.size, 1.0)
+		-- bound(pos(1), t.size, roomHeight-t.size, 1.0)
 		return t
 	end
 	makeTable:define(makeTableImpl)
@@ -247,12 +247,12 @@ local function layoutModel()
 		var room = RoomT.stackAlloc(roomWidth, roomHeight)
 		var tables = &room.tables
 
-		-- Spawn pillars
-		var pillarSize = 12.0
-		var p1pos = Vec2.stackAlloc(0.25*roomWidth, 0.5*roomHeight)
-		var p2pos = Vec2.stackAlloc(0.75*roomWidth, 0.5*roomHeight)
-		room.pillars:push(PillarT {p1pos, pillarSize})
-		room.pillars:push(PillarT {p2pos, pillarSize})
+		-- -- Spawn pillars
+		-- var pillarSize = 12.0
+		-- var p1pos = Vec2.stackAlloc(0.25*roomWidth, 0.5*roomHeight)
+		-- var p2pos = Vec2.stackAlloc(0.75*roomWidth, 0.5*roomHeight)
+		-- room.pillars:push(PillarT {p1pos, pillarSize})
+		-- room.pillars:push(PillarT {p2pos, pillarSize})
 
 		-- Spawn tables
 		for i=0,numTables do
@@ -269,26 +269,52 @@ local function layoutModel()
 			end
 		end
 
-		-- Minimum distance between tables
-		var minDistBetween = 10.0
-		for i=0,tables.size-1 do
-			var t1 = tables:getPointer(i)
-			for j=i+1,tables.size do
-				var t2 = tables:getPointer(j)
-				var mind = t1.size + t2.size + minDistBetween
-				var d = t1.pos:dist(t2.pos)
-				if d < mind then
-					factor(softEq(d, mind, 2.0))
-				end
-			end
-		end
-
-		-- Non-overlap (table-pillar)
+		-- Tables lie on a circle
+		var circCenter = Vec2.stackAlloc(nuniformNoPrior(0.0, roomWidth),
+								         nuniformNoPrior(0.0, roomHeight))
+		bound(circCenter(0), 0.0, room.width, 1.0)
+		bound(circCenter(1), 0.0, room.height, 1.0)
+		var circRad = 30.0
 		for i=0,tables.size do
 			var t = tables:getPointer(i)
-			factor(softEq(t:intersectArea(&room.pillars(0)), 0.0, 1.0))
-			factor(softEq(t:intersectArea(&room.pillars(1)), 0.0, 1.0))
-		end 
+			factor(softEq(t.pos:dist(circCenter), circRad, 0.1))
+		end
+
+		-- Circle center itself lies on a circle
+		var metaCircCenter = Vec2.stackAlloc(room.width/2.0, room.height/2.0)
+		var metaCircRad = 30.0
+		factor(softEq(circCenter:dist(metaCircCenter), metaCircRad, 0.1))
+
+		-- -- Equal spacing around the circle
+		-- var prevDist = tables(0).pos:dist(tables(1).pos)
+		-- for i=1,tables.size do
+		-- 	var t1 = tables:getPointer(i)
+		-- 	var t2 = tables:getPointer((i+1)%tables.size)
+		-- 	var currDist = t1.pos:dist(t2.pos)
+		-- 	factor(softEq(currDist, prevDist, 0.5))
+		-- 	prevDist = currDist
+		-- end
+
+		-- -- Minimum distance between tables
+		-- var minDistBetween = 10.0
+		-- for i=0,tables.size-1 do
+		-- 	var t1 = tables:getPointer(i)
+		-- 	for j=i+1,tables.size do
+		-- 		var t2 = tables:getPointer(j)
+		-- 		var mind = t1.size + t2.size + minDistBetween
+		-- 		var d = t1.pos:dist(t2.pos)
+		-- 		if d < mind then
+		-- 			factor(softEq(d, mind, 2.0))
+		-- 		end
+		-- 	end
+		-- end
+
+		-- -- Non-overlap (table-pillar)
+		-- for i=0,tables.size do
+		-- 	var t = tables:getPointer(i)
+		-- 	factor(softEq(t:intersectArea(&room.pillars(0)), 0.0, 1.0))
+		-- 	factor(softEq(t:intersectArea(&room.pillars(1)), 0.0, 1.0))
+		-- end 
 
 		return room
 	end
@@ -378,10 +404,19 @@ end
 
 ----------------------------------
 
-local numsamps = 10000
+-- local kernelType = HMC
+local kernelType = RandomWalk
+local hmcNumSteps = 20
+local numsamps = 20000
 local verbose = true
-local kernel = HMC({numSteps=20})
--- local kernel = RandomWalk()
+
+if kernelType == RandomWalk then numsamps = 0.75*hmcNumSteps*numsamps end
+local kernel = nil
+if kernelType == RandomWalk then
+	kernel = RandomWalk()
+else
+	kernel = HMC({numSteps=hmcNumSteps})
+end
 local terra doInference()
 	return [mcmc(layoutModel, kernel, {numsamps=numsamps, verbose=verbose})]
 end
