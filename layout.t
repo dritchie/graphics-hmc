@@ -404,9 +404,9 @@ end
 
 ----------------------------------
 
--- local kernelType = HMC
-local kernelType = RandomWalk
-local hmcNumSteps = 20
+local kernelType = HMC
+-- local kernelType = RandomWalk
+local hmcNumSteps = 100
 local numsamps = 20000
 local verbose = true
 
