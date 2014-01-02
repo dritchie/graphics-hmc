@@ -7,6 +7,7 @@ local image = terralib.require("image")
 local templatize = terralib.require("templatize")
 local util = terralib.require("util")
 local Vec = terralib.require("linalg").Vec
+local ad = terralib.require("ad")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -15,34 +16,57 @@ local C = terralib.includecstring [[
 
 local cmath = util.includec_path("math.h")
 
--- Returns MSE of height in image region to constant height range [hmin,hmax]
+-- Returns total difference between heights in image region
+-- and constant height range [hmin,hmax] over [xmin,xmax] x [ymin,ymax]
 local HeightConstraint = templatize(function(real)
 	local RealGrid = image.Image(real, 1)
-	return function(hmin, hmax, xmin, xmax, xstep, ymin, ymax, ystep)
+	return function(hmin, hmax, xmin, xmax, ymin, ymax)
 		return terra(image: &RealGrid)
-			var mse = real(0.0)
-			var numSamples = 0
-			for y = ymin, ymax, ystep do
-				for x = xmin, xmax, xstep do
-				  numSamples = numSamples + 1
+			var err = real(0.0)
+			for y = ymin, ymax do
+				for x = xmin, xmax do
 					var h = image(x,y)(0)
-					var d = 0.0
+					var d = h - h  --gets type right but TODO: properly initialize to 0
 					if (h > hmax) then
 						d = h - hmax
 					elseif (h < hmin) then
 						d = h - hmin
 					end
-					mse = mse + (d * d)
-					--C.printf("%d,%d\t=\t%f,%f,%f\n", x, y, h, d, mse)
+					err = err + (d * d)
 				end
 			end
-			mse = mse / numSamples;
-			return mse
+			return err
 		end
 	end
 end)
 
--- A map object
+-- Returns total difference between height in image and tgtImage
+-- with a +/- hDelta threshold
+local DeltaHeightConstraint = templatize(function(real)
+	local RealGrid = image.Image(real, 1)
+	local DoubleGrid = image.Image(double, 1)
+	return function(hDelta, xmin, xmax, ymin, ymax)
+		return terra(image: &RealGrid, tgtImage: &DoubleGrid)
+			var err = real(0.0)
+			for y = ymin, ymax do
+				for x = xmin, xmax do
+					var tH = tgtImage(x, y)(0)
+					var currH = image(x,y)(0)
+					var hmax = tH + hDelta
+					var hmin = tH - hDelta
+					var d = currH - currH --gets type right but TODO: properly initialize to 0
+					if (currH > hmax) then
+						d = currH - hmax
+					elseif (currH < hmin) then
+						d = currH - hmin
+					end
+					err = err + (d * d)
+				end
+			end
+			return err
+		end
+	end
+end)
 
 -- Container struct for terrain map
 local TerrainMap = templatize(function(real)
@@ -70,26 +94,31 @@ local TerrainMap = templatize(function(real)
   return MapT
 end)
 
--- Discrete derivatives
-local Dx = macro(function(f, x, y, h)
-	return `(f(x+1,y) - f(x-1,y))/(2*h)
-end)
-local Dy = macro(function(f, x, y, h)
-	return `(f(x,y+1) - f(x,y-1))/(2*h)
-end)
-local Dxx = macro(function(f, x, y, h)
-	return `(f(x+1,y) - 2.0*f(x,y) + f(x-1,y))/(2*h*h)
-end)
-local Dyy = macro(function(f, x, y, h)
-	return `(f(x,y+1) - 2.0*f(x,y) + f(x,y-1))/(2*h*h)
-end)
-local Dxy = macro(function(f, x, y, h)
-	return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
-end)
-
 
 local fractalSplineModel = templatize(function(real)
+	-- Discrete derivatives
+	local Dx = macro(function(f, x, y, h)
+		return `(f(x+1,y) - f(x-1,y))/(2*h)
+	end)
+	local Dy = macro(function(f, x, y, h)
+		return `(f(x,y+1) - f(x,y-1))/(2*h)
+	end)
+	local Dxx = macro(function(f, x, y, h)
+		return `(f(x+1,y) - 2.0*f(x,y) + f(x-1,y))/(2*h*h)
+	end)
+	local Dyy = macro(function(f, x, y, h)
+		return `(f(x,y+1) - 2.0*f(x,y) + f(x,y-1))/(2*h*h)
+	end)
+	local Dxy = macro(function(f, x, y, h)
+		return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
+	end)
+
   local TerrainMapT = TerrainMap(real)
+	local HeightConstraintT = HeightConstraint(real)
+	local DeltaHeightConstraintT = DeltaHeightConstraint(real)
+	local hE1 = HeightConstraintT(0.1, 0.3, 0, 15, 0, 15)
+  local hE2 = HeightConstraintT(0.8, 1.0, 20, 30, 20, 35)
+  local dHE = DeltaHeightConstraintT(0.2, 0, 100, 0, 70)
 
   return function(tgtImage, temp, rigidity, tension, c)
 		return terra()
@@ -116,13 +145,17 @@ local fractalSplineModel = templatize(function(real)
 					var dxy = Dxy(lattice, x, y, h)
 					var e_p = 0.5 * rigidity *
 						((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
-					var diff = lattice(x,y):distSq(tgtImage(x, y))
-					var e_d = 0.5 * c * diff
-					var energy = e_p(0) + e_d
-					factor(-energy/temp)
+					--var diff = lattice(x,y):distSq(tgtImage(x, y))
+					--var e_d = 0.5 * c * diff
+					var energy = e_p(0) --+ e_d
+					factor(-energy / temp)
 				end
 			end
-
+			-- var hE = hEnergy(&lattice, c, temp)
+			-- var hE2 = hEnergy2(&lattice, c, temp)
+			-- factor(-hE/temp)
+			-- factor(-hE2/temp)
+			factor(-0.5 * c * dHE(&lattice, &tgtImage) / temp)
 			return lattice
 		end
 	end
@@ -175,6 +208,7 @@ return
 {
 	TerrainMap = TerrainMap,
 	HeightConstraint = HeightConstraint,
+	DeltaHeightConstraint = DeltaHeightConstraint,
 	fractalSplineModel = fractalSplineModel,
 	renderSamplesToMovie = renderSamplesToMovie,
 	TEST_IMAGE = TEST_IMAGE
