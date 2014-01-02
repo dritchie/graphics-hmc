@@ -20,8 +20,8 @@ local DoubleGrid = image.Image(double, 1)
 local size = 40
 local function fractalSplineModel()
 
-	local splineTemp = 100.0
-	local imageTemp = 0.005
+	local splineTemp = 500.0
+	local imageTemp = 0.0001
 	local rigidity = 1.0
 	local tension = 0.5
 	local Vec2 = Vec(real, 2)
@@ -73,7 +73,20 @@ local function fractalSplineModel()
 		return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
 	end)
 
-	-- Circle 'image' constraint
+	-- Generate unconstrained random lattice
+	local genLattice = pfn(terra()
+		var lattice = RealGrid.stackAlloc(size, size)
+		for y=0,size do
+			for x=0,size do
+				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
+				lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=1.0})
+				-- bound(lattice(x,y)(0), 0.0, 1.0, 0.2)
+			end
+		end
+		return lattice
+	end)
+
+	-- Separate circle 'image' constraint
 	local terra circleConstraint(lattice: &RealGrid, pos: Vec2, rad: real)
 		var p = Vec2.stackAlloc(pos(0)*lattice.width, pos(1)*lattice.height)
 		var r = rad*lattice.width
@@ -81,7 +94,6 @@ local function fractalSplineModel()
 		var pmaxx = [int](ad.val(clamp(p(0) + r, 0.0, double(lattice.width))))
 		var pminy = [int](ad.val(clamp(p(1) - r, 0.0, double(lattice.height))))
 		var pmaxy = [int](ad.val(clamp(p(1) + r, 0.0, double(lattice.height))))
-		-- C.printf("%d, %d, %d, %d     \n", pminx, pmaxx, pminy, pmaxy)
 		var r2 = rad*rad
 		var totalPenalty = real(0.0)
 		var numPoints = 0
@@ -97,19 +109,42 @@ local function fractalSplineModel()
 		factor(totalPenalty/double(numPoints))
 	end
 
-	local iters = global(int, 0)
-	return terra()
-		iters = iters + 1
+	-- Generate random lattice, taking into account circle constraint
+	local genConstrainedLattice = pfn(terra(pos: Vec2, rad: real)
 		var lattice = RealGrid.stackAlloc(size, size)
-		-- Priors
+		var p = Vec2.stackAlloc(pos(0)*lattice.width, pos(1)*lattice.height)
+		var r = rad*lattice.width
+		var pminx = [int](ad.val(clamp(p(0) - r, 0.0, double(lattice.width))))
+		var pmaxx = [int](ad.val(clamp(p(0) + r, 0.0, double(lattice.width))))
+		var pminy = [int](ad.val(clamp(p(1) - r, 0.0, double(lattice.height))))
+		var pmaxy = [int](ad.val(clamp(p(1) + r, 0.0, double(lattice.height))))
+		var r2 = rad*rad
+		var totalPenalty = real(0.0)
+		var numPoints = 0
 		for y=0,size do
 			for x=0,size do
-				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-				lattice(x,y)(0) = gaussian(0.25, 0.25, {structural=false, mass=1.0})
-				bound(lattice(x,y)(0), 0.0, 1.0, 0.2)
+				var insideCircle = false
+				if x >= pminx and x < pmaxx and y >= pminy and y < pmaxy then
+					var p_ = Vec2.stackAlloc(double(x)/lattice.width, double(y)/lattice.height)
+					if p_:distSq(pos) < r2 then
+						insideCircle = true
+					end
+				end
+				var mass = 1.0
+				if insideCircle then mass = 50.0 end
+				lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=mass})
+				if insideCircle then
+					numPoints = numPoints + 1
+					totalPenalty = totalPenalty + softEq(lattice(x,y)(0), 1.0, imageTemp)
+				end
 			end
 		end
-		-- Varational spline derivative constraints
+		factor(totalPenalty/double(numPoints))
+		return lattice
+	end)
+
+	-- Variational spline smoothness constraint
+	local terra splineConstraint(lattice: &RealGrid)
 		var h = 1.0 / size
 		for y=1,size-1 do
 			for x=1,size-1 do
@@ -123,6 +158,12 @@ local function fractalSplineModel()
 				factor(-energy(0)/splineTemp)
 			end
 		end
+	end
+
+	return terra()
+
+		-- var lattice = genLattice()
+
 		-- Circle constraint
 		var mass = 1.0
 		var circCenter = Vec2.stackAlloc(uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass}),
@@ -132,11 +173,20 @@ local function fractalSplineModel()
 		-- var circCenter = Vec2.stackAlloc(0.5, 0.5)
 		var circRad = 0.1
 		-- C.printf("\n(%.2f, %.2f)              \n", ad.val(circCenter(0)), ad.val(circCenter(1)))
-		circleConstraint(&lattice, circCenter, circRad)
+		-- circleConstraint(&lattice, circCenter, circRad)
+
+		-- Jointly generate lattice and apply circle constraint
+		-- (Control mass appropriately)
+		var lattice = genConstrainedLattice(circCenter, circRad)
+
+		-- Varational spline derivative constraint
+		-- splineConstraint(&lattice)
+
 		-- -- Constrain circle to be on another circle
 		-- var metaCircCenter = Vec2.stackAlloc(0.5, 0.5)
 		-- var metaCircRad = 0.3
 		-- factor(softEq(circCenter:dist(metaCircCenter), metaCircRad, 0.05))
+
 		return lattice
 	end
 end
