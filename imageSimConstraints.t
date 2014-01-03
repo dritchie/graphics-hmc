@@ -5,88 +5,11 @@ local util = terralib.require("util")
 local ad = terralib.require("ad")
 local Vec = terralib.require("linalg").Vec
 local image = terralib.require("image")
+local rand = terralib.require("prob.random")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
-
-local softmaxTightness = 2.0
-local softmax = macro(function(x, y)
-	local t = softmaxTightness
-	local invt = 1.0/t
-	return `ad.math.pow(ad.math.pow(x, t) + ad.math.pow(y, y), invt)
-end)
-
--- Convolutional similarity constraint: Evaluate constraint for multiple
---    transformations of the target image
-local ConvSimConstraint = templatize(function(real)
-	local RealGrid = image.Image(real, 1)
-	return function(tgtImage, txmin, txmax, txstep, tymin, tymax, tystep)
-		return terra(image: &RealGrid)
-			var iter = 0
-			var energy = real(0.0)
-			for ty=tymin,tymax,tystep do
-				for tx=txmin,txmax,txstep do
-					var mse = real(0.0)
-					var totalWeight = 0.0
-					for y=0,image.height do
-						for x=0,image.width do
-							var _x = x - tx
-							var _y = y - ty
-							if _x >= 0 and _x < tgtImage.width and _y >= 0 and _y < tgtImage.height
-								and tgtImage(_x,_y)(1) > 0.0
-								then
-								totalWeight = totalWeight + tgtImage(_x,_y)(1)
-								var diff = image(x,y)(0) - tgtImage(_x,_y)(0)
-								diff = diff*diff*tgtImage(_x,_y)(1)	-- weight by alpha
-								mse = mse + diff
-							end
-						end
-					end
-					mse = mse / totalWeight
-					energy = energy + mse
-					-- if iter == 0 then
-					-- 	energy = mse
-					-- else
-					-- 	energy = softmax(energy, mse)
-					-- 	-- energy = ad.math.fmax(energy, mse)
-					-- end
-					iter = iter + 1
-				end
-			end
-			return energy
-		end
-	end
-end)
-
--- Direct image similarity constraint
-local DirectSimConstraint = templatize(function(real)
-	local RealGrid = image.Image(real, 1)
-	return function(tgtImage)
-		return terra(image: &RealGrid)
-			var err = real(0.0)
-			var totalWeight = 0.0
-			for y=0,image.height do
-				for x=0,image.width do
-					if x < tgtImage.width and y < tgtImage.height then
-						var color = tgtImage(x,y)(0)
-						var alpha = tgtImage(x,y)(1)
-						if alpha > 0.0 then
-							var diff = image(x,y)(0) - color
-							-- C.printf("%g          \n", ad.val(image(x,y)(0)))
-							diff = diff*diff*alpha	-- weight by alpha
-							err = err + diff
-							totalWeight = totalWeight + alpha
-						end
-					end
-				end
-			end
-			err = err / totalWeight
-			-- C.printf("%g         \n", ad.val(err))
-			return err
-		end
-	end
-end)
 
 local lerp = macro(function(lo, hi, t)
 	return `(1.0-t)*lo + t*hi
@@ -123,6 +46,99 @@ local bilerp = macro(function(image, x, y, Vec2)
 	end
 end)
 
+local softmaxTightness = 40.0
+local softmax = macro(function(x, y)
+	local t = softmaxTightness
+	local invt = 1.0/t
+	return `ad.math.pow(ad.math.pow(x, t) + ad.math.pow(y, t), invt)
+end)
+
+-- Convolutional similarity constraint: Evaluate constraint for multiple
+--    transformations of the target image
+local ConvSimConstraint = templatize(function(real)
+	local Vec2 = Vec(real, 2)
+	local RealGrid = image.Image(real, 1)
+	return function(tgtImage, txmin, txmax, txstep, tymin, tymax, tystep)
+		return terra(image: &RealGrid)
+			var energy = real(0.0)
+			for ty=tymin,tymax,tystep do
+				for tx=txmin,txmax,txstep do
+					var mse = real(0.0)
+					var totalWeight = real(0.0)
+					for y=0,image.height do
+						for x=0,image.width do
+							var _x = [double](x) - tx
+							var _y = [double](y) - ty
+							if _x >= 0.0 and _x <= [double](tgtImage.width-1) and
+							   _y >= 0.0 and _y <= [double](tgtImage.height-1) then
+								-- var pix = bilerp(tgtImage, _x, _y, Vec2)
+								var pix = tgtImage([int](_x), [int](_y))
+								var color = pix(0)
+								var alpha = pix(1)
+								if alpha > 0.0 then
+									var diff = image(x,y)(0) - color
+									diff = diff*diff*alpha	-- weight by alpha
+									mse = mse + diff
+									totalWeight = totalWeight + alpha
+								else
+									var diff = image(x,y)(0)
+									diff = diff*diff
+									totalWeight = totalWeight + 1.0
+								end
+							end
+						end
+					end
+					if totalWeight > 0.0 then
+						mse = mse / totalWeight
+						-- mse = ad.math.exp(-mse)
+						mse = [rand.gaussian_logprob(real)](mse, 0.0, 0.05)
+						mse = ad.math.exp(mse)
+					end
+					energy = energy + mse
+					-- if energy == 0.0 then
+					-- 	energy = mse
+					-- else
+					-- 	energy = softmax(energy, mse)
+					-- 	-- energy = ad.math.fmax(energy, mse)
+					-- end
+				end
+			end
+			-- C.printf("%g            \n", ad.val(energy))
+			-- return energy
+			return -ad.math.log(energy)
+		end
+	end
+end)
+
+-- Direct image similarity constraint
+local DirectSimConstraint = templatize(function(real)
+	local RealGrid = image.Image(real, 1)
+	return function(tgtImage)
+		return terra(image: &RealGrid)
+			var err = real(0.0)
+			var totalWeight = 0.0
+			for y=0,image.height do
+				for x=0,image.width do
+					if x < tgtImage.width and y < tgtImage.height then
+						var color = tgtImage(x,y)(0)
+						var alpha = tgtImage(x,y)(1)
+						if alpha > 0.0 then
+							var diff = image(x,y)(0) - color
+							-- C.printf("%g          \n", ad.val(image(x,y)(0)))
+							diff = diff*diff*alpha	-- weight by alpha
+							err = err + diff
+							totalWeight = totalWeight + alpha
+						end
+					end
+				end
+			end
+			err = err / totalWeight
+			-- C.printf("%g         \n", ad.val(err))
+			return err
+		end
+	end
+end)
+
 -- Transformed similarity constraint: Evaluate constraint for a single
 --    transform of the target image, but this transform is controlled
 --    via random variables
@@ -149,6 +165,7 @@ local TransformedSimConstraint = templatize(function(real)
 						var color = pix(0)
 						var alpha = pix(1)
 						if alpha > 0.0 then
+							-- C.printf("%g            \n", ad.val(alpha))
 							var diff = image(x,y)(0) - color
 							diff = diff*diff*alpha	-- weight by alpha
 							err = err + diff
