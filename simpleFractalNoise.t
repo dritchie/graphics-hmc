@@ -133,9 +133,14 @@ local function fractalSplineModel()
 				var mass = 1.0
 				if insideCircle then mass = 50.0 end
 				lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=mass})
+				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass})
+				-- bound(lattice(x,y)(0), 0.0, 1.0, 0.1)
 				if insideCircle then
 					numPoints = numPoints + 1
 					totalPenalty = totalPenalty + softEq(lattice(x,y)(0), 1.0, imageTemp)
+				-- else
+				-- 	numPoints = numPoints + 1
+				-- 	totalPenalty = totalPenalty + softEq(lattice(x,y)(0), 0.25, imageTemp)
 				end
 			end
 		end
@@ -168,8 +173,8 @@ local function fractalSplineModel()
 		var mass = 1.0
 		var circCenter = Vec2.stackAlloc(uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass}),
 										 uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass}))
-		-- bound(circCenter(0), 0.0, 1.0, 0.1)
-		-- bound(circCenter(1), 0.0, 1.0, 0.1)
+		bound(circCenter(0), 0.0, 1.0, 0.1)
+		bound(circCenter(1), 0.0, 1.0, 0.1)
 		-- var circCenter = Vec2.stackAlloc(0.5, 0.5)
 		var circRad = 0.1
 		-- C.printf("\n(%.2f, %.2f)              \n", ad.val(circCenter(0)), ad.val(circCenter(1)))
@@ -193,10 +198,13 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 1000
+-- local numsamps = 1000
+local numsamps = 10000
 local verbose = true
-local kernel = HMC({numSteps=20})
--- local kernel = HMC({numSteps=40, stepSizeAdapt=false, stepSize=0.002})
+-- local kernel = HMC({numSteps=20})
+-- local kernel = HMC({numSteps=20, stepSizeAdapt=false, stepSize=0.008})
+local kernel = HMC({numSteps=1, stepSizeAdapt=false, stepSize=0.001})
+-- local kernel = HMC({numSteps=10, stepSizeAdapt=false, stepSize=0.001})
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(fractalSplineModel, kernel, {numsamps=numsamps, verbose=verbose})]
