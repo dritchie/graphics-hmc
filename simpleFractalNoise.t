@@ -160,35 +160,40 @@ local function fractalSplineModel()
 		-- Varational spline derivative constraint
 		-- splineConstraint(&lattice)
 
-		-- -- Circle constraint
-		-- var circRad = 0.1
-		-- var scale = 0.1
-		-- -- var cx = gaussian(0.0, scale, {structural=false})
-		-- -- var cy = gaussian(0.0, scale, {structural=false})
-		-- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
-		-- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
-		-- cx = logistic(cx/scale)
-		-- cy = logistic(cy/scale)
-		-- var circCenter = Vec2.stackAlloc(cx, cy)
-		-- -- var circCenter = Vec2.stackAlloc(0.5, 0.5)
-		-- circleConstraint(&lattice, circCenter, circRad)
-
-		-- General image constraint
-		var scale = 0.05
-		var halfw = (tgtImage.width/2.0) / size
-		var halfh = (tgtImage.height/2.0) / size
-		var cx = gaussian(0.0, scale, {structural=false})
-		var cy = gaussian(0.0, scale, {structural=false})
-		-- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
-		-- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- Circle constraint
+		var circRad = 0.1
+		var scale = 0.1
+		-- var cx = gaussian(0.0, scale, {structural=false})
+		-- var cy = gaussian(0.0, scale, {structural=false})
+		var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
+		var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
 		cx = logistic(cx/scale)
 		cy = logistic(cy/scale)
-		cx = rescale(cx, halfw, 1.0-halfw)
-		cy = rescale(cy, halfh, 1.0-halfh)
-		var center = Vec2.stackAlloc(cx, cy)
-		-- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
-		factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
-		-- factor(tgtImagePenaltyFn(&lattice, center))
+		var circCenter = Vec2.stackAlloc(cx, cy)
+		-- var circCenter = Vec2.stackAlloc(0.5, 0.5)
+		circleConstraint(&lattice, circCenter, circRad)
+
+		-- -- Encourage circle to be on a circle
+		-- var mcc = Vec2.stackAlloc(0.5, 0.5)
+		-- var mcr = 0.35
+		-- factor(softEq(circCenter:distSq(mcc), mcr*mcr, 0.01))
+
+		-- -- General image constraint
+		-- var scale = 0.05
+		-- var halfw = (tgtImage.width/2.0) / size
+		-- var halfh = (tgtImage.height/2.0) / size
+		-- var cx = gaussian(0.0, scale, {structural=false})
+		-- var cy = gaussian(0.0, scale, {structural=false})
+		-- -- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- -- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- cx = logistic(cx/scale)
+		-- cy = logistic(cy/scale)
+		-- cx = rescale(cx, halfw, 1.0-halfw)
+		-- cy = rescale(cy, halfh, 1.0-halfh)
+		-- var center = Vec2.stackAlloc(cx, cy)
+		-- -- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+		-- factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
+		-- -- factor(tgtImagePenaltyFn(&lattice, center))
 
 		return lattice
 	end
