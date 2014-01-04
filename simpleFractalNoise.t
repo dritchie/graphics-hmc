@@ -8,6 +8,7 @@ local util = terralib.require("util")
 local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
 local rand = terralib.require("prob.random")
+local imageConstraints = terralib.require("imageSimConstraints")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -15,17 +16,22 @@ local C = terralib.includecstring [[
 ]]
 
 local DoubleGrid = image.Image(double, 1)
+local DoubleAlphaGrid = image.Image(double, 2)
+local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
 
-local size = 40
+local size = 80
 local function fractalSplineModel()
 
-	local splineTemp = 500.0
+	local splineTemp = 0.25
 	local imageTemp = 0.005
 	local rigidity = 1.0
 	local tension = 0.5
 	local Vec2 = Vec(real, 2)
 	local RealGrid = image.Image(real, 1)
+
+	local TransformedSimConstraint = imageConstraints.TransformedSimConstraint(real)
+	local tgtImagePenaltyFn = TransformedSimConstraint(tgtImage, imageTemp)
 
 
 	local softEq = macro(function(x, target, softness)
@@ -57,6 +63,11 @@ local function fractalSplineModel()
 
 	local logistic = macro(function(x)
 		return `1.0 / (1.0 + ad.math.exp(-x))
+	end)
+
+	-- 'x' assumed to be between 0 and 1
+	local rescale = macro(function(x, lo, hi)
+		return `lo + x*(hi-lo)
 	end)
 
 	-- Discrete derivatives
@@ -125,6 +136,7 @@ local function fractalSplineModel()
 	-- Variational spline smoothness constraint
 	local terra splineConstraint(lattice: &RealGrid)
 		var h = 1.0 / size
+		var totalEnergy = real(0.0)
 		for y=1,size-1 do
 			for x=1,size-1 do
 				var dx = Dx(lattice, x, y, h)
@@ -134,27 +146,13 @@ local function fractalSplineModel()
 				var dxy = Dxy(lattice, x, y, h)
 				var energy = 0.5 * rigidity *
 					((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
-				factor(-energy(0)/splineTemp)
+				totalEnergy = totalEnergy + energy(0)
 			end
 		end
+		factor(-totalEnergy/(splineTemp*(size-1)*(size-1)))
 	end
 
 	return terra()
-
-		-- Circle constraint
-		-- var cx = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-		-- var cy = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-		var scale = 0.1
-		var cx = gaussian(0.0, scale, {structural=false})
-		var cy = gaussian(0.0, scale, {structural=false})
-		cx = logistic(cx/scale)
-		cy = logistic(cy/scale)
-		var circCenter = Vec2.stackAlloc(cx, cy)
-		-- bound(circCenter(0), 0.0, 1.0, 0.05)
-		-- bound(circCenter(1), 0.0, 1.0, 0.05)
-		-- var circCenter = Vec2.stackAlloc(0.5, 0.5)
-		var circRad = 0.1
-		-- C.printf("\n(%.2f, %.2f)              \n", ad.val(circCenter(0)), ad.val(circCenter(1)))
 
 		-- Generate lattice
 		var lattice = genLattice()
@@ -162,12 +160,35 @@ local function fractalSplineModel()
 		-- Varational spline derivative constraint
 		-- splineConstraint(&lattice)
 
-		circleConstraint(&lattice, circCenter, circRad)
+		-- -- Circle constraint
+		-- var circRad = 0.1
+		-- var scale = 0.1
+		-- -- var cx = gaussian(0.0, scale, {structural=false})
+		-- -- var cy = gaussian(0.0, scale, {structural=false})
+		-- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- cx = logistic(cx/scale)
+		-- cy = logistic(cy/scale)
+		-- var circCenter = Vec2.stackAlloc(cx, cy)
+		-- -- var circCenter = Vec2.stackAlloc(0.5, 0.5)
+		-- circleConstraint(&lattice, circCenter, circRad)
 
-		-- -- Constrain circle to be on another circle
-		-- var metaCircCenter = Vec2.stackAlloc(0.5, 0.5)
-		-- var metaCircRad = 0.3
-		-- factor(softEq(circCenter:dist(metaCircCenter), metaCircRad, 0.05))
+		-- General image constraint
+		var scale = 0.05
+		var halfw = (tgtImage.width/2.0) / size
+		var halfh = (tgtImage.height/2.0) / size
+		var cx = gaussian(0.0, scale, {structural=false})
+		var cy = gaussian(0.0, scale, {structural=false})
+		-- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
+		-- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
+		cx = logistic(cx/scale)
+		cy = logistic(cy/scale)
+		cx = rescale(cx, halfw, 1.0-halfw)
+		cy = rescale(cy, halfh, 1.0-halfh)
+		var center = Vec2.stackAlloc(cx, cy)
+		-- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+		factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
+		-- factor(tgtImagePenaltyFn(&lattice, center))
 
 		return lattice
 	end
@@ -177,13 +198,9 @@ end
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
--- local numsamps = 10000
 local verbose = true
-local temp = 2000.0
+local temp = 1000.0
 local kernel = HMC({numSteps=20})
--- local kernel = HMC({numSteps=20, stepSizeAdapt=false, stepSize=0.0005})
--- local kernel = HMC({numSteps=1, stepSizeAdapt=false, stepSize=0.001})
--- local kernel = HMC({numSteps=10, stepSizeAdapt=false, stepSize=0.001})
 
 
 
