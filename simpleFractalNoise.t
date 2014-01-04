@@ -21,7 +21,7 @@ local size = 40
 local function fractalSplineModel()
 
 	local splineTemp = 500.0
-	local imageTemp = 0.0001
+	local imageTemp = 0.005
 	local rigidity = 1.0
 	local tension = 0.5
 	local Vec2 = Vec(real, 2)
@@ -55,6 +55,9 @@ local function fractalSplineModel()
 		return `ad.math.fmin(ad.math.fmax(val, lo), hi)
 	end)
 
+	local logistic = macro(function(x)
+		return `1.0 / (1.0 + ad.math.exp(-x))
+	end)
 
 	-- Discrete derivatives
 	local Dx = macro(function(f, x, y, h)
@@ -76,10 +79,16 @@ local function fractalSplineModel()
 	-- Generate unconstrained random lattice
 	local genLattice = pfn(terra()
 		var lattice = RealGrid.stackAlloc(size, size)
+		var scale = 0.01
+		-- var scale = 0.005
+		-- var scale = 1.0
 		for y=0,size do
 			for x=0,size do
+				var pix = gaussian(0.0, scale, {structural=false})
+				-- var pix = uniform(-scale, scale, {structural=false, hasPrior=false})
+				lattice(x,y)(0) = logistic(pix/scale)
 				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-				lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=1.0})
+				-- lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=1.0})
 				-- bound(lattice(x,y)(0), 0.0, 1.0, 0.2)
 			end
 		end
@@ -106,47 +115,12 @@ local function fractalSplineModel()
 				end
 			end
 		end
-		factor(totalPenalty/double(numPoints))
-	end
-
-	-- Generate random lattice, taking into account circle constraint
-	local genConstrainedLattice = pfn(terra(pos: Vec2, rad: real)
-		var lattice = RealGrid.stackAlloc(size, size)
-		var p = Vec2.stackAlloc(pos(0)*lattice.width, pos(1)*lattice.height)
-		var r = rad*lattice.width
-		var pminx = [int](ad.val(clamp(p(0) - r, 0.0, double(lattice.width))))
-		var pmaxx = [int](ad.val(clamp(p(0) + r, 0.0, double(lattice.width))))
-		var pminy = [int](ad.val(clamp(p(1) - r, 0.0, double(lattice.height))))
-		var pmaxy = [int](ad.val(clamp(p(1) + r, 0.0, double(lattice.height))))
-		var r2 = rad*rad
-		var totalPenalty = real(0.0)
-		var numPoints = 0
-		for y=0,size do
-			for x=0,size do
-				var insideCircle = false
-				if x >= pminx and x < pmaxx and y >= pminy and y < pmaxy then
-					var p_ = Vec2.stackAlloc(double(x)/lattice.width, double(y)/lattice.height)
-					if p_:distSq(pos) < r2 then
-						insideCircle = true
-					end
-				end
-				var mass = 1.0
-				if insideCircle then mass = 50.0 end
-				lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=mass})
-				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass})
-				-- bound(lattice(x,y)(0), 0.0, 1.0, 0.1)
-				if insideCircle then
-					numPoints = numPoints + 1
-					totalPenalty = totalPenalty + softEq(lattice(x,y)(0), 1.0, imageTemp)
-				-- else
-				-- 	numPoints = numPoints + 1
-				-- 	totalPenalty = totalPenalty + softEq(lattice(x,y)(0), 0.25, imageTemp)
-				end
-			end
+		if numPoints > 0 then
+			totalPenalty = totalPenalty/double(numPoints)
 		end
-		factor(totalPenalty/double(numPoints))
-		return lattice
-	end)
+		-- C.printf("%g                   \n", ad.val(totalPenalty))
+		factor(totalPenalty)
+	end
 
 	-- Variational spline smoothness constraint
 	local terra splineConstraint(lattice: &RealGrid)
@@ -167,25 +141,28 @@ local function fractalSplineModel()
 
 	return terra()
 
-		-- var lattice = genLattice()
-
 		-- Circle constraint
-		var mass = 1.0
-		var circCenter = Vec2.stackAlloc(uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass}),
-										 uniform(0.0, 1.0, {structural=false, hasPrior=false, mass=mass}))
-		bound(circCenter(0), 0.0, 1.0, 0.1)
-		bound(circCenter(1), 0.0, 1.0, 0.1)
+		-- var cx = uniform(0.0, 1.0, {structural=false, hasPrior=false})
+		-- var cy = uniform(0.0, 1.0, {structural=false, hasPrior=false})
+		var scale = 0.1
+		var cx = gaussian(0.0, scale, {structural=false})
+		var cy = gaussian(0.0, scale, {structural=false})
+		cx = logistic(cx/scale)
+		cy = logistic(cy/scale)
+		var circCenter = Vec2.stackAlloc(cx, cy)
+		-- bound(circCenter(0), 0.0, 1.0, 0.05)
+		-- bound(circCenter(1), 0.0, 1.0, 0.05)
 		-- var circCenter = Vec2.stackAlloc(0.5, 0.5)
 		var circRad = 0.1
 		-- C.printf("\n(%.2f, %.2f)              \n", ad.val(circCenter(0)), ad.val(circCenter(1)))
-		-- circleConstraint(&lattice, circCenter, circRad)
 
-		-- Jointly generate lattice and apply circle constraint
-		-- (Control mass appropriately)
-		var lattice = genConstrainedLattice(circCenter, circRad)
+		-- Generate lattice
+		var lattice = genLattice()
 
 		-- Varational spline derivative constraint
 		-- splineConstraint(&lattice)
+
+		circleConstraint(&lattice, circCenter, circRad)
 
 		-- -- Constrain circle to be on another circle
 		-- var metaCircCenter = Vec2.stackAlloc(0.5, 0.5)
@@ -196,15 +173,27 @@ local function fractalSplineModel()
 	end
 end
 
+
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
--- local numsamps = 1000
-local numsamps = 10000
+local numsamps = 1000
+-- local numsamps = 10000
 local verbose = true
--- local kernel = HMC({numSteps=20})
--- local kernel = HMC({numSteps=20, stepSizeAdapt=false, stepSize=0.008})
-local kernel = HMC({numSteps=1, stepSizeAdapt=false, stepSize=0.001})
+local temp = 2000.0
+local kernel = HMC({numSteps=20})
+-- local kernel = HMC({numSteps=20, stepSizeAdapt=false, stepSize=0.0005})
+-- local kernel = HMC({numSteps=1, stepSizeAdapt=false, stepSize=0.001})
 -- local kernel = HMC({numSteps=10, stepSizeAdapt=false, stepSize=0.001})
+
+
+
+local scheduleFn = macro(function(iter, currTrace)
+	return quote
+		currTrace.temperature = temp
+	end
+end)
+kernel = Schedule(kernel, scheduleFn)
+
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(fractalSplineModel, kernel, {numsamps=numsamps, verbose=verbose})]
