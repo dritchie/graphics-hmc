@@ -12,6 +12,7 @@ local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
 
 local constraints = terralib.require("terrainConstraints")
+local U = terralib.require("terrainUtils")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -77,23 +78,6 @@ local TerrainMap = templatize(function(real)
 end)
 
 local fractalSplineModel = templatize(function(real)
-  -- Discrete derivatives
-  local Dx = macro(function(f, x, y, h)
-    return `(f(x+1,y) - f(x-1,y))/(2*h)
-  end)
-  local Dy = macro(function(f, x, y, h)
-    return `(f(x,y+1) - f(x,y-1))/(2*h)
-  end)
-  local Dxx = macro(function(f, x, y, h)
-    return `(f(x+1,y) - 2.0*f(x,y) + f(x-1,y))/(2*h*h)
-  end)
-  local Dyy = macro(function(f, x, y, h)
-    return `(f(x,y+1) - 2.0*f(x,y) + f(x,y-1))/(2*h*h)
-  end)
-  local Dxy = macro(function(f, x, y, h)
-    return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
-  end)
-
   local TerrainMapT = TerrainMap(real)
   local HeightConstraintT = constraints.HeightConstraint(real)
   local DeltaHeightConstraintT = constraints.DeltaHeightConstraint(real)
@@ -119,11 +103,11 @@ local fractalSplineModel = templatize(function(real)
       var h = 1.0 / ad.math.fmax(width, height)
       for y = 1, height-1 do
         for x = 1, width-1 do
-          var dx = Dx(lattice, x, y, h)
-          var dy = Dy(lattice, x, y, h)
-          var dxx = Dxx(lattice, x, y, h)
-          var dyy = Dyy(lattice, x, y, h)
-          var dxy = Dxy(lattice, x, y, h)
+          var dx = U.Dx(lattice, x, y, h)
+          var dy = U.Dy(lattice, x, y, h)
+          var dxx = U.Dxx(lattice, x, y, h)
+          var dyy = U.Dyy(lattice, x, y, h)
+          var dxy = U.Dxy(lattice, x, y, h)
           var e_p = 0.5 * rigidity *
             ((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
           --var diff = lattice(x,y):distSq(tgtImage(x, y))
@@ -142,53 +126,8 @@ local fractalSplineModel = templatize(function(real)
   end
 end)
 
-local DoubleGrid = image.Image(double, 1);
-local TEST_IMAGE = (terra()
-  var t = DoubleGrid.stackAlloc(100, 100)
-  for y=0,100 do
-    for x=0,100 do
-      if (x+y) > 100 then
-        t(x, y)(0) = 1.0
-      else
-        t(x, y)(0) = 0.0
-      end
-    end
-  end
-  return t
-end)()
-
--- Render the set of gathered samples into a movie
--- TODO: Factor out to utils
-local function renderSamplesToMovie(samples, numsamps, moviename)
-  local moviefilename = string.format("renders/%s.mp4", moviename)
-  local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
-  local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
-  io.write("Rendering video...")
-  io.flush()
-  -- We render every frame of a 1000 frame sequence. We want to linearly adjust downward
-  --    for longer sequences
-  local frameSkip = math.ceil(numsamps / 1000.0)
-  local terra renderFrames()
-    var framename : int8[1024]
-    var framenumber = 0
-    for i=0,numsamps,frameSkip do
-      C.sprintf(framename, movieframebasename, framenumber)
-      framenumber = framenumber + 1
-      -- Quantize image to 8 bits per channel when saving
-      var imagePtr = &samples(i).value
-      [DoubleGrid.save(uint8)](imagePtr, image.Format.PNG, framename)
-    end
-  end
-  renderFrames()
-  util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
-  util.wait(string.format("rm -f %s", movieframewildcard))
-  print("done.")
-end
-
 return
 {
   TerrainMap = TerrainMap,
   fractalSplineModel = fractalSplineModel,
-  renderSamplesToMovie = renderSamplesToMovie,
-  TEST_IMAGE = TEST_IMAGE
 }

@@ -10,6 +10,7 @@ local util = terralib.require("util")
 local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
 local terrain = terralib.require("terrain")
+local U = terralib.require("terrainUtils")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -42,4 +43,4 @@ local samples = m.gc(doInference())
 
 -- Render movie
 local moviename = arg[1] or "movie"
-terrain.renderSamplesToMovie(samples, numsamps, moviename)
+U.renderSamplesToMovie(samples, moviename)
