@@ -26,10 +26,10 @@ end)
 -- x and y may not be ints, and may be dual nums
 local bilerp = macro(function(image, x, y, Vec2)
 	return quote
-		var x0 = [int](ad.val(ad.math.floor(x)))
-		var x1 = [int](ad.val(ad.math.ceil(x)))
-		var y0 = [int](ad.val(ad.math.floor(y)))
-		var y1 = [int](ad.val(ad.math.ceil(y)))
+		var x0 = [int](ad.math.floor(ad.val(x)))
+		var x1 = [int](ad.math.ceil(ad.val(x)))
+		var y0 = [int](ad.math.floor(ad.val(y)))
+		var y1 = [int](ad.math.ceil(ad.val(y)))
 		var tx = x - [double](x0)
 		var ty = y - [double](y0)
 		var v00 = Vec2(image(x0, y0))
@@ -144,8 +144,9 @@ end)
 --    via random variables
 local TransformedSimConstraint = templatize(function(real)
 	local Vec2 = Vec(real, 2)
+	-- local Vec2 = Vec(double, 2)
 	local RealGrid = image.Image(real, 1)
-	return function(tgtImage)
+	return function(tgtImage, softness)
 		return terra(image: &RealGrid, center: Vec2)
 			var centerInPixels = Vec2.stackAlloc(center(0)*[double](image.width), center(1)*[double](image.height))
 			var halfWidth = [double](tgtImage.width)/2.0
@@ -159,24 +160,21 @@ local TransformedSimConstraint = templatize(function(real)
 					var _y = [double](y) - topLeft(1)
 					if (_x >= 0.0 and _x <= [double](tgtImage.width-1) and
 						_y >= 0.0 and _y <= [double](tgtImage.height-1)) then
-						-- Bilinear interpolation for now (switch to bicubic if
-						--    derivative discontinuities are a problem?)
 						var pix = bilerp(tgtImage, _x, _y, Vec2)
+						-- var pix = tgtImage([int](ad.val(_x)), [int](ad.val(_y)))
 						var color = pix(0)
 						var alpha = pix(1)
 						if alpha > 0.0 then
-							-- C.printf("%g            \n", ad.val(alpha))
-							var diff = image(x,y)(0) - color
-							diff = diff*diff*alpha	-- weight by alpha
-							err = err + diff
+							var localerr = [rand.gaussian_logprob(real)](image(x,y)(0), color, softness)
+							localerr = localerr*alpha
+							err = err + localerr
 							totalWeight = totalWeight + alpha
 						end
 					end
 				end
 			end
 			if totalWeight > 0.0 then
-				err = (err - totalWeight) / totalWeight
-				-- err = err / totalWeight
+				err = err / totalWeight
 			end
 			-- C.printf("%g                  \n", ad.val(err))
 			return err
