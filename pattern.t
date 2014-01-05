@@ -22,7 +22,8 @@ local Pattern = templatize(function(real)
 		backgroundId: uint,
 		adjacencies: Adjacencies,
 		templateId: uint,
-		numGroups: uint
+		numGroups: uint,
+		sizes: Vector(double)
 	}
 	PatternInfo.Color = Color
 	PatternInfo.Adjacencies = Adjacencies
@@ -55,11 +56,12 @@ local Pattern = templatize(function(real)
 	end
 	util.inline(PatternInfo.methods.setVar)
 
-	terra PatternInfo:__construct(numGroups:uint, adj:Adjacencies, bid:uint, tid:uint)
+	terra PatternInfo:__construct(numGroups:uint, adj:Adjacencies, bid:uint, tid:uint, sizes:Vector(double))
 		--C.printf("%d, %d, %d, %d", numGroups, adj.size(), bid, tid)
 		self.backgroundId = bid
 
 		self.adjacencies = m.copy(adj)
+		self.sizes = m.copy(sizes)
 
 		self.templateId = tid
 		self.numGroups = numGroups
@@ -83,6 +85,7 @@ local Pattern = templatize(function(real)
 		self.adjacencies = m.copy(other.adjacencies)
 		self.templateId = other.templateId
 		self.backgroundId = other.backgroundId
+		self.sizes = m.copy(other.sizes)
 	end
 
 	m.addConstructors(PatternInfo)

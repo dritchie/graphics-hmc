@@ -151,10 +151,10 @@ local UnaryLightnessConstraint = templatize(function(real)
 
 			--if it's the background allow darkness, otherwise prefer lighter colors
 			if (i == pattern.backgroundId) then
-				score = (ad.math.exp(score) + ad.math.exp([gaussian_logprob(real)](L, mu2, sigma)))/2.0
+				score = (0.7*ad.math.exp(score) + 0.3*ad.math.exp([gaussian_logprob(real)](L, mu2, sigma)))
 				score = ad.math.log(score)
 			end
-			totalScore = totalScore + score
+			totalScore = totalScore + pattern.sizes:get(i)*score
 		end
 		return totalScore
 	end
@@ -180,10 +180,10 @@ local UnarySaturationConstraint = templatize(function(real)
 			end
 			if (i == pattern.backgroundId) then
 				var score = [gaussian_logprob(real)](saturation, low, sigma)
-				totalScore = totalScore + score
+				totalScore = totalScore + pattern.sizes:get(i)*score
 			else
 				var score = [gaussian_logprob(real)](saturation, high, sigma)
-				totalScore = totalScore + score
+				totalScore = totalScore + pattern.sizes:get(i)*score
 			end
 		end
 		return totalScore
@@ -217,7 +217,7 @@ local BinaryPerceptualConstraint = templatize(function(real)
 			var score = [gaussian_logprob(real)](dist, mu, sigma)
 			totalScore = totalScore + score
 		end
-		return totalScore
+		return totalScore/pattern.adjacencies.size
 	end
 end)
 
@@ -233,6 +233,7 @@ local BinaryLightnessConstraint = templatize(function(real)
 		var totalScore = real(0.0)
 
 		var maxDist = 100.0
+		var numAdj = pattern.adjacencies.size
 		for i=0,pattern.adjacencies.size do
 			var adj = pattern.adjacencies:get(i)
 			var first = [RGBtoLAB(real)](pattern(adj:get(0)))(0)
@@ -246,9 +247,9 @@ local BinaryLightnessConstraint = templatize(function(real)
 				var score = [gaussian_logprob(real)](dist, mu, sigma)
 				totalScore = totalScore + score
 			end
-			
+
 		end
-		return totalScore
+		return totalScore/numAdj
 	end
 end)
 
