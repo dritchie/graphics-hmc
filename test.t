@@ -31,13 +31,40 @@ local function fractalSplineModel()
 	return FractalSplineModelT(tgtImage, temp, rigidity, tension, c)
 end
 
+local function testLineModel()
+  local TerrainMapT = terrain.TerrainMap(real)
+  local terrainMap = `TerrainMapT.stackAlloc(100, 100)
+  local r = 1.0
+  local lattice = `terrainMap.grid
+  local function checkFun(lat)
+    return terra(x: int, y: int)
+      --C.printf("%f", lat)
+      lat(x,y)(0) = 1.0
+      return true
+    end
+  end
+  return terra()
+    var scale = 0.01
+    for y=0,lattice.height do
+      for x=0,lattice.width do
+        var pix = gaussian(0.0, scale, {structural=false})
+        lattice(x,y)(0) = U.logistic(pix/scale)
+      end
+    end
+
+    var check = [checkFun(lattice)]
+    U.bresenhamCheck(0, 0, 50, 50, check)
+    return lattice
+  end
+end
+
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
 local verbose = true
 local kernel = HMC({numSteps=1})
 local terra doInference()
-	return [mcmc(fractalSplineModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	return [mcmc(testLineModel, kernel, {numsamps=numsamps, verbose=verbose})]
 end
 local samples = m.gc(doInference())
 

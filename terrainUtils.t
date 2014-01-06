@@ -99,6 +99,10 @@ U.nuniformNoPrior = macro(function(lo, hi)
   return `uniform(lo, hi, {structural=false, hasPrior=false})
 end)
 
+U.logistic = macro(function(x)
+  return `1.0 / (1.0 + ad.math.exp(-x))
+end)
+
 U.lerp = macro(function(lo, hi, t)
   return `(1.0-t)*lo + t*hi
 end)
@@ -140,6 +144,49 @@ U.softmax = macro(function(x, y)
   local invt = 1.0/t
   return `ad.math.pow(ad.math.pow(x, t) + ad.math.pow(y, t), invt)
 end)
+
+U.bresenhamCheck = function(x0, y0, x1, y1, check)
+  return terra()
+    var sx = 1
+    if x0 > x1 then sx = -1 end
+    var sy = 1
+    if y0 > y1 then sy = -1 end
+    var dx = ad.math.fabs(x1 - x0)
+    var dy = ad.math.fabs(y1 - y0)
+
+    var err = dx - dy
+    var err2 = 0
+    
+    if not check(x0, y0) then return false end
+    
+    while not(x0 == x1 and y0 == y1) do
+      err2 = err + err
+      if err2 > -dy then
+        err = err - dy
+        x0  = x0 + sx
+      end
+      if err2 < dx then
+        err = err + dx
+        y0  = y0 + sy
+      end
+      if not check(x0, y0) then return false end
+    end
+
+    return true
+  end
+end
+
+U.bresenhamLine = function(x0, y0, x1, y1, check)
+  local points = {}
+  local count = 0
+  local result = U.bresenhamCheck(x0, y0, x1, y1, function(x,y)
+    if not check(x,y) then return false end
+    count = count + 1
+    points[count] = {x,y}
+    return true
+  end)
+  return points, result
+end
 
 U.TEST_IMAGE = (terra()
   var t = DoubleGrid.stackAlloc(100, 100)
