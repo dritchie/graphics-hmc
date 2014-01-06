@@ -9,6 +9,7 @@ local Vector = terralib.require("vector")
 local Vec = terralib.require('linalg').Vec
 local Pattern = terralib.require("pattern")
 local ColorUtils = terralib.require('colorUtils')
+local ad = terralib.require("ad")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -26,6 +27,10 @@ local function colorCompatModel()
 	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
 	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
 	local lightnessDiffFn = ColorUtils.BinaryLightnessConstraint(real)
+
+	local logistic = macro(function(x)
+                return `1.0 / (1.0 + ad.math.exp(-x))
+    	end)
 	
 	return terra()
 		var numGroups = 5
@@ -39,24 +44,28 @@ local function colorCompatModel()
 											Vector.fromItems(2,3),
 											Vector.fromItems(2,4),
 											Vector.fromItems(3,4))
+		var sizes = Vector.fromItems(0.623075, 0.04915, 0.0777, 0.09085, 0.159225)
 		var tid = 105065 --bird pattern
 		var backgroundId = 0
 		
-		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid)
+		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid, sizes)
 		m.destruct(adjacencies)
 
 		-- Priors
+		var scale = 1.0
 		for i=0,numGroups do
 			for c=0,3 do
-				pattern(i)(c) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
+				--pattern(i)(c) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
+				var value = gaussian(0.0, scale, {structural=false})
+				pattern(i)(c) = logistic(value/scale)
 			end
 		end
 
 		-- Constraints
-		var lightness = 0 --lightnessFn(&pattern) --Unary lightness might be more arbitrary
-		var saturation = saturationFn(&pattern)
-		var diff = diffFn(&pattern)
-		var lightnessDiff = lightnessDiffFn(&pattern) 
+		var lightness = 0.9*lightnessFn(&pattern) --Unary lightness might be more arbitrary
+		var saturation = 1.3*saturationFn(&pattern)
+		var diff = 1.4*diffFn(&pattern)
+		var lightnessDiff = 0.5*lightnessDiffFn(&pattern) 
 
 		factor((lightness+saturation+diff+lightnessDiff)/temp)
 
@@ -69,7 +78,7 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 10000
 local verbose = true
-local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
+local kernel = HMC({numSteps=20})	-- Defaults to trajectories of length 1
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(colorCompatModel, kernel, {numsamps=numsamps, verbose=verbose})]
@@ -83,6 +92,9 @@ io.write("Saving samples to file...")
 io.flush()
 local terra ToByte(num:double)
 	var value = [int](C.floor(C.fmax(C.fmin(num*255+0.5, 255), 0)))
+	if (num < 0 or num > 1) then
+		C.printf("%f\n", num)
+	end
 	if (value > 255 or value < 0) then
 		C.printf("%d\n", value)
 	end
