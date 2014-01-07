@@ -25,7 +25,7 @@ local function colorCompatModel()
 	local constraintTemp = 1
 	local glowRange = 3
 	local hueRange = 10
-	local compatScale = 0.1 -- scaling compatibility to other factors...
+	local compatScale = 0.01 -- scaling compatibility to other factors...
 
 	local RealPattern = Pattern(real)
 	
@@ -213,8 +213,13 @@ local terra ToByte(num:double)
 	return value
 end
 local terra SaveToFile()
-	var file_ptr = C.fopen("colorSamples.txt", "w");
+	var scoreThresh = -3
+	var file_ptr = C.fopen("colorSamples.txt", "w")
 	C.fprintf(file_ptr, "link,score\n")
+
+    var html_ptr = C.fopen("colorSamples.html","w")
+	C.fprintf(html_ptr, "<html><head></head><body><h1>Samples with logprob above %d</h1>\n",scoreThresh) --arbitrary threshold
+
 	for i=0,numsamps do
 		var pattern = samples(i).value
 		var tid = pattern.templateId
@@ -226,8 +231,23 @@ local terra SaveToFile()
     			  ToByte(pattern(4)(0)), ToByte(pattern(4)(1)), ToByte(pattern(4)(2)),
     			  samples(i).logprob   			  
     	)
+
+    	if (samples(i).logprob > scoreThresh) then  	
+	    	C.fprintf(html_ptr, "<img src='http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png' title='%f'/>\n", tid,
+	    			  ToByte(pattern(0)(0)), ToByte(pattern(0)(1)), ToByte(pattern(0)(2)),
+	    			  ToByte(pattern(1)(0)), ToByte(pattern(1)(1)), ToByte(pattern(1)(2)),
+	    			  ToByte(pattern(2)(0)), ToByte(pattern(2)(1)), ToByte(pattern(2)(2)),		  
+	    			  ToByte(pattern(3)(0)), ToByte(pattern(3)(1)), ToByte(pattern(3)(2)),
+	    			  ToByte(pattern(4)(0)), ToByte(pattern(4)(1)), ToByte(pattern(4)(2)),
+	    			  samples(i).logprob 			  
+	    	)
+    	end
     end
     C.fclose(file_ptr)
+
+
+	C.fprintf(html_ptr, "</body></html>\n")
+    C.fclose(html_ptr)
 end
 
 SaveToFile()
