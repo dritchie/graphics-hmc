@@ -253,6 +253,7 @@ local BinaryLightnessConstraint = templatize(function(real)
 	end
 end)
 
+
 return {
 	LABtoRGB = LABtoRGB,
 	RGBtoLAB = RGBtoLAB,

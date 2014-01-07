@@ -1,4 +1,5 @@
 -- Include quicksand
+local rand = terralib.require("prob.random")
 terralib.require("prob")
 
 -- Other libraries we'll need
@@ -21,6 +22,10 @@ local C = terralib.includecstring [[
 
 local function colorCompatModel()
 	local temp = 0.01
+	local glowRange = 3
+	local hueRange = 10
+	local compatScale = 0.1 -- scaling compatibility to other factors...
+
 	local RealPattern = Pattern(real)
 	
 	local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
@@ -31,22 +36,67 @@ local function colorCompatModel()
 	local logistic = macro(function(x)
                 return `1.0 / (1.0 + ad.math.exp(-x))
     	end)
+
+	local softEq = macro(function(x, target, softness)
+		return `[rand.gaussian_logprob(real)](x, target, softness)
+	end)
+
+	local terra glowConstraint(pattern:&RealPattern, l_indices:Vector(int), h_indices:Vector(int), l_range:double, h_range:double)
+		var endIdx = l_indices.size-1
+		var maxldiff = 100.0
+		for i=0,endIdx do
+			var light = [ColorUtils.RGBtoLAB(real)](pattern(l_indices:get(i)))
+			var dark = [ColorUtils.RGBtoLAB(real)](pattern(l_indices:get(i+1)))
+			var ldiff = (light(0)-dark(0))/maxldiff
+			var target = 15/maxldiff
+
+			--constrain lightness
+			factor(softEq(ldiff, target, l_range/maxldiff))
+
+		end
+
+		endIdx = h_indices.size-1
+		var maxhdiff = 282.9
+		for i=0,endIdx do
+			var light = [ColorUtils.RGBtoLAB(real)](pattern(h_indices:get(i)))
+			var dark = [ColorUtils.RGBtoLAB(real)](pattern(h_indices:get(i+1)))
+			var adiff = light(1)-dark(1)
+			var bdiff = light(2)-dark(2)
+			var hdiff = ad.math.sqrt(adiff*adiff+bdiff*bdiff)/maxhdiff
+			var target = 20/maxhdiff
+
+			--constrain hue
+			factor(softEq(hdiff, target, h_range/maxhdiff))
+		end
+	end
 	
 	return terra()
 		var numGroups = 5
+		--------BIRD PATTERN
+		-- var adjacencies = Vector.fromItems(Vector.fromItems(0,1), 
+		-- 									Vector.fromItems(0,2), 
+		-- 									Vector.fromItems(0,3), 
+		-- 									Vector.fromItems(0,4), 
+		-- 									Vector.fromItems(1,2), 
+		-- 									Vector.fromItems(1,3), 
+		-- 									Vector.fromItems(1,4),
+		-- 									Vector.fromItems(2,3),
+		-- 									Vector.fromItems(2,4),
+		-- 									Vector.fromItems(3,4))
+		-- var sizes = Vector.fromItems(0.623075, 0.04915, 0.0777, 0.09085, 0.159225)
+		-- var tid = 105065 --bird pattern
+		-- var backgroundId = 0
+
+		--------FIREFLY PATTERN
 		var adjacencies = Vector.fromItems(Vector.fromItems(0,1), 
-											Vector.fromItems(0,2), 
-											Vector.fromItems(0,3), 
-											Vector.fromItems(0,4), 
 											Vector.fromItems(1,2), 
-											Vector.fromItems(1,3), 
 											Vector.fromItems(1,4),
 											Vector.fromItems(2,3),
 											Vector.fromItems(2,4),
 											Vector.fromItems(3,4))
-		var sizes = Vector.fromItems(0.623075, 0.04915, 0.0777, 0.09085, 0.159225)
-		var tid = 105065 --bird pattern
-		var backgroundId = 0
+		var sizes = Vector.fromItems(0.002575, 0.01575, 0.057375, 0.7566, 0.1677)
+		var tid = 36751
+		var backgroundId = 3
 		
 		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid, sizes)
 		m.destruct(adjacencies)
@@ -67,7 +117,9 @@ local function colorCompatModel()
 		var diff = 1.4*diffFn(&pattern)
 		var lightnessDiff = 0.5*lightnessDiffFn(&pattern) 
 
-		factor((lightness+saturation+diff+lightnessDiff)/temp)
+		factor(compatScale*(lightness+saturation+diff+lightnessDiff)/temp)
+
+		glowConstraint(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2,3), glowRange, hueRange)
 
 		return pattern
 	end
@@ -76,9 +128,20 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
+local kernelType = HMC
+--local kernelType = RandomWalk
+local hmcNumSteps = 1
 local numsamps = 10000
 local verbose = true
-local kernel = HMC({numSteps=20})	-- Defaults to trajectories of length 1
+
+if kernelType == RandomWalk then numsamps = hmcNumSteps*numsamps end
+local kernel = nil
+if kernelType == RandomWalk then
+        kernel = RandomWalk()
+else
+        kernel = HMC({numSteps=hmcNumSteps})
+end
+
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
 	return [mcmc(colorCompatModel, kernel, {numsamps=numsamps, verbose=verbose})]
