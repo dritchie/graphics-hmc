@@ -26,6 +26,9 @@ local RealGrid = image.Image(real, 1)
 local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 
+U.RealGrid = RealGrid
+U.Vec2 = Vec2
+
 U.polar2rect = terra(polarVec: Vec2)
   var r = polarVec(0)
   var theta = polarVec(1)
@@ -145,19 +148,20 @@ U.softmax = macro(function(x, y)
   return `ad.math.pow(ad.math.pow(x, t) + ad.math.pow(y, t), invt)
 end)
 
-U.bresenhamCheck = function(x0, y0, x1, y1, check)
+U.bresenhamAccumulate = function(x0, y0, x1, y1, accumFun)
   return terra()
     var sx = 1
     if x0 > x1 then sx = -1 end
     var sy = 1
     if y0 > y1 then sy = -1 end
-    var dx = ad.math.fabs(x1 - x0)
-    var dy = ad.math.fabs(y1 - y0)
+    var dx = x1 - x0
+    if dx < 0 then dx = -dx end
+    var dy = y1 - y0
+    if dy < 0 then dy = -dy end
 
     var err = dx - dy
-    var err2 = 0
-    
-    if not check(x0, y0) then return false end
+    var err2 = dx - dx
+    var accum = accumFun(x0, y0)
     
     while not(x0 == x1 and y0 == y1) do
       err2 = err + err
@@ -169,21 +173,21 @@ U.bresenhamCheck = function(x0, y0, x1, y1, check)
         err = err + dx
         y0  = y0 + sy
       end
-      if not check(x0, y0) then return false end
+      accum = accum + accumFun(x0, y0)
     end
-
-    return true
+    return accum
   end
 end
 
-U.bresenhamLine = function(x0, y0, x1, y1, check)
+U.bresenhamLineAccumulate = function(x0, y0, x1, y1, latt)
   local points = {}
   local count = 0
-  local result = U.bresenhamCheck(x0, y0, x1, y1, function(x,y)
-    if not check(x,y) then return false end
+  local err = 0.0
+  local result = U.bresenhamAccumulate(x0, y0, x1, y1, function(x,y)
+    local herr = `ad.math.fabs(latt(x, y)(0) - 1.0)
     count = count + 1
     points[count] = {x,y}
-    return true
+    return herr
   end)
   return points, result
 end

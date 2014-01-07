@@ -77,57 +77,7 @@ local TerrainMap = templatize(function(real)
   return MapT
 end)
 
-local fractalSplineModel = templatize(function(real)
-  local TerrainMapT = TerrainMap(real)
-  local HeightConstraintT = constraints.HeightConstraint(real)
-  local DeltaHeightConstraintT = constraints.DeltaHeightConstraint(real)
-  local hE1 = HeightConstraintT(0.1, 0.3, 0, 15, 0, 15)
-  local hE2 = HeightConstraintT(0.8, 1.0, 20, 30, 20, 35)
-  local dHE = DeltaHeightConstraintT(0.2, 0, 100, 0, 70)
-
-  return function(tgtImage, temp, rigidity, tension, c)
-    return terra()
-      var width = tgtImage.width
-      var height = tgtImage.height 
-      var terrainMap = TerrainMapT.stackAlloc(width, height)
-      var lattice = terrainMap.grid
-
-      -- Priors
-      for y=0,height do
-        for x=0,width do
-          lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-        end
-      end
-
-      -- Variational spline derivative constraints
-      var h = 1.0 / ad.math.fmax(width, height)
-      for y = 1, height-1 do
-        for x = 1, width-1 do
-          var dx = U.Dx(lattice, x, y, h)
-          var dy = U.Dy(lattice, x, y, h)
-          var dxx = U.Dxx(lattice, x, y, h)
-          var dyy = U.Dyy(lattice, x, y, h)
-          var dxy = U.Dxy(lattice, x, y, h)
-          var e_p = 0.5 * rigidity *
-            ((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
-          --var diff = lattice(x,y):distSq(tgtImage(x, y))
-          --var e_d = 0.5 * c * diff
-          var energy = e_p(0) --+ e_d
-          factor(-energy / temp)
-        end
-      end
-      -- var hE = hEnergy(&lattice, c, temp)
-      -- var hE2 = hEnergy2(&lattice, c, temp)
-      -- factor(-hE/temp)
-      -- factor(-hE2/temp)
-      factor(-0.5 * c * dHE(&lattice, &tgtImage) / temp)
-      return lattice
-    end
-  end
-end)
-
 return
 {
-  TerrainMap = TerrainMap,
-  fractalSplineModel = fractalSplineModel,
+  TerrainMap = TerrainMap
 }
