@@ -143,8 +143,8 @@ end)
 --    transform of the target image, but this transform is controlled
 --    via random variables
 local TransformedSimConstraint = templatize(function(real)
-	local Vec2 = Vec(real, 2)
-	-- local Vec2 = Vec(double, 2)
+	-- local Vec2 = Vec(real, 2)
+	local Vec2 = Vec(double, 2)
 	local RealGrid = image.Image(real, 1)
 	return function(tgtImage, softness)
 		return terra(image: &RealGrid, center: Vec2)
