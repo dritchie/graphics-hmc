@@ -214,15 +214,17 @@ local terra ToByte(num:double)
 end
 local terra SaveToFile()
 	var file_ptr = C.fopen("colorSamples.txt", "w");
+	C.fprintf(file_ptr, "link,score\n")
 	for i=0,numsamps do
 		var pattern = samples(i).value
 		var tid = pattern.templateId
-    	C.fprintf(file_ptr, "http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png\n", tid,
+    	C.fprintf(file_ptr, "http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png,%f\n", tid,
     			  ToByte(pattern(0)(0)), ToByte(pattern(0)(1)), ToByte(pattern(0)(2)),
     			  ToByte(pattern(1)(0)), ToByte(pattern(1)(1)), ToByte(pattern(1)(2)),
     			  ToByte(pattern(2)(0)), ToByte(pattern(2)(1)), ToByte(pattern(2)(2)),		  
     			  ToByte(pattern(3)(0)), ToByte(pattern(3)(1)), ToByte(pattern(3)(2)),
-    			  ToByte(pattern(4)(0)), ToByte(pattern(4)(1)), ToByte(pattern(4)(2))   			  
+    			  ToByte(pattern(4)(0)), ToByte(pattern(4)(1)), ToByte(pattern(4)(2)),
+    			  samples(i).logprob   			  
     	)
     end
     C.fclose(file_ptr)
