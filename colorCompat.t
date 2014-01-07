@@ -21,7 +21,8 @@ local C = terralib.includecstring [[
 
 
 local function colorCompatModel()
-	local temp = 0.01
+	local temp = 1
+	local constraintTemp = 1
 	local glowRange = 3
 	local hueRange = 10
 	local compatScale = 0.1 -- scaling compatibility to other factors...
@@ -51,7 +52,7 @@ local function colorCompatModel()
 			var target = 15/maxldiff
 
 			--constrain lightness
-			factor(softEq(ldiff, target, l_range/maxldiff))
+			factor(softEq(ldiff, target, l_range/maxldiff)/constraintTemp)
 
 		end
 
@@ -66,8 +67,55 @@ local function colorCompatModel()
 			var target = 20/maxhdiff
 
 			--constrain hue
-			factor(softEq(hdiff, target, h_range/maxhdiff))
+			factor(softEq(hdiff, target, h_range/maxhdiff)/constraintTemp)
 		end
+	end
+
+	--factor over three variables. lightness delta between two vars should be the same as the lightness delta between the other two vars. The first lightness delta can be anything. 
+	--(i.e. lightness values should be equally spaced and in one direction)
+	-- TODO: the hue delta between two vars should also be the same as between the other two vars (i.e. hue values should be equally spaced and in one direction)
+	local terra glowConstraint2(pattern:&RealPattern, l_indices:Vector(int), h_indices:Vector(int), l_range:double, h_range:double)
+		var endIdx = l_indices.size-2
+		var maxldiff = 100.0
+		var firstRange = 0.3
+		var logisticScale = 100
+		var minContrast = 0.1
+		for i=0,endIdx do
+			var light = [ColorUtils.RGBtoLAB(real)](pattern(l_indices:get(i)))
+			var dark = [ColorUtils.RGBtoLAB(real)](pattern(l_indices:get(i+1)))
+			var darkest = [ColorUtils.RGBtoLAB(real)](pattern(l_indices:get(i+2)))
+
+			--enforce positivity
+			if (i == 0) then
+				var firstDiff = (light(0)-dark(0))/maxldiff
+				var aboveMin = logistic((firstDiff-minContrast)*logisticScale)/constraintTemp
+				factor(softEq(aboveMin,1,l_range/maxldiff))
+			end
+
+			var ldiff_0 = (light(0)-dark(0))/maxldiff
+			var ldiff_1 = (dark(0)-darkest(0))/maxldiff
+
+			--var target = ad.math.sqrt(ldiff_0*ldiff_0 - ldiff_1*ldiff_1)/maxldiff
+
+			--constrain lightness
+			factor(softEq(ldiff_1, ldiff_0, l_range/maxldiff)/constraintTemp)
+
+		end
+
+		endIdx = h_indices.size-1
+		var maxhdiff = 282.9
+		for i=0,endIdx do
+			var light = [ColorUtils.RGBtoLAB(real)](pattern(h_indices:get(i)))
+			var dark = [ColorUtils.RGBtoLAB(real)](pattern(h_indices:get(i+1)))
+			var adiff = light(1)-dark(1)
+			var bdiff = light(2)-dark(2)
+			var hdiff = ad.math.sqrt(adiff*adiff+bdiff*bdiff)/maxhdiff
+			var target = 20/maxhdiff
+
+			--constrain hue
+			factor(softEq(hdiff, target, h_range/maxhdiff)/constraintTemp)
+		end
+
 	end
 	
 	return terra()
@@ -119,7 +167,8 @@ local function colorCompatModel()
 
 		factor(compatScale*(lightness+saturation+diff+lightnessDiff)/temp)
 
-		glowConstraint(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2,3), glowRange, hueRange)
+		--glowConstraint(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2,3), glowRange, hueRange)
+		glowConstraint2(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2,3), glowRange, hueRange)
 
 		return pattern
 	end
