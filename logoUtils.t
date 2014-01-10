@@ -51,7 +51,7 @@ local RandomLattice = templatize(function(real)
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
-        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, lowerBound=0.0, upperBound=1.0})
+        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
       end
     end
     return lattice
@@ -145,6 +145,41 @@ local HSLtoRGB = templatize(function(real)
   end
 end)
 
+-- Swap RGB to BGR order
+local rgb2bgr = macro(function(c)
+  return quote
+    var blue = c(2)
+    c(2) = c(0)
+    c(0) = blue
+  in
+    c
+  end
+end)
+
+-- Map real to HSL lightness color ramp
+local LightnessColorizer = templatize(function(real)
+  local h2r = HSLtoRGB(real)
+  return terra(t: real)
+    var L = 0.75 + t / 4.0
+    var c = h2r(0.663, 1.0, L)
+    return rgb2bgr(c)
+  end
+end)
+
+-- Map real to weighted RGB color
+local WeightedRGBColorizer = templatize(function(real)
+  local h2r = HSLtoRGB(real)
+  local Color = Vec(real, 3)
+  return terra(t: real)
+    var t2 = 0.88 * t
+    var rgb = Color.stackAlloc(t, t, t)
+    rgb(2) = t2 + 0.1
+    rgb(1) = t2 + 0.03
+    rgb(0) = t2
+    return rgb
+  end
+end)
+
 local RealGridToRGBImage = templatize(function(real)
   local RealGrid = image.Image(real, 1)
   local RGBImage = image.Image(double, 3)
@@ -171,5 +206,7 @@ return {
   MarbleLattice = MarbleLattice,
   WoodLattice = WoodLattice,
   HSLtoRGB = HSLtoRGB,
+  LightnessColorizer = LightnessColorizer,
+  WeightedRGBColorizer = WeightedRGBColorizer,
   RealGridToRGBImage = RealGridToRGBImage
 }

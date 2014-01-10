@@ -25,18 +25,6 @@ local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
-local cloudTransferFun = terra(t: real)
-  var h2r = [U.HSLtoRGB(double)]
-  var L = 0.75 + t / 4.0
-  var c = h2r(0.663, 1.0, L)
-
-  -- Swap into BGR order
-  var blue = c(2)
-  c(2) = c(0)
-  c(0) = blue
-  return c
-end
-
 local terra testTurbulence()
   var size = 256
   var testImgFilename = "renders/test.png"
@@ -48,44 +36,43 @@ local terra testTurbulence()
   var lattTurb = [U.TurbulenceLattice(real)](size, size, 128)
 
   -- Create cloud RGB image
-  var im = [U.RealGridToRGBImage(real)](&lattTurb, cloudTransferFun)
+  var cloudizer = [U.LightnessColorizer(real)]
+  var im = [U.RealGridToRGBImage(real)](&lattTurb, cloudizer)
   [RGBImage.save(uint8)](&im, image.Format.PNG, testImgFilename)
 end
-testTurbulence()
+-- testTurbulence()
 
 local terra testMarble()
   var size = 256
   var testImgFilename = "renders/test.png"
 
   -- -- Marble
-  var xPeriod = 5.0
-  var yPeriod = 10.0
-  var turbPower = 2.0
-  var turbSize = 32.0
-
-  -- -- Wood
-  -- var xyPeriod = 12.0
-  -- var turbPower = 0.1
+  -- var xPeriod = 5.0
+  -- var yPeriod = 10.0
+  -- var turbPower = 2.0
   -- var turbSize = 32.0
 
+  -- Wood
+  var xyPeriod = 12.0
+  var turbPower = 0.1
+  var turbSize = 32.0
+
   -- Lattice
-  var lattice = [U.MarbleLattice(real)](size, size, xPeriod, yPeriod, turbPower, turbSize)
-  -- var lattice = [U.WoodLattice(real)](size, size, xyPeriod, turbPower, turbSize)
+  -- var lattice = [U.MarbleLattice(real)](size, size, xPeriod, yPeriod, turbPower, turbSize)
+  var lattice = [U.WoodLattice(real)](size, size, xyPeriod, turbPower, turbSize)
 
   -- Create RGB image
   var im = RGBImage.stackAlloc(size, size)
-  var h2r = [U.HSLtoRGB(double)]
+  var woodizer = [U.WeightedRGBColorizer(real)]
   for x = 0,size do
     for y = 0,size do
       var t = lattice(x, y)(0)
-      im(x,y)(2) = 0.1 + t
-      im(x,y)(1) = 0.03 + t
-      im(x,y)(0) = 0.88 * t
+      im(x, y) = woodizer(t)
     end
   end
   [RGBImage.save(uint8)](&im, image.Format.PNG, testImgFilename)
 end
--- testMarble()
+testMarble()
 
 
 -- util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
