@@ -10,6 +10,11 @@ local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
 local rand = terralib.require("prob.random")
 
+-- C standard library stuff
+local C = terralib.includecstring [[
+#include <stdio.h>
+]]
+
 -- Interpolation functions
 local lerp = macro(function(lo, hi, t)
   return `(1.0-t)*lo + t*hi
@@ -197,6 +202,32 @@ local RealGridToRGBImage = templatize(function(real)
   end
 end)
 
+-- Render the set of gathered samples into a movie
+local renderSamplesToMovie = function(samples, moviename, GridType)
+  local moviefilename = string.format("renders/%s.mp4", moviename)
+  local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
+  local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
+  io.write("Rendering video...")
+  io.flush()
+  local numsamps = samples.size
+  local frameSkip = math.ceil(numsamps / 1000.0)
+  local terra renderFrames()
+    var framename : int8[1024]
+    var framenumber = 0
+    for i=0,numsamps,frameSkip do
+      C.sprintf(framename, movieframebasename, framenumber)
+      framenumber = framenumber + 1
+      -- Quantize image to 8 bits per channel when saving
+      var imagePtr = &samples(i).value
+      [GridType.save(uint8)](imagePtr, image.Format.PNG, framename)
+    end
+  end
+  renderFrames()
+  util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
+  util.wait(string.format("rm -f %s", movieframewildcard))
+  print("done.")
+end
+
 return {
   lerp = lerp,
   ease = ease,
@@ -208,5 +239,6 @@ return {
   HSLtoRGB = HSLtoRGB,
   LightnessColorizer = LightnessColorizer,
   WeightedRGBColorizer = WeightedRGBColorizer,
-  RealGridToRGBImage = RealGridToRGBImage
+  RealGridToRGBImage = RealGridToRGBImage,
+  renderSamplesToMovie = renderSamplesToMovie
 }
