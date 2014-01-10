@@ -145,6 +145,23 @@ local HSLtoRGB = templatize(function(real)
   end
 end)
 
+local RealGridToRGBImage = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  local RGBImage = image.Image(double, 3)
+  local Color = Vec(double, 3)
+  return terra(grid: &RealGrid, transferFun: real -> Color)
+    var width = grid.width
+    var height = grid.height
+    var im = RGBImage.stackAlloc(width, height)
+    for x = 0,width do
+      for y = 0,height do
+        im(x,y) = transferFun(grid(x,y)(0))
+      end
+    end
+    return im
+  end
+end)
+
 return {
   lerp = lerp,
   ease = ease,
@@ -153,5 +170,6 @@ return {
   TurbulenceLattice = TurbulenceLattice,
   MarbleLattice = MarbleLattice,
   WoodLattice = WoodLattice,
-  HSLtoRGB = HSLtoRGB
+  HSLtoRGB = HSLtoRGB,
+  RealGridToRGBImage = RealGridToRGBImage
 }

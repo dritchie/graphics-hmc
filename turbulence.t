@@ -25,6 +25,18 @@ local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
+local cloudTransferFun = terra(t: real)
+  var h2r = [U.HSLtoRGB(double)]
+  var L = 0.75 + t / 4.0
+  var c = h2r(0.663, 1.0, L)
+
+  -- Swap into BGR order
+  var blue = c(2)
+  c(2) = c(0)
+  c(0) = blue
+  return c
+end
+
 local terra testTurbulence()
   var size = 256
   var testImgFilename = "renders/test.png"
@@ -35,29 +47,11 @@ local terra testTurbulence()
   -- Turbulence pass
   var lattTurb = [U.TurbulenceLattice(real)](size, size, 128)
 
-  -- Create RGB image
-  var im = RGBImage.stackAlloc(size, size)
-  var h2r = [U.HSLtoRGB(double)]
-  for x = 0,size do
-    for y = 0,size do
-      var t = lattTurb(x, y)(0)
-      var L = 0.75 + t / 4.0
-      var c = h2r(0.663, 1.0, L)
-      
-      -- Swap into BGR order
-      var blue = c(2)
-      c(2) = c(0)
-      c(0) = blue
-      
-      -- C.printf("%f,%f,%f\n", c(0), c(1), c(2))
-      im(x, y) = c
-    end
-  end
- 
-  -- Output frame
+  -- Create cloud RGB image
+  var im = [U.RealGridToRGBImage(real)](&lattTurb, cloudTransferFun)
   [RGBImage.save(uint8)](&im, image.Format.PNG, testImgFilename)
 end
--- testTurbulence()
+testTurbulence()
 
 local terra testMarble()
   var size = 256
@@ -77,7 +71,7 @@ local terra testMarble()
   -- Lattice
   var lattice = [U.MarbleLattice(real)](size, size, xPeriod, yPeriod, turbPower, turbSize)
   -- var lattice = [U.WoodLattice(real)](size, size, xyPeriod, turbPower, turbSize)
-  
+
   -- Create RGB image
   var im = RGBImage.stackAlloc(size, size)
   var h2r = [U.HSLtoRGB(double)]
@@ -91,7 +85,7 @@ local terra testMarble()
   end
   [RGBImage.save(uint8)](&im, image.Format.PNG, testImgFilename)
 end
-testMarble()
+-- testMarble()
 
 
 -- util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
