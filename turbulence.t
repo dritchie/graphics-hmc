@@ -30,21 +30,10 @@ local terra testTurbulence()
   var testImgFilename = "renders/test.png"
   
   -- Generate random lattice
-  var lattice = DoubleGrid.stackAlloc(size, size)
-  for y=0,size do
-    for x=0,size do
-      lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, lowerBound=0.0, upperBound=1.0})
-    end
-  end
+  var lattice = [U.RandomLattice(real)](size, size)
 
   -- Turbulence pass
-  var lattTurb = DoubleGrid.stackAlloc(size, size)
-  for x = 0, size do
-    for y = 0, size do
-      var t = U.turbulence(lattice, x, y, 128.0)
-      lattTurb(x, y) = t
-    end
-  end
+  var lattTurb = [U.TurbulenceLattice(real)](size, size, 128)
 
   -- Create RGB image
   var im = RGBImage.stackAlloc(size, size)
@@ -75,31 +64,26 @@ local terra testMarble()
   var testImgFilename = "renders/test.png"
 
   -- -- Marble
-  -- var xPeriod = 5.0
-  -- var yPeriod = 10.0
-  -- var turbPower = 2.0
+  var xPeriod = 5.0
+  var yPeriod = 10.0
+  var turbPower = 2.0
+  var turbSize = 32.0
+
+  -- -- Wood
+  -- var xyPeriod = 12.0
+  -- var turbPower = 0.1
   -- var turbSize = 32.0
 
-  -- Wood
-  var xyPeriod = 12.0
-  var turbPower = 0.1
-  var turbSize = 32.0
+  -- Lattice
+  var lattice = [U.MarbleLattice(real)](size, size, xPeriod, yPeriod, turbPower, turbSize)
+  -- var lattice = [U.WoodLattice(real)](size, size, xyPeriod, turbPower, turbSize)
   
-  -- Generate random lattice
-  var lattice = DoubleGrid.stackAlloc(size, size)
-  for y=0,size do
-    for x=0,size do
-      lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, lowerBound=0.0, upperBound=1.0})
-    end
-  end
-
   -- Create RGB image
   var im = RGBImage.stackAlloc(size, size)
   var h2r = [U.HSLtoRGB(double)]
   for x = 0,size do
     for y = 0,size do
-      --var t = U.marble(lattice, x, y, xPeriod, yPeriod, turbPower, turbSize)
-      var t = U.wood(lattice, x, y, xyPeriod, turbPower, turbSize)
+      var t = lattice(x, y)(0)
       im(x,y)(2) = 0.1 + t
       im(x,y)(1) = 0.03 + t
       im(x,y)(0) = 0.88 * t

@@ -44,45 +44,77 @@ local bilerp = macro(function(image, x, y)
   end
 end)
 
--- Turbulence function
-local turbulence = macro(function(randLattice, x, y, maxZoom)
-  return quote
-    var val = randLattice(x, y) - randLattice(x, y) -- Get zero of image element type
-    var zoom = maxZoom
-    while zoom >= 1.0 do
-      var pix = bilerp(randLattice, x / zoom, y / zoom)
-      val = val + pix * zoom
-      zoom = zoom / 2.0
+-- Generate unconstrained random lattice
+local RandomLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  return pfn(terra(width: int, height: int)
+    var lattice = RealGrid.stackAlloc(width, height)
+    for y=0,height do
+      for x=0,width do
+        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false, lowerBound=0.0, upperBound=1.0})
+      end
     end
-    val = 0.5 * val / maxZoom
-  in
-    val
+    return lattice
+  end)
+end)
+
+-- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
+local TurbulenceLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  return terra(width: int, height: int, maxZoom: double)
+    var R = [RandomLattice(real)](width, height)
+    var Rturb = RealGrid.stackAlloc(width, height)
+    var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
+    for x=0,width do
+      for y=0,height do
+        var val = zero
+        var zoom = maxZoom
+        while zoom >= 1.0 do
+          var pix = bilerp(R, x / zoom, y / zoom)
+          val = val + zoom * pix
+          zoom = zoom / 2.0
+        end
+        val = 0.5 * val / maxZoom
+        Rturb(x, y) = val
+      end
+    end
+    return Rturb
   end
 end)
 
--- Marble-like patterns by passing "sine" repetitions over domain through turbulence
-local marble = macro(function(randLattice, x, y, xPeriod, yPeriod, turbPower, turbSize)
-  return quote
-    var height = randLattice.height
-    var width = randLattice.width
-    var xyValue = x * xPeriod / width + y * yPeriod / height + turbPower * turbulence(randLattice, x, y, turbSize)(0)
-    var sineValue = ad.math.fabs(ad.math.sin(xyValue * 3.14159))
-  in
-    sineValue
+-- Marble-like patterns by summing "sine" repetitions over domain with turbulence
+local MarbleLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  return terra(width: int, height: int, xPeriod: double, yPeriod: double, turbPower: double, turbSize: double)
+    var T = [TurbulenceLattice(real)](width, height, turbSize)
+    var marble = RealGrid.stackAlloc(width, height)
+    var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
+    for x=0,width do
+      for y=0,height do
+        var xyValue = (x * xPeriod / width) + (y * yPeriod / height) + (turbPower * T(x, y)(0))
+        marble(x, y)(0) = ad.math.fabs(ad.math.sin(xyValue * 3.14159))
+      end
+    end
+    return marble
   end
 end)
 
--- Wood-like pattern passing circular "sines" over turbulence
-local wood = macro(function(randLattice, x, y, xyPeriod, turbPower, turbSize)
-  return quote
-    var height = randLattice.height
-    var width = randLattice.width
-    var xVal = (x - width / 2.0) / width
-    var yVal = (y - height / 2.0) / height
-    var distVal = ad.math.sqrt(xVal * xVal + yVal * yVal) + turbPower * turbulence(randLattice, x, y, turbSize)(0)
-    var sineVal = 0.5 * ad.math.fabs(ad.math.sin(2.0 * xyPeriod * distVal * 3.14159))
-  in
-    sineVal
+-- Wood-like patterns by summing circular "sine" repetitions over domain with turbulence
+local WoodLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  return terra(width: int, height: int, xyPeriod: double, turbPower: double, turbSize: double)
+    var T = [TurbulenceLattice(real)](width, height, turbSize)
+    var wood = RealGrid.stackAlloc(width, height)
+    var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
+    for x=0,width do
+      for y=0,height do
+        var xVal = (x - width / 2.0) / width
+        var yVal = (y - height / 2.0) / height
+        var dVal = ad.math.sqrt(xVal * xVal + yVal * yVal) + (turbPower * T(x, y)(0))
+        wood(x, y)(0) = 0.5 * ad.math.fabs(ad.math.sin(2.0 * xyPeriod * dVal * 3.14159))
+      end
+    end
+    return wood
   end
 end)
 
@@ -113,13 +145,13 @@ local HSLtoRGB = templatize(function(real)
   end
 end)
 
-
 return {
   lerp = lerp,
   ease = ease,
   bilerp = bilerp,
-  turbulence = turbulence,
-  marble = marble,
-  wood = wood,
+  RandomLattice = RandomLattice,
+  TurbulenceLattice = TurbulenceLattice,
+  MarbleLattice = MarbleLattice,
+  WoodLattice = WoodLattice,
   HSLtoRGB = HSLtoRGB
 }
