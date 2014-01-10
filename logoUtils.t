@@ -15,6 +15,8 @@ local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
 
+return function()
+
 -- Interpolation functions
 local lerp = macro(function(lo, hi, t)
   return `(1.0-t)*lo + t*hi
@@ -66,7 +68,7 @@ end)
 -- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
 local TurbulenceLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return terra(width: int, height: int, maxZoom: double)
+  return pfn(terra(width: int, height: int, maxZoom: double)
     var R = [RandomLattice(real)](width, height)
     var Rturb = RealGrid.stackAlloc(width, height)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
@@ -84,13 +86,13 @@ local TurbulenceLattice = templatize(function(real)
       end
     end
     return Rturb
-  end
+  end)
 end)
 
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
 local MarbleLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return terra(width: int, height: int, xPeriod: double, yPeriod: double, turbPower: double, turbSize: double)
+  return pfn(terra(width: int, height: int, xPeriod: double, yPeriod: double, turbPower: double, turbSize: double)
     var T = [TurbulenceLattice(real)](width, height, turbSize)
     var marble = RealGrid.stackAlloc(width, height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
@@ -101,13 +103,13 @@ local MarbleLattice = templatize(function(real)
       end
     end
     return marble
-  end
+  end)
 end)
 
 -- Wood-like patterns by summing circular "sine" repetitions over domain with turbulence
 local WoodLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return terra(width: int, height: int, xyPeriod: double, turbPower: double, turbSize: double)
+  return pfn(terra(width: int, height: int, xyPeriod: double, turbPower: double, turbSize: double)
     var T = [TurbulenceLattice(real)](width, height, turbSize)
     var wood = RealGrid.stackAlloc(width, height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
@@ -120,7 +122,7 @@ local WoodLattice = templatize(function(real)
       end
     end
     return wood
-  end
+  end)
 end)
 
 -- Color conversion
@@ -228,6 +230,41 @@ local renderSamplesToMovie = function(samples, moviename, GridType)
   print("done.")
 end
 
+local testTurbulence = function(params, imgFilename)
+  local RGBImage = image.Image(double, 3)
+  local terra test()
+    var lattice = [TurbulenceLattice(real)](params.size, params.size, params.turbSize)
+    var cloudizer = [LightnessColorizer(real)]
+    var im = [RealGridToRGBImage(real)](&lattice, cloudizer)
+    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+  end
+  test()
+end
+
+local testMarble = function(params, imgFilename)
+  local p = params
+  local RGBImage = image.Image(double, 3)
+  local terra test()
+    var lattice = [MarbleLattice(real)](p.size, p.size, p.xPeriod, p.yPeriod, p.turbPower, p.turbSize)
+    var woodizer = [WeightedRGBColorizer(real)]
+    var im = [RealGridToRGBImage(real)](&lattice, woodizer)
+    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+  end
+  test()
+end
+
+local testWood = function(params, imgFilename)
+  local p = params
+  local RGBImage = image.Image(double, 3)
+  local terra test()
+    var lattice = [WoodLattice(real)](p.size, p.size, p.xyPeriod, p.turbPower, p.turbSize)
+    var woodizer = [WeightedRGBColorizer(real)]
+    var im = [RealGridToRGBImage(real)](&lattice, woodizer)
+    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+  end
+  test()
+end
+
 return {
   lerp = lerp,
   ease = ease,
@@ -240,5 +277,10 @@ return {
   LightnessColorizer = LightnessColorizer,
   WeightedRGBColorizer = WeightedRGBColorizer,
   RealGridToRGBImage = RealGridToRGBImage,
-  renderSamplesToMovie = renderSamplesToMovie
+  renderSamplesToMovie = renderSamplesToMovie,
+  testTurbulence = testTurbulence,
+  testMarble = testMarble,
+  testWood = testWood
 }
+
+end
