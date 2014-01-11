@@ -52,13 +52,13 @@ local bilerp = macro(function(image, x, y)
 end)
 
 -- Generate unconstrained random lattice
-local RandomLattice = templatize(function(real)
+local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   return pfn(terra(width: int, height: int)
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
-        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0, mass=1.0})
       end
     end
     return lattice
@@ -68,7 +68,7 @@ end)
 -- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
 local TurbulenceLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return pfn(terra(width: int, height: int, maxZoom: double)
+  return terra(width: int, height: int, maxZoom: double)
     var R = [RandomLattice(real)](width, height)
     var Rturb = RealGrid.stackAlloc(width, height)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
@@ -86,30 +86,61 @@ local TurbulenceLattice = templatize(function(real)
       end
     end
     return Rturb
-  end)
+  end
+end)
+
+-- Turbulence lattice by subsampling and weighted summing of random lattice
+local TurbulenceSubSampledLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  local p = params
+  return terra(width: int, height: int, maxSubsampleStep: double)
+    var R = [RandomLattice(real)](width, height)
+    var Rturb = RealGrid.stackAlloc(width, height)
+    var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
+    var step = maxSubsampleStep
+    while step >= 1.0 do
+      for x=0,width,step do
+        for y=0,height,step do
+          var val = zero
+          var pix = R(x, y) --bilerp(R, x / zoom, y / zoom)
+          val = val + step * pix
+          val = 0.5 * val / maxSubsampleStep
+          Rturb(x, y) = val
+        end
+      end
+      step = step / 2.0
+    end
+    return Rturb
+  end
 end)
 
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
-local MarbleLattice = templatize(function(real)
+local MarbleLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
-  return pfn(terra(width: int, height: int, xPeriod: double, yPeriod: double, turbPower: double, turbSize: double)
-    var T = [TurbulenceLattice(real)](width, height, turbSize)
-    var marble = RealGrid.stackAlloc(width, height)
+  local p = params
+  return terra()
+    var T = [TurbulenceLattice(real)](p.width, p.height, p.turbSize)
+    var marble = RealGrid.stackAlloc(p.width, p.height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
-    for x=0,width do
-      for y=0,height do
-        var xyValue = (x * xPeriod / width) + (y * yPeriod / height) + (turbPower * T(x, y)(0))
+    for x=0,p.width do
+      for y=0,p.height do
+        var xyValue = (x * p.xPeriod / p.width) + (y * p.yPeriod / p.height) + (p.turbPower * T(x, y)(0))
         marble(x, y)(0) = ad.math.fabs(ad.math.sin(xyValue * 3.14159))
       end
     end
     return marble
-  end)
+  end
 end)
 
 -- Wood-like patterns by summing circular "sine" repetitions over domain with turbulence
-local WoodLattice = templatize(function(real)
+local WoodLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
-  return pfn(terra(width: int, height: int, xyPeriod: double, turbPower: double, turbSize: double)
+  local p = params
+  return terra()
+    var width = p.width
+    var height = p.height
+    var turbSize = p.turbSize
+    var turbPower = p.turbPower
     var T = [TurbulenceLattice(real)](width, height, turbSize)
     var wood = RealGrid.stackAlloc(width, height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
@@ -122,7 +153,7 @@ local WoodLattice = templatize(function(real)
       end
     end
     return wood
-  end)
+  end
 end)
 
 -- Color conversion
@@ -140,8 +171,9 @@ local HSLtoRGB = templatize(function(real)
   
   return terra(h: real, s: real, l: real)
     var rgb = Color.stackAlloc(l, l, l)  -- default for achromatic case (s == 0)
-    if s ~= 0.0 then
-      var q = real(0.0)
+    var zero = real(0.0)
+    if s ~= zero then
+      var q = zero
       if l < 0.5 then q = l * (1 + s) else q = l + s - l * s end
       var p = 2.0 * l - q
       rgb(0) = hue2rgb(p, q, h + (1.0 / 3.0))
@@ -160,6 +192,14 @@ local rgb2bgr = macro(function(c)
     c(0) = blue
   in
     c
+  end
+end)
+
+-- Map real to gray color of that lightness
+local TrivialColorizer = templatize(function(real)
+  local Color = Vec(real, 3)
+  return terra(t: real)
+    return Color.stackAlloc(t, t, t)
   end
 end)
 
@@ -204,8 +244,19 @@ local RealGridToRGBImage = templatize(function(real)
   end
 end)
 
+local GridSaver = templatize(function(real, Colorizer)
+  local RealGrid = image.Image(real, 1)
+  local RGBImage = image.Image(double, 3)
+  local gridToRGB = RealGridToRGBImage(real)
+  local colorTransferFun = Colorizer(real)
+  return terra(grid: &RealGrid, imgFilename: rawstring)
+    var im = gridToRGB(grid, colorTransferFun)
+    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+  end
+end)
+
 -- Render the set of gathered samples into a movie
-local renderSamplesToMovie = function(samples, moviename, GridType)
+local renderSamplesToMovie = function(samples, moviename, GridSaver)
   local moviefilename = string.format("renders/%s.mp4", moviename)
   local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
   local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
@@ -218,10 +269,9 @@ local renderSamplesToMovie = function(samples, moviename, GridType)
     var framenumber = 0
     for i=0,numsamps,frameSkip do
       C.sprintf(framename, movieframebasename, framenumber)
-      framenumber = framenumber + 1
-      -- Quantize image to 8 bits per channel when saving
       var imagePtr = &samples(i).value
-      [GridType.save(uint8)](imagePtr, image.Format.PNG, framename)
+      GridSaver(imagePtr, framename)
+      framenumber = framenumber + 1
     end
   end
   renderFrames()
@@ -234,9 +284,7 @@ local testTurbulence = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var lattice = [TurbulenceLattice(real)](params.size, params.size, params.turbSize)
-    var cloudizer = [LightnessColorizer(real)]
-    var im = [RealGridToRGBImage(real)](&lattice, cloudizer)
-    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+    [GridSaver(real, LightnessColorizer)](&lattice, imgFilename)
   end
   test()
 end
@@ -246,9 +294,7 @@ local testMarble = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var lattice = [MarbleLattice(real)](p.size, p.size, p.xPeriod, p.yPeriod, p.turbPower, p.turbSize)
-    var woodizer = [WeightedRGBColorizer(real)]
-    var im = [RealGridToRGBImage(real)](&lattice, woodizer)
-    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+    [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
   test()
 end
@@ -258,9 +304,7 @@ local testWood = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var lattice = [WoodLattice(real)](p.size, p.size, p.xyPeriod, p.turbPower, p.turbSize)
-    var woodizer = [WeightedRGBColorizer(real)]
-    var im = [RealGridToRGBImage(real)](&lattice, woodizer)
-    [RGBImage.save(uint8)](&im, image.Format.PNG, imgFilename)
+    [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
   test()
 end
@@ -271,12 +315,15 @@ return {
   bilerp = bilerp,
   RandomLattice = RandomLattice,
   TurbulenceLattice = TurbulenceLattice,
+  TurbulenceSubSampledLattice = TurbulenceSubSampledLattice,
   MarbleLattice = MarbleLattice,
   WoodLattice = WoodLattice,
   HSLtoRGB = HSLtoRGB,
+  TrivialColorizer = TrivialColorizer,
   LightnessColorizer = LightnessColorizer,
   WeightedRGBColorizer = WeightedRGBColorizer,
   RealGridToRGBImage = RealGridToRGBImage,
+  GridSaver = GridSaver,
   renderSamplesToMovie = renderSamplesToMovie,
   testTurbulence = testTurbulence,
   testMarble = testMarble,

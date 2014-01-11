@@ -18,6 +18,7 @@ local C = terralib.includecstring [[
 ]]
 
 local U = logoUtils()
+local RGBImage = image.Image(double, 3)
 local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
@@ -26,40 +27,28 @@ local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfor
 -- U.testTurbulence(params, "renders/test.png")
 
 local function cloudModel()
-  local size = 100
-  local turbSize = 50 
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
   
-  local imageTemp = 0.05
+  local imageTemp = 0.001
   local Vec2 = Vec(real, 2)
   local TransformedSimConstraint = imageConstraints.TransformedSimConstraint(real)
   local tgtImagePenaltyFn = TransformedSimConstraint(tgtImage, imageTemp)
-  
-  local logistic = macro(function(x)
-    return `1.0 / (1.0 + ad.math.exp(-x))
-  end)
-
-  -- 'x' assumed to be between 0 and 1
   local rescale = macro(function(x, lo, hi)
     return `lo + x*(hi-lo)
   end)
-  
-  return terra()
-    var lattice = [U.TurbulenceLattice(real)](size, size, turbSize)
 
-    var scale = 0.05
-    var halfw = (tgtImage.width/2.0) / size
-    var halfh = (tgtImage.height/2.0) / size
-    var cx = gaussian(0.0, scale, {structural=false})
-    var cy = gaussian(0.0, scale, {structural=false})
-    -- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
-    -- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
-    cx = logistic(cx/scale)
-    cy = logistic(cy/scale)
+  local size = 128
+  local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=32.0}
+  return terra()
+    var lattice = [U.TurbulenceLattice(real, params)](params.width, params.height, params.turbSize)
+    var halfw = (tgtImage.width/2.0) / params.width
+    var halfh = (tgtImage.height/2.0) / params.height
+    var cx = uniform(0.0, 1.0, {structural=false, hasPrior=true, lowerBound=0.0, upperBound=1.0})
+    var cy = uniform(0.0, 1.0, {structural=false, hasPrior=true, lowerBound=0.0, upperBound=1.0})
     cx = rescale(cx, halfw, 1.0-halfw)
     cy = rescale(cy, halfh, 1.0-halfh)
     var center = Vec2.stackAlloc(cx, cy)
-    -- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+    C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
     factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
 
     return lattice
@@ -67,9 +56,9 @@ local function cloudModel()
 end
 
 -- Do HMC inference on the model
-local numsamps = 100
+local numsamps = 10
 local verbose = true
-local temp = 10.0
+local temp = 1000.0
 local kernel = HMC({numSteps=20})
 local scheduleFn = macro(function(iter, currTrace)
   return quote
@@ -83,4 +72,5 @@ local terra doInference()
 end
 local samples = m.gc(doInference())
 local moviename = arg[1] or "movie"
-U.renderSamplesToMovie(samples, moviename, DoubleGrid)
+local gridSaver = U.GridSaver(real, U.TrivialColorizer)
+U.renderSamplesToMovie(samples, moviename, gridSaver)
