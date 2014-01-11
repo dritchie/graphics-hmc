@@ -70,7 +70,7 @@ local ConvSimConstraint = templatize(function(real)
 							var _x = [double](x) - tx
 							var _y = [double](y) - ty
 							if _x >= 0.0 and _x <= [double](tgtImage.width-1) and
-							   _y >= 0.0 and _y <= [double](tgtImage.height-1) then
+								 _y >= 0.0 and _y <= [double](tgtImage.height-1) then
 								-- var pix = bilerp(tgtImage, _x, _y, Vec2)
 								var pix = tgtImage([int](_x), [int](_y))
 								var color = pix(0)
@@ -139,6 +139,36 @@ local DirectSimConstraint = templatize(function(real)
 	end
 end)
 
+-- Returns total difference between image and tgtImage outside a +/- hDelta threshold
+local DirectSimDeltaConstraint = templatize(function(real)
+	local RealGrid = image.Image(real, 1)
+	local DoubleGrid = image.Image(double, 2)
+	return function(hDelta)
+		return terra(image: &RealGrid, tgtImage: &DoubleGrid)
+			var err = real(0.0)
+			for y = 0, image.height do
+				for x = 0, image.width do
+					var tH = 0.0
+					if x < tgtImage.width and y < tgtImage.height then
+						tH = tgtImage(x, y)(0)
+					end
+					var currH = image(x, y)(0)
+					var hmax = tH + hDelta
+					var hmin = tH - hDelta
+					var d = currH - currH --gets type right but TODO: properly initialize to 0
+					if (currH > hmax) then
+						d = currH - hmax
+					elseif (currH < hmin) then
+						d = currH - hmin
+					end
+					err = err + (d * d)
+				end
+			end
+			return err
+		end
+	end
+end)
+
 -- Transformed similarity constraint: Evaluate constraint for a single
 --    transform of the target image, but this transform is controlled
 --    via random variables
@@ -185,6 +215,7 @@ end)
 return
 {
 	DirectSimConstraint = DirectSimConstraint,
+	DirectSimDeltaConstraint = DirectSimDeltaConstraint,
 	ConvolutionalSimConstraint = ConvSimConstraint,
 	TransformedSimConstraint = TransformedSimConstraint
 }

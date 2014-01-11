@@ -31,6 +31,8 @@ local function cloudModel()
   
   local imageTemp = 0.001
   local Vec2 = Vec(real, 2)
+  local DeltaSimConstraint = imageConstraints.DirectSimDeltaConstraint(real)
+  local deltaSim = DeltaSimConstraint(0.1)
   local TransformedSimConstraint = imageConstraints.TransformedSimConstraint(real)
   local tgtImagePenaltyFn = TransformedSimConstraint(tgtImage, imageTemp)
   local rescale = macro(function(x, lo, hi)
@@ -38,10 +40,13 @@ local function cloudModel()
   end)
 
   local size = 128
-  local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=32.0}
+  local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=64.0}
   return terra()
     -- var lattice = [U.TurbulenceLattice(real, params)](params.width, params.height, params.turbSize)
-    var lattice = [U.TurbulenceSubSampledLattice(real)](params.width, params.height, params.turbSize)
+    -- var dE = deltaSim(&lattice, &tgtImage)
+    -- factor(- 0.5 * dE * 100)
+    
+    var lattice = [U.TurbulenceBySubdivLattice(real)](params.width, params.height, params.turbSize)
     var halfw = (tgtImage.width/2.0) / params.width
     var halfh = (tgtImage.height/2.0) / params.height
     var cx = uniform(0.0, 1.0, {structural=false, hasPrior=true, lowerBound=0.0, upperBound=1.0})
@@ -57,7 +62,7 @@ local function cloudModel()
 end
 
 -- Do HMC inference on the model
-local numsamps = 10
+local numsamps = 100
 local verbose = true
 local temp = 1000.0
 local kernel = HMC({numSteps=20})

@@ -95,10 +95,10 @@ local TurbulenceLattice = templatize(function(real)
   end
 end)
 
--- Turbulence lattice by subsampling and weighted summing of random lattice
-local TurbulenceSubSampledLattice = templatize(function(real)
+-- Turbulence lattice by top-down summing of random grid subdivisions
+local TurbulenceBySubdivLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return terra(width: int, height: int, maxSubsampleLevel: double)
+  return terra(width: int, height: int, maxSubdivLevel: double)
     var R = [RandomLattice(real)](width, height)
     var Rprev: RealGrid -- Holds previous level's subsampled lattice
     var Rcurr: RealGrid -- Holds current level's subsampled lattice
@@ -106,7 +106,7 @@ local TurbulenceSubSampledLattice = templatize(function(real)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
     var level: double = 1.0
     Rcurr = R
-    while level <= maxSubsampleLevel do
+    while level <= maxSubdivLevel do
       -- Subsample Rprev into Rcurr
       var currWidth = width / level
       var currHeight = height / level
@@ -137,7 +137,7 @@ local TurbulenceSubSampledLattice = templatize(function(real)
     for x=0,width do
       for y=0,height do
         var val = Rturb(x, y)
-        val = 0.5 * val / maxSubsampleLevel
+        val = 0.5 * val / maxSubdivLevel
         Rturb(x, y) = val
       end
     end
@@ -347,7 +347,7 @@ return {
   bilerp = bilerp,
   RandomLattice = RandomLattice,
   TurbulenceLattice = TurbulenceLattice,
-  TurbulenceSubSampledLattice = TurbulenceSubSampledLattice,
+  TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
   MarbleLattice = MarbleLattice,
   WoodLattice = WoodLattice,
   HSLtoRGB = HSLtoRGB,
