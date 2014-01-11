@@ -103,36 +103,28 @@ local function staticsModel()
 		
 		var forces = [Vector(Vec2)].stackAlloc()
 		var pointsOfAction = [Vector(Vec2)].stackAlloc()
+		var rotCenters = [Vector(Vec2)].stackAlloc()
 		var force2point = [Vector(uint)].stackAlloc()
 
-		-- C.printf("----------------\n")
+		-- Internal forces from supports
 		for i=0,numSupports do
 			var vertBar = structure.bars:getPointer(i+1)
 			var pointOfAction = vertBar.top + (horizBar.width/2.0)*up
 			pointsOfAction:push(pointOfAction)
-			-- Two internal forces for each support: the force exerted by the bar on the support,
-			--    and the force exerted by the support on the bar
-			-- The first force has to act downward, and the second has to act upward
+			rotCenters:push(pointOfAction)
 
-			var downForce = gaussian(0.0, 100.0, {structural=false}) * up
-			var upForce = gaussian(0.0, 100.0, {structural=false}) * up
-			-- var downForce = gaussian(0.0, 100.0, {structural=false, upperBound=0.0}) * up
-			-- var upForce = gaussian(0.0, 100.0, {structural=false, lowerBound=0.0}) * up
+			var supportForce = gaussian(0.0, 1000.0, {structural=false, lowerBound=0.0}) * up
 
-			-- C.printf("f: (%g, %g)\n", ad.val(upForce(0)), ad.val(upForce(1)))
-			-- C.printf("f: (%g, %g)\n", ad.val(downForce(0)), ad.val(downForce(1)))
+			-- C.printf("f: (%g, %g)\n", ad.val(supportForce(0)), ad.val(supportForce(1)))
 
-			-- forces:push(downForce)
-			-- force2point:push(pointsOfAction.size-1)
-			forces:push(upForce)
+			forces:push(supportForce)
 			force2point:push(pointsOfAction.size-1)
 		end
 
-		-- The only external force is gravity
+		-- The only external force is gravity, which acts on the bar's center of mass
 		var hbarLength = (horizBar.top - horizBar.bot):norm()
 		var gravForce = gravityConstant * hbarLength * up
 		forces:push(gravForce)
-		-- Gravity acts on the center of mass of the horizontal bar
 		pointsOfAction:push(horizBar:centerOfMass())
 		force2point:push(pointsOfAction.size-1)
 
@@ -145,12 +137,12 @@ local function staticsModel()
 		factor(softEq(fsum(1), 0.0, 1.0))
 		-- C.printf("fsum:norm(): %g          \n", ad.val(fsum:norm()))
 
-		-- Constraint: For any given point of action, the sum of all force moments about that
-		--    point should be zero.
+		-- Constraint: For any given center of rotation, the sum of all force moments about that
+		--    point should be zero
 		var totaltsum = real(0.0)
-		for i=0,pointsOfAction.size do
+		for i=0,rotCenters.size do
 			var tsum = real(0.0)
-			var c = pointsOfAction(i)
+			var c = rotCenters(i)
 			for j=0,forces.size do
 				var f = forces(j)
 				var p = pointsOfAction(force2point(j))
@@ -168,6 +160,7 @@ local function staticsModel()
 
 		m.destruct(forces)
 		m.destruct(pointsOfAction)
+		m.destruct(rotCenters)
 		m.destruct(force2point)
 	end)
 
@@ -175,8 +168,8 @@ local function staticsModel()
 		var structure = StructureT.stackAlloc(width, height)
 
 		-- Gen horizontal bar
-		-- var horizBarLength = gaussian(60.0, 10.0, {structural=false})
-		var horizBarLength = 60.0
+		var horizBarLength = gaussian(60.0, 10.0, {structural=false, lowerBound=20.0, upperBound=100.0})
+		-- var horizBarLength = 60.0
 		var hbarLeft = horizBarCenterPos - horizBarLength/2.0
 		var hbarRight = horizBarCenterPos + horizBarLength/2.0
 		var hbarHeight = base + supportHeight + barWidth/2.0
@@ -274,11 +267,13 @@ end
 
 ----------------------------------
 local numsamps = 1000
+-- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
 local imageHeight = 250
 local kernel = HMC({numSteps=1000, verbosity=0})
+-- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
 		currTrace.temperature = temp
