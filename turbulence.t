@@ -40,7 +40,8 @@ local function cloudModel()
   local size = 128
   local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=32.0}
   return terra()
-    var lattice = [U.TurbulenceLattice(real, params)](params.width, params.height, params.turbSize)
+    -- var lattice = [U.TurbulenceLattice(real, params)](params.width, params.height, params.turbSize)
+    var lattice = [U.TurbulenceSubSampledLattice(real)](params.width, params.height, params.turbSize)
     var halfw = (tgtImage.width/2.0) / params.width
     var halfh = (tgtImage.height/2.0) / params.height
     var cx = uniform(0.0, 1.0, {structural=false, hasPrior=true, lowerBound=0.0, upperBound=1.0})
@@ -48,7 +49,7 @@ local function cloudModel()
     cx = rescale(cx, halfw, 1.0-halfw)
     cy = rescale(cy, halfh, 1.0-halfh)
     var center = Vec2.stackAlloc(cx, cy)
-    C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+    C.printf("(%g, %g)\n", ad.val(cx), ad.val(cy))
     factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
 
     return lattice
@@ -72,5 +73,5 @@ local terra doInference()
 end
 local samples = m.gc(doInference())
 local moviename = arg[1] or "movie"
-local gridSaver = U.GridSaver(real, U.TrivialColorizer)
+local gridSaver = U.GridSaver(real, U.LightnessColorizer)
 U.renderSamplesToMovie(samples, moviename, gridSaver)

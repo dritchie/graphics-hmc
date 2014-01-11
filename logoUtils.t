@@ -29,12 +29,18 @@ local ease = macro(function(lo, hi, x)
   end
 end)
 -- x and y may not be ints, and may be dual nums
-local bilerp = macro(function(image, x, y)
+local bilerp = macro(function(image, x, y, s)
+  if not s then s = 1.0 end
   return quote
-    var x0 = [int](ad.math.floor(ad.val(x)))
-    var x1 = [int](ad.math.ceil(ad.val(x)))
-    var y0 = [int](ad.math.floor(ad.val(y)))
-    var y1 = [int](ad.math.ceil(ad.val(y)))
+    var step: double = s
+    var width: int = image.width
+    var height: int = image.height
+    -- C.printf("step=%f,w=%d,h=%d\n",step,width,height)
+    var x0 = [int](ad.math.floor(ad.val(x)) % width)
+    var x1 = [int](ad.math.floor(ad.val(x + step)) % width)
+    var y0 = [int](ad.math.floor(ad.val(y)) % height)
+    var y1 = [int](ad.math.floor(ad.val(y + step)) % height)
+    -- C.printf("(%d,%d),(%d,%d)\n",x0,y0,x1,y1)
     var tx = x - [double](x0)
     var ty = y - [double](y0)
     var v00 = image(x0, y0)
@@ -92,24 +98,50 @@ end)
 -- Turbulence lattice by subsampling and weighted summing of random lattice
 local TurbulenceSubSampledLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  local p = params
-  return terra(width: int, height: int, maxSubsampleStep: double)
+  return terra(width: int, height: int, maxSubsampleLevel: double)
     var R = [RandomLattice(real)](width, height)
-    var Rturb = RealGrid.stackAlloc(width, height)
+    var Rprev: RealGrid -- Holds previous level's subsampled lattice
+    var Rcurr: RealGrid -- Holds current level's subsampled lattice
+    var Rturb = RealGrid.stackAlloc(width, height) -- Output turbulence lattice
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
-    var step = maxSubsampleStep
-    while step >= 1.0 do
-      for x=0,width,step do
-        for y=0,height,step do
-          var val = zero
-          var pix = R(x, y) --bilerp(R, x / zoom, y / zoom)
-          val = val + step * pix
-          val = 0.5 * val / maxSubsampleStep
+    var level: double = 1.0
+    Rcurr = R
+    while level <= maxSubsampleLevel do
+      -- Subsample Rprev into Rcurr
+      var currWidth = width / level
+      var currHeight = height / level
+      Rprev = Rcurr
+      Rcurr = RealGrid.stackAlloc(currWidth, currHeight)
+      for x=0,currWidth do
+        for y=0,currHeight do
+          var xPrev = x * 2
+          var yPrev = y * 2
+          var pix = bilerp(Rprev, xPrev, yPrev)
+          Rcurr(x, y) = pix
+        end
+      end
+
+      -- Add weighted Rcurr into Rturb
+      for x=0,width do
+        for y=0,height do
+          var val = Rturb(x, y)
+          var pix = bilerp(Rcurr, x / level, y / level)
+          val = val + level * pix
           Rturb(x, y) = val
         end
       end
-      step = step / 2.0
+      level = level * 2.0
     end
+
+    -- Normalize Rturb values
+    for x=0,width do
+      for y=0,height do
+        var val = Rturb(x, y)
+        val = 0.5 * val / maxSubsampleLevel
+        Rturb(x, y) = val
+      end
+    end
+
     return Rturb
   end
 end)
