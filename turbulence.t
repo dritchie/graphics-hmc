@@ -23,7 +23,7 @@ local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 -- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/cal_50_40.png")
 -- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/loop_alpha_100_100.png")
-local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_68_100.png")
+local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
 -- local params = {size=512, xPeriod = 5.0, yPeriod = 10.0, xyPeriod = 12.0, turbPower = 0.1, turbSize = 32.0}
 -- U.testTurbulence(params, "renders/test.png")
@@ -41,12 +41,12 @@ local function cloudModel()
     return `lo + x*(hi-lo)
   end)
 
-  local size = 256
+  local size = 128
   local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=64.0}
   return terra()
     -- var lattice = [U.TurbulenceLattice(real)](params.width, params.height, maxSubdiv)
     
-    var maxSubdiv = 6 -- 2^6 = 64
+    var maxSubdiv = 5 -- 2^6 = 64
     var lattice = [U.TurbulenceBySubdivLattice(real)](params.width, params.height, maxSubdiv)
     
     var halfw = (tgtImage.width/2.0) / params.width
@@ -70,7 +70,7 @@ end
 -- Do HMC inference on the model
 local numsamps = 100
 local verbose = true
-local temp = 1000.0
+local temp = 10000.0
 local kernel = HMC({numSteps=20})
 local scheduleFn = macro(function(iter, currTrace)
   return quote
