@@ -191,7 +191,6 @@ local TransformedSimConstraint = templatize(function(real)
 					if (_x >= 0.0 and _x <= [double](tgtImage.width-1) and
 						_y >= 0.0 and _y <= [double](tgtImage.height-1)) then
 						var pix = bilerp(tgtImage, _x, _y, Vec2)
-						-- var pix = tgtImage([int](ad.val(_x)), [int](ad.val(_y)))
 						var color = pix(0)
 						var alpha = pix(1)
 						if alpha > 0.0 then
@@ -200,6 +199,14 @@ local TransformedSimConstraint = templatize(function(real)
 							err = err + localerr
 							totalWeight = totalWeight + alpha
 						end
+					else
+						-- Assume zero target outside target image
+						var color = real(0.0)
+						var alpha = real(1.0)
+						var localerr = [rand.gaussian_logprob(real)](image(x,y)(0), color, softness)
+						localerr = localerr*alpha
+						err = err + localerr
+						totalWeight = totalWeight + alpha
 					end
 				end
 			end

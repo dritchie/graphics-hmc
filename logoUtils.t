@@ -9,6 +9,7 @@ local templatize = terralib.require("templatize")
 local Vec = terralib.require("linalg").Vec
 local ad = terralib.require("ad")
 local rand = terralib.require("prob.random")
+local Vector = terralib.require("vector")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -29,17 +30,13 @@ local ease = macro(function(lo, hi, x)
   end
 end)
 -- x and y may not be ints, and may be dual nums
-local bilerp = macro(function(image, x, y, s)
-  if not s then s = 1.0 end
+local bilerp = macro(function(image, x, y)
   return quote
-    var step: double = s
-    var width: int = image.width
-    var height: int = image.height
     -- C.printf("step=%f,w=%d,h=%d\n",step,width,height)
-    var x0 = [int](ad.math.floor(ad.val(x)) % width)
-    var x1 = [int](ad.math.floor(ad.val(x + step)) % width)
-    var y0 = [int](ad.math.floor(ad.val(y)) % height)
-    var y1 = [int](ad.math.floor(ad.val(y + step)) % height)
+    var x0 = [int](ad.math.floor(ad.val(x)))
+    var x1 = [int](ad.math.ceil(ad.val(x)))
+    var y0 = [int](ad.math.floor(ad.val(y)))
+    var y1 = [int](ad.math.ceil(ad.val(y)))
     -- C.printf("(%d,%d),(%d,%d)\n",x0,y0,x1,y1)
     var tx = x - [double](x0)
     var ty = y - [double](y0)
@@ -98,50 +95,38 @@ end)
 -- Turbulence lattice by top-down summing of random grid subdivisions
 local TurbulenceBySubdivLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
-  return terra(width: int, height: int, maxSubdivLevel: double)
-    var R = [RandomLattice(real)](width, height)
-    var Rprev: RealGrid -- Holds previous level's subsampled lattice
-    var Rcurr: RealGrid -- Holds current level's subsampled lattice
-    var Rturb = RealGrid.stackAlloc(width, height) -- Output turbulence lattice
-    var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
-    var level: double = 1.0
-    Rcurr = R
-    while level <= maxSubdivLevel do
-      -- Subsample Rprev into Rcurr
-      var currWidth = width / level
-      var currHeight = height / level
-      Rprev = Rcurr
-      Rcurr = RealGrid.stackAlloc(currWidth, currHeight)
-      for x=0,currWidth do
-        for y=0,currHeight do
-          var xPrev = x * 2
-          var yPrev = y * 2
-          var pix = bilerp(Rprev, xPrev, yPrev)
-          Rcurr(x, y) = pix
-        end
-      end
+  return terra(width: int, height: int, maxSubdivLevel: int)
+    -- Create random lattices for all subdivision levels
+    var Rs: Vector(RealGrid)
+    m.init(Rs)
+    for i=0,maxSubdivLevel do
+      var subdivFactor = ad.math.pow(2, i)
+      var currW = [int](ad.math.ceil(width / [double](subdivFactor))) + 1
+      var currH = [int](ad.math.ceil(height / [double](subdivFactor))) + 1
+      Rs:push([RandomLattice(real)](currW, currH))
+    end
 
-      -- Add weighted Rcurr into Rturb
+    -- Sum lattices together into result lattice
+    var maxSubdivFactor = ad.math.pow(2, maxSubdivLevel) -- for normalization
+    var Rturb = RealGrid.stackAlloc(width, height)
+    var first = Rs:getPointer(0)(0, 0)
+    var zero = first - first -- Get zero of lattice element type
+    for y=0,height do
       for x=0,width do
-        for y=0,height do
-          var val = Rturb(x, y)
-          var pix = bilerp(Rcurr, x / level, y / level)
-          val = val + level * pix
-          Rturb(x, y) = val
+        var val = zero
+        var subdivFactor = 1.0
+        for i=0,maxSubdivLevel do
+          var xi = x / subdivFactor
+          var yi = y / subdivFactor
+          var Ri = Rs:getPointer(i)
+          var pix = bilerp(@Ri, xi, yi) --Ri(xi, yi)
+          val = val + subdivFactor * pix
+          subdivFactor = subdivFactor * 2.0
         end
-      end
-      level = level * 2.0
-    end
-
-    -- Normalize Rturb values
-    for x=0,width do
-      for y=0,height do
-        var val = Rturb(x, y)
-        val = 0.5 * val / maxSubdivLevel
-        Rturb(x, y) = val
+        Rturb(x, y) = (0.5 / maxSubdivFactor) * val  -- normalization
       end
     end
-
+    m.destruct(Rs)
     return Rturb
   end
 end)
