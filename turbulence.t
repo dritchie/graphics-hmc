@@ -22,10 +22,10 @@ local RGBImage = image.Image(double, 3)
 local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 -- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/cal_50_40.png")
--- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/loop_alpha_100_100.png")
+-- local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/loop_alpha_50_50.png")
 local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
 
--- local params = {size=512, xPeriod = 5.0, yPeriod = 10.0, xyPeriod = 12.0, turbPower = 0.1, turbSize = 32.0}
+-- local params = {size=512, xPeriod = 5.0, yPeriod = 10.0, xyPeriod = 12.0, turbPower = 0.1, turbSize = 6.0}
 -- U.testTurbulence(params, "renders/test.png")
 
 local function cloudModel()
@@ -44,11 +44,11 @@ local function cloudModel()
   local size = 128
   local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=64.0}
   return terra()
+    
+    var maxSubdiv: int = 2 -- 2^6 = 64
     -- var lattice = [U.TurbulenceLattice(real)](params.width, params.height, maxSubdiv)
-    
-    var maxSubdiv = 5 -- 2^6 = 64
-    var lattice = [U.TurbulenceBySubdivLattice(real)](params.width, params.height, maxSubdiv)
-    
+    var lattice = [U.TurbulenceBySubsampleLattice(real)](params.width, params.height, maxSubdiv)
+
     var halfw = (tgtImage.width/2.0) / params.width
     var halfh = (tgtImage.height/2.0) / params.height
     var cx = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
@@ -57,8 +57,8 @@ local function cloudModel()
     cy = rescale(cy, halfh, 1.0-halfh)
     var center = Vec2.stackAlloc(cx, cy)
     C.printf("(%g, %g)\n", ad.val(cx), ad.val(cy))
-    factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
     
+    factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
     -- var err = deltaSim(&lattice, &tgtImage)
     -- var c = 100
     -- factor(- c * err)
@@ -71,7 +71,7 @@ end
 local numsamps = 100
 local verbose = true
 local temp = 10000.0
-local kernel = HMC({numSteps=20})
+local kernel = HMC({numSteps=1})
 local scheduleFn = macro(function(iter, currTrace)
   return quote
     currTrace.temperature = temp

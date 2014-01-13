@@ -30,7 +30,7 @@ local ease = macro(function(lo, hi, x)
   end
 end)
 -- x and y may not be ints, and may be dual nums
-local bilerp = macro(function(image, x, y)
+local bilerp = macro(function(image, x, y, VecT)
   return quote
     -- C.printf("step=%f,w=%d,h=%d\n",step,width,height)
     var x0 = [int](ad.math.floor(ad.val(x)))
@@ -40,10 +40,10 @@ local bilerp = macro(function(image, x, y)
     -- C.printf("(%d,%d),(%d,%d)\n",x0,y0,x1,y1)
     var tx = x - [double](x0)
     var ty = y - [double](y0)
-    var v00 = image(x0, y0)
-    var v01 = image(x0, y1)
-    var v10 = image(x1, y0)
-    var v11 = image(x1, y1)
+    var v00 = VecT(image(x0, y0))
+    var v01 = VecT(image(x0, y1))
+    var v10 = VecT(image(x1, y0))
+    var v11 = VecT(image(x1, y1))
     -- var v0 = lerp(v00, v01, ty)
     -- var v1 = lerp(v10, v11, ty)
     var v0 = ease(v00, v01, ty)
@@ -71,6 +71,7 @@ end)
 -- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
 local TurbulenceLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
+  local Vec1 = Vec(real, 1)
   return terra(width: int, height: int, maxZoom: double)
     var R = [RandomLattice(real)](width, height)
     var Rturb = RealGrid.stackAlloc(width, height)
@@ -80,7 +81,7 @@ local TurbulenceLattice = templatize(function(real)
         var val = zero
         var zoom = maxZoom
         while zoom >= 1.0 do
-          var pix = bilerp(R, x / zoom, y / zoom)
+          var pix = bilerp(R, x / zoom, y / zoom, Vec1)
           val = val + zoom * pix
           zoom = zoom / 2.0
         end
@@ -95,6 +96,8 @@ end)
 -- Turbulence lattice by top-down summing of random grid subdivisions
 local TurbulenceBySubdivLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
+  local DoubleAlphaGrid = image.Image(double, 2)
+  local Vec1 = Vec(real, 1)
   return terra(width: int, height: int, maxSubdivLevel: int)
     -- Create random lattices for all subdivision levels
     var Rs: Vector(RealGrid)
@@ -119,7 +122,7 @@ local TurbulenceBySubdivLattice = templatize(function(real)
           var xi = x / subdivFactor
           var yi = y / subdivFactor
           var Ri = Rs:getPointer(i)
-          var pix = bilerp(@Ri, xi, yi) --Ri(xi, yi)
+          var pix = bilerp(@Ri, xi, yi, Vec1) --Ri(xi, yi)
           val = val + subdivFactor * pix
           subdivFactor = subdivFactor * 2.0
         end
@@ -130,6 +133,70 @@ local TurbulenceBySubdivLattice = templatize(function(real)
     return Rturb
   end
 end)
+
+-- Turbulence lattice by summing subsampled versions of a random noise grid
+local TurbulenceBySubsampleLattice = templatize(function(real)
+  local RealGrid = image.Image(real, 1)
+  local Vec1 = Vec(real, 1)
+  return terra(width: int, height: int, maxLevel: int)
+    -- Create random noise field lattice
+    var R = [RandomLattice(real)](width, height)
+
+    -- Subsample random lattice up to maxLevel
+    var Rs: Vector(RealGrid)
+    m.init(Rs)
+    -- var framename : int8[1024]
+    for i=0,maxLevel do
+      var subdivFactor = ad.math.pow(2.0, double(i))
+      var currW = [int](ad.math.ceil(width / [double](subdivFactor))) + 1
+      var currH = [int](ad.math.ceil(height / [double](subdivFactor))) + 1
+      var Ri = RealGrid.stackAlloc(currW, currH)
+      for y=0,currH do
+        for x=0,currW do
+            var u = x / double(currW)
+            var v = y / double(currH)
+            var xR = u * (width - 1)
+            var yR = v * (height - 1)
+            -- if xR < 0.0 or xR > width then
+            --   C.printf("Invalid xR=%f for w=%d\n", xR, width)
+            -- end
+            -- if yR < 0.0 or yR > height then
+            --   C.printf("Invalid yR=%f for h=%d\n", yR, height)
+            -- end
+            var pix = bilerp(R, xR, yR, Vec1)
+            Ri(x, y) = pix
+        end
+      end
+      Rs:push(Ri)
+    end
+
+    -- Sum sub-sampled versions of lattice into result lattice
+    var maxSubdivFactor = ad.math.pow(2.0, maxLevel) -- for normalization
+    var Rturb = RealGrid.stackAlloc(width, height)
+    var first = Rs:getPointer(0)(0, 0)
+    var zero = first - first -- Get zero of lattice element type
+    for y=0,height do
+      for x=0,width do
+        var val = zero
+        var subdivFactor = 1.0
+        for i=0,maxLevel do
+          var Ri = Rs:getPointer(i)
+          var xi = (x / double(width)) * (Ri.width - 1)
+          var yi = (y / double(height)) * (Ri.height - 1)
+          var pix = bilerp(@Ri, xi, yi, Vec1)
+          val = val + subdivFactor * pix
+          subdivFactor = subdivFactor * 2.0
+        end
+        var valNormed = (0.5 / maxSubdivFactor) * val -- normalization
+        Rturb(x, y) = valNormed
+      end
+    end
+
+    m.destruct(Rs)
+    return Rturb
+  end
+end)
+
 
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
 local MarbleLattice = templatize(function(real, params)
@@ -300,7 +367,7 @@ end
 local testTurbulence = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
-    var lattice = [TurbulenceLattice(real)](params.size, params.size, params.turbSize)
+    var lattice = [TurbulenceBySubsampleLattice(real)](params.size, params.size, params.turbSize)
     [GridSaver(real, LightnessColorizer)](&lattice, imgFilename)
   end
   test()
@@ -333,6 +400,7 @@ return {
   RandomLattice = RandomLattice,
   TurbulenceLattice = TurbulenceLattice,
   TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
+  TurbulenceBySubsampleLattice = TurbulenceBySubsampleLattice,
   MarbleLattice = MarbleLattice,
   WoodLattice = WoodLattice,
   HSLtoRGB = HSLtoRGB,
