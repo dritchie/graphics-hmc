@@ -27,11 +27,15 @@ local Block = templatize(function(real)
 	local struct BlockT
 	{
 		centerOfMass: Vec2,
+		length: real,
+		height: real,
 		halfLength: real,
 		halfHeight: real
 	}
 	terra BlockT:__construct(com: Vec2, length: real, height: real) : {}
 		self.centerOfMass = com
+		self.length = length
+		self.height = height
 		self.halfLength = 0.5*length
 		self.halfHeight = 0.5*height
 	end
@@ -42,6 +46,10 @@ local Block = templatize(function(real)
 	terra BlockT:bottom() return self.centerOfMass(1) - self.halfHeight end
 	terra BlockT:left() return self.centerOfMass(0) - self.halfLength end
 	terra BlockT:right() return self.centerOfMass(0) + self.halfLength end
+	terra BlockT:mass(density: real) return self.length * self.height * density end
+	terra BlockT:weight(density: real, gravMag: real)
+		return self:mass(density) * gravMag
+	end
 	m.addConstructors(BlockT)
 	return BlockT
 end)
@@ -88,9 +96,9 @@ local function stackingModel()
 	local blockMaxLength = `40.0
 	local blockMinHeight = `5.0
 	local blockMaxHeight = `10.0
-	local blockDensity = 0.1
-	local numBlocks = 3
-	local gravityConstant = `-9.8
+	local blockDensity = `0.1
+	local numBlocks = 6
+	local gravityConstant = `9.8
 
 	local Vec2 = Vec(real, 2)
 	local BlockT = Block(real)
@@ -104,13 +112,102 @@ local function stackingModel()
 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
 	end)
 
-	local terra torque(force: Vec2, pointOfAction: Vec2, centerOfRotation: Vec2)
-		var d = pointOfAction - centerOfRotation
-		return force(0)*d(1) - force(1)*d(0)
+	-- A force is defined by its vector direction/magnitude and the point on
+	--    which it acts
+	local struct Force { vec: Vec2, point: Vec2 }
+
+	local genForce = pfn(terra(block: &BlockT, point: Vec2, dir: Vec2)
+		-- Variance for the force magnitude is proportional the force of gravity
+		--    on this block
+		-- TODO: Does this heuristic work? Or does it make things weird?
+		-- var variance = block:weight(blockDensity, gravityConstant)
+		var variance = 100.0
+		var forceMag = gaussian(0.0, variance, {structural=false, lowerBound=0.0})
+		return Force { forceMag * dir, point }
+	end)
+
+	local terra torque(force: Force, centerOfRotation: Vec2)
+		var d = force.point - centerOfRotation
+		return force.vec(0)*d(1) - force.vec(1)*d(0)
 	end
 
-	-- local stabilityConstraint = pfn(terra(structure: &StructureT)
-	-- end)
+	local stabilityConstraint = pfn(terra(structure: &StructureT)
+		var up = Vec2.stackAlloc(0.0, 1.0)
+		var down = -up
+		var forces = [Vector(Force)].stackAlloc()
+		var centersOfRotation = [Vector(Vec2)].stackAlloc()
+
+		-- Enforce stability for all blocks except the bottom block
+		--    (which is stable due to resting on the ground), and the
+		--    top block (which is stable by construction)
+		for i=1,structure.blocks.size-1 do
+			forces:clear()
+			centersOfRotation:clear()
+			var block = structure.blocks:getPointer(i)
+
+			-- Generate upward forces due to the block below us
+			var belowBlock = structure.blocks:getPointer(i-1)
+			var upForceY = block:bottom()
+			var upForceX1 = ad.math.fmax(block:left(), belowBlock:left())
+			var upForceX2 = ad.math.fmin(block:right(), belowBlock:right())
+			var upPos1 = Vec2.stackAlloc(upForceX1, upForceY)
+			var upPos2 = Vec2.stackAlloc(upForceX2, upForceY)
+			forces:push(genForce(block, upPos1, up))
+			forces:push(genForce(block, upPos2, up))
+
+			-- Generate downward forces due to the block above us
+			var aboveBlock = structure.blocks:getPointer(i+1)
+			var downForceY = block:top()
+			var downForceX1 = ad.math.fmax(block:left(), aboveBlock:left())
+			var downForceX2 = ad.math.fmin(block:right(), aboveBlock:right())
+			var downPos1 = Vec2.stackAlloc(downForceX1, downForceY)
+			var downPos2 = Vec2.stackAlloc(downForceX2, downForceY)
+			forces:push(genForce(block, downPos1, down))
+			forces:push(genForce(block, downPos2, down))
+
+			-- C.printf("----------------\n")
+			-- C.printf("%g, %g, %g, %g\n",
+			-- 	ad.val(forces(0).vec(1)), ad.val(forces(1).vec(1)), ad.val(forces(2).vec(1)), ad.val(forces(3).vec(1)))
+			
+			-- Account for gravity
+			forces:push(Force { block:weight(blockDensity, gravityConstant)*down,
+								block.centerOfMass })
+
+			-- Determine centers of rotation about which to calculate torque:
+			--    We have four unknown forces.
+			--    This requires force balance eqn. + 3 torque balance eqns.
+			--    In additional to c.o.m., we'll use the two bottom contacts
+			centersOfRotation:push(block.centerOfMass)
+			centersOfRotation:push(upPos1)
+			centersOfRotation:push(upPos2)
+
+			-- Enforce force balance
+			var totalForce = real(0.0)
+			for i=0,forces.size do
+				-- Forces are all vertical, so we just sum up the y component
+				totalForce = totalForce + forces(i).vec(1)
+			end
+			-- C.printf("totalForce: %g\n", ad.val(totalForce))
+			factor(softEq(totalForce, 0.0, 1.0))
+
+			-- Enforce torque balance
+			for c=0,centersOfRotation.size do
+				var totalTorque = real(0.0)
+				for i=0,forces.size do
+					var t = torque(forces(i), centersOfRotation(c))
+					totalTorque = totalTorque + t
+				end
+				factor(softEq(totalTorque, 0.0, 1.0))
+			end
+		end
+
+		m.destruct(forces)
+		m.destruct(centersOfRotation)
+	end)
+
+	local rescale = macro(function(x, lo, hi)
+		return `lo + (hi - lo) * x
+	end)
 
 	return terra()
 		var structure = StructureT.stackAlloc(roomWidth, roomHeight)
@@ -131,10 +228,13 @@ local function stackingModel()
 			var y = supportBlock:top() + 0.5*height
 			var xlo = supportBlock:left()
 			var xhi = supportBlock:right()
-			var x = boundedUniform(xlo, xhi)
+			var x = rescale(boundedUniform(0.0, 1.0), xlo, xhi)
 			var com = Vec2.stackAlloc(x, y)
 			structure.blocks:push(BlockT.stackAlloc(com, length, height))
 		end
+
+		-- Enforce stability
+		stabilityConstraint(&structure)
 
 		return structure
 	end
@@ -217,7 +317,7 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 end
 
 ----------------------------------
-local numsamps = 1000
+local numsamps = 2000
 -- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
@@ -232,8 +332,8 @@ local scheduleFn = macro(function(iter, currTrace)
 end)
 kernel = Schedule(kernel, scheduleFn)
 local terra doInference()
-	-- return [mcmc(stackingModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	return [forwardSample(stackingModel, numsamps)]
+	return [mcmc(stackingModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	-- return [forwardSample(stackingModel, numsamps)]
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
