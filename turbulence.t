@@ -45,7 +45,7 @@ local function cloudModel()
   local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=64.0}
   return terra()
     
-    var maxSubdiv: int = 2 -- 2^6 = 64
+    var maxSubdiv: int = 5 -- 2^6 = 64
     -- var lattice = [U.TurbulenceLattice(real)](params.width, params.height, maxSubdiv)
     var lattice = [U.TurbulenceBySubsampleLattice(real)](params.width, params.height, maxSubdiv)
 

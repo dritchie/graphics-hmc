@@ -199,14 +199,14 @@ local TransformedSimConstraint = templatize(function(real)
 							err = err + localerr
 							totalWeight = totalWeight + alpha
 						end
-					-- else
-					-- 	-- Assume zero target outside target image
-					-- 	var color = real(0.0)
-					-- 	var alpha = real(1.0)
-					-- 	var localerr = [rand.gaussian_logprob(real)](image(x,y)(0), color, softness)
-					-- 	localerr = localerr*alpha
-					-- 	err = err + localerr
-					-- 	totalWeight = totalWeight + alpha
+					else
+						-- Assume zero target outside target image
+						var color = real(0.0)
+						var alpha = real(1.0)
+						var localerr = [rand.gaussian_logprob(real)](image(x,y)(0), color, softness)
+						localerr = localerr*alpha
+						err = err + localerr
+						totalWeight = totalWeight + alpha
 					end
 				end
 			end

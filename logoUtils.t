@@ -72,7 +72,8 @@ end)
 local TurbulenceLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
-  return terra(width: int, height: int, maxZoom: double)
+  return terra(width: int, height: int, maxZoomLevel: double)
+    var maxZoom: double = ad.math.pow(2.0, maxZoomLevel)
     var R = [RandomLattice(real)](width, height)
     var Rturb = RealGrid.stackAlloc(width, height)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
@@ -139,17 +140,14 @@ local TurbulenceBySubsampleLattice = templatize(function(real)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
   return terra(width: int, height: int, maxLevel: int)
-    -- Create random noise field lattice
+    -- Create random noise field lattice and subsample up to maxLevel
     var R = [RandomLattice(real)](width, height)
-
-    -- Subsample random lattice up to maxLevel
     var Rs: Vector(RealGrid)
     m.init(Rs)
-    -- var framename : int8[1024]
     for i=0,maxLevel do
-      var subdivFactor = ad.math.pow(2.0, double(i))
-      var currW = [int](ad.math.ceil(width / [double](subdivFactor))) + 1
-      var currH = [int](ad.math.ceil(height / [double](subdivFactor))) + 1
+      var subdivFactor = [double](ad.math.pow(2.0, double(i)))
+      var currW = [int](ad.math.ceil(width / subdivFactor)) + 1
+      var currH = [int](ad.math.ceil(height / subdivFactor)) + 1
       var Ri = RealGrid.stackAlloc(currW, currH)
       for y=0,currH do
         for x=0,currW do
@@ -157,14 +155,7 @@ local TurbulenceBySubsampleLattice = templatize(function(real)
             var v = y / double(currH)
             var xR = u * (width - 1)
             var yR = v * (height - 1)
-            -- if xR < 0.0 or xR > width then
-            --   C.printf("Invalid xR=%f for w=%d\n", xR, width)
-            -- end
-            -- if yR < 0.0 or yR > height then
-            --   C.printf("Invalid yR=%f for h=%d\n", yR, height)
-            -- end
-            var pix = bilerp(R, xR, yR, Vec1)
-            Ri(x, y) = pix
+            Ri(x, y) = bilerp(R, xR, yR, Vec1)
         end
       end
       Rs:push(Ri)
