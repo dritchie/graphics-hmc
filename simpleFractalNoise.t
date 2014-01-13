@@ -23,7 +23,8 @@ local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfor
 local size = 80
 local function fractalSplineModel()
 
-	local splineTemp = 0.25
+	-- local splineTemp = 100.0
+	local splineTemp = 1.0
 	local imageTemp = 0.005
 	local rigidity = 1.0
 	local tension = 0.5
@@ -37,26 +38,7 @@ local function fractalSplineModel()
 	local softEq = macro(function(x, target, softness)
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
-	local upperBound = macro(function(val, bound, softness)
-		return quote
-			if val > bound then
-				factor(softEq(val-bound, 0.0, softness))
-			end 
-		end
-	end)
-	local lowerBound = macro(function(val, bound, softness)
-		return quote
-			if val < bound then
-				factor(softEq(bound-val, 0.0, softness))
-			end 
-		end
-	end)
-	local bound = macro(function(val, lo, hi, softness)
-		return quote
-			lowerBound(val, lo, softness)
-			upperBound(val, hi, softness)
-		end
-	end)
+
 	local clamp = macro(function(val, lo, hi)
 		return `ad.math.fmin(ad.math.fmax(val, lo), hi)
 	end)
@@ -95,12 +77,10 @@ local function fractalSplineModel()
 		-- var scale = 1.0
 		for y=0,size do
 			for x=0,size do
-				var pix = gaussian(0.0, scale, {structural=false})
-				-- var pix = uniform(-scale, scale, {structural=false, hasPrior=false})
-				lattice(x,y)(0) = logistic(pix/scale)
-				-- lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, hasPrior=false})
-				-- lattice(x,y)(0) = gaussian(0.5, 0.25, {structural=false, mass=1.0})
-				-- bound(lattice(x,y)(0), 0.0, 1.0, 0.2)
+				-- var pix = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+				var pix = ((gaussian(0.5, scale, {structural=false, lowerBound=0.0, upperBound=1.0}) - 0.5)/scale)+0.5
+				-- var pix = logistic(gaussian(0.0, scale, {structural=false})/scale)
+				lattice(x,y)(0) = pix
 			end
 		end
 		return lattice
@@ -158,7 +138,7 @@ local function fractalSplineModel()
 		var lattice = genLattice()
 
 		-- Varational spline derivative constraint
-		-- splineConstraint(&lattice)
+		splineConstraint(&lattice)
 
 		-- -- Circle constraint
 		-- var circRad = 0.1
@@ -178,22 +158,17 @@ local function fractalSplineModel()
 		-- var mcr = 0.35
 		-- factor(softEq(circCenter:distSq(mcc), mcr*mcr, 0.01))
 
-		-- General image constraint
-		var scale = 0.05
-		var halfw = (tgtImage.width/2.0) / size
-		var halfh = (tgtImage.height/2.0) / size
-		var cx = gaussian(0.0, scale, {structural=false})
-		var cy = gaussian(0.0, scale, {structural=false})
-		-- var cx = uniform(-scale, scale, {structural=false, hasPrior=false})
-		-- var cy = uniform(-scale, scale, {structural=false, hasPrior=false})
-		cx = logistic(cx/scale)
-		cy = logistic(cy/scale)
-		cx = rescale(cx, halfw, 1.0-halfw)
-		cy = rescale(cy, halfh, 1.0-halfh)
-		var center = Vec2.stackAlloc(cx, cy)
-		-- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
-		factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
-		-- factor(tgtImagePenaltyFn(&lattice, center))
+		-- -- General image constraint
+		-- var scale = 0.05
+		-- var halfw = (tgtImage.width/2.0) / size
+		-- var halfh = (tgtImage.height/2.0) / size
+		-- var cx = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+		-- var cy = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+		-- cx = rescale(cx, halfw, 1.0-halfw)
+		-- cy = rescale(cy, halfh, 1.0-halfh)
+		-- var center = Vec2.stackAlloc(cx, cy)
+		-- -- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+		-- factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
 
 		return lattice
 	end

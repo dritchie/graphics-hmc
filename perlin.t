@@ -24,7 +24,7 @@ local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfor
 
 local function perlinModel()
 
-	local size = 200
+	local size = 100
 	local scale = 16
 	local temp = 0.001
 	local RealGrid = image.Image(real, 1)
@@ -117,11 +117,11 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
 local verbose = true
-local kernel = HMC({numSteps=1})	-- Defaults to trajectories of length 1
+local kernel = HMC({numSteps=1})
 local terra doInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
-	return [mcmc(perlinModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	-- return [forwardSample(perlinModel, numsamps)]
+	-- return [mcmc(perlinModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	return [forwardSample(perlinModel, numsamps)]
 end
 -- Garbage collect the returned vector of samples
 --    (i.e. free the memory when it is safe to do so)
