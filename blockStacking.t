@@ -22,44 +22,54 @@ local RGBImage = image.Image(uint8, 3)
 
 ----------------------------------
 
-local Bar = templatize(function(real)
+local Block = templatize(function(real)
 	local Vec2 = Vec(real, 2)
-	local struct BarT
+	local struct BlockT
 	{
-		bot: Vec2,
-		top: Vec2,
-		width: real
+		centerOfMass: Vec2,
+		halfLength: real,
+		halfHeight: real
 	}
-	terra BarT:centerOfMass()
-		return 0.5*(self.bot + self.top)
+	terra BlockT:__construct(com: Vec2, length: real, height: real) : {}
+		self.centerOfMass = com
+		self.halfLength = 0.5*length
+		self.halfHeight = 0.5*height
 	end
-	return BarT
+	terra BlockT:__construct() : {}
+		self:__construct(Vec2.stackAlloc(0.0, 0.0), 0.0, 0.0)
+	end
+	terra BlockT:top() return self.centerOfMass(1) + self.halfHeight end
+	terra BlockT:bottom() return self.centerOfMass(1) - self.halfHeight end
+	terra BlockT:left() return self.centerOfMass(0) - self.halfLength end
+	terra BlockT:right() return self.centerOfMass(0) + self.halfLength end
+	m.addConstructors(BlockT)
+	return BlockT
 end)
-local BarD = Bar(double)
+local BlockD = Block(double)
 
 local Structure = templatize(function(real)
-	local BarT = Bar(real)
+	local BlockT = Block(real)
 	local struct StructureT
 	{
 		width: real,
 		height: real,
-		bars: Vector(BarT)
+		blocks: Vector(BlockT)
 	}
 	terra StructureT:__construct(w: real, h: real) : {}
 		self.width = w
 		self.height = h
-		m.init(self.bars)
+		m.init(self.blocks)
 	end
 	terra StructureT:__construct() : {}
 		self:__construct(0.0, 0.0)
 	end
 	terra StructureT:__destruct()
-		m.destruct(self.bars)
+		m.destruct(self.blocks)
 	end
 	terra StructureT:__copy(other: &StructureT)
 		self.width = other.width
 		self.height = other.height
-		self.bars = m.copy(other.bars)
+		self.blocks = m.copy(other.blocks)
 	end
 	m.addConstructors(StructureT)
 	return StructureT
@@ -69,23 +79,29 @@ local StructureD = Structure(double)
 ----------------------------------
 
 
-local function staticsModel()
-	local width = `100.0
-	local height = `50.0
-	local base = `5.0
-	local supportHeight = `15.0
-	local barWidth = `5.0
-	local horizBarCenterPos = `width/2.0
-	local numSupports = 2
+local function stackingModel()
+	local roomWidth = `100.0
+	local roomHeight = `100.0
+	local groundHeight = `2.0
+	local bottomBlockCenterX = `roomWidth/2.0
+	local blockMinLength = `10.0
+	local blockMaxLength = `40.0
+	local blockMinHeight = `5.0
+	local blockMaxHeight = `10.0
+	local blockDensity = 0.1
+	local numBlocks = 3
 	local gravityConstant = `-9.8
-	local barDensity = 0.1
 
 	local Vec2 = Vec(real, 2)
-	local BarT = Bar(real)
+	local BlockT = Block(real)
 	local StructureT = Structure(real)
 
 	local softEq = macro(function(x, target, softness)
 		return `[rand.gaussian_logprob(real)](x, target, softness)
+	end)
+
+	local boundedUniform = macro(function(lo, hi)
+		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
 	end)
 
 	local terra torque(force: Vec2, pointOfAction: Vec2, centerOfRotation: Vec2)
@@ -93,11 +109,32 @@ local function staticsModel()
 		return force(0)*d(1) - force(1)*d(0)
 	end
 
-	local stabilityConstraint = pfn(terra(structure: &StructureT)
-	end)
+	-- local stabilityConstraint = pfn(terra(structure: &StructureT)
+	-- end)
 
 	return terra()
-		var structure = StructureT.stackAlloc(width, height)
+		var structure = StructureT.stackAlloc(roomWidth, roomHeight)
+
+		-- Generate the bottom block
+		var botBlockLength = boundedUniform(blockMinLength, blockMaxLength)
+		var botBlockHeight = boundedUniform(blockMinHeight, blockMaxHeight)
+		var botBlockCenter = Vec2.stackAlloc(bottomBlockCenterX, groundHeight + botBlockHeight/2.0)
+		structure.blocks:push(BlockT.stackAlloc(botBlockCenter, botBlockLength, botBlockHeight))
+		
+		-- Generate the stack of blocks above it
+		for i=1,numBlocks do
+			var length = boundedUniform(blockMinLength, blockMaxLength)
+			var height = boundedUniform(blockMinHeight, blockMaxHeight)
+			-- This block must be 'locally stable' (the center of mass lies atop the
+			--    the block beneath this one)
+			var supportBlock = structure.blocks:getPointer(i-1)
+			var y = supportBlock:top() + 0.5*height
+			var xlo = supportBlock:left()
+			var xhi = supportBlock:right()
+			var x = boundedUniform(xlo, xhi)
+			var com = Vec2.stackAlloc(x, y)
+			structure.blocks:push(BlockT.stackAlloc(com, length, height))
+		end
 
 		return structure
 	end
@@ -106,32 +143,38 @@ end
 
 ----------------------------------
 
-local terra drawBar(bar: &BarD, color: Color3d)
-	var dir = bar.top - bar.bot
-	dir:normalize()
-	var w = bar.width / 2.0
-	var perp = Vec2d.stackAlloc(dir(1), dir(0))
-	var p0 = bar.bot - w*perp
-	var p1 = bar.bot + w*perp
-	var p2 = bar.top + w*perp
-	var p3 = bar.top - w*perp
+local terra drawBlock(block: &BlockD, color: Color3d)
+	var top = block:top()
+	var bot = block:bottom()
+	var left = block:left()
+	var right = block:right()
+	-- Draw polygon
 	gl.glColor3d(color(0), color(1), color(2))
 	gl.glBegin(gl.mGL_QUADS())
-	gl.glVertex2d(p0(0), p0(1))
-	gl.glVertex2d(p1(0), p1(1))
-	gl.glVertex2d(p2(0), p2(1))
-	gl.glVertex2d(p3(0), p3(1))
+	gl.glVertex2d(left, bot)
+	gl.glVertex2d(left, top)
+	gl.glVertex2d(right, top)
+	gl.glVertex2d(right, bot)
+	gl.glEnd()
+	-- Outline the edges in black
+	gl.glLineWidth(2.0)
+	gl.glColor3d(0.0, 0.0, 0.0)
+	gl.glBegin(gl.mGL_LINE_LOOP())
+	gl.glVertex2d(left, bot)
+	gl.glVertex2d(left, top)
+	gl.glVertex2d(right, top)
+	gl.glVertex2d(right, bot)
 	gl.glEnd()
 end
 
-local terra drawStructure(structure: &StructureD, barColor: Color3d)
+local terra drawStructure(structure: &StructureD, blockColor: Color3d)
 	gl.glMatrixMode(gl.mGL_PROJECTION())
 	gl.glLoadIdentity()
 	gl.gluOrtho2D(0, structure.width, 0, structure.height)
 	gl.glMatrixMode(gl.mGL_MODELVIEW())
 	gl.glLoadIdentity()
-	for i=0,structure.bars.size do
-		drawBar(structure.bars:getPointer(i), barColor)
+	for i=0,structure.blocks.size do
+		drawBlock(structure.blocks:getPointer(i), blockColor)
 	end
 end
 
@@ -153,14 +196,14 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 		var im = RGBImage.stackAlloc(imageWidth, imageHeight)
 		var framename: int8[1024]
 		var framenumber = 0
-		var barColor = Color3d.stackAlloc(31/255.0, 119/255.0, 180/255.0)
+		var blockColor = Color3d.stackAlloc(31/255.0, 119/255.0, 180/255.0)
 		for i=0,numsamps,frameSkip do
 			C.sprintf(framename, movieframebasename, framenumber)
 			framenumber = framenumber + 1
 			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
 			var structure = &samples(i).value
-			drawStructure(structure, barColor)
+			drawStructure(structure, blockColor)
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
 				gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
@@ -179,7 +222,7 @@ local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
-local imageHeight = 250
+local imageHeight = 500
 local kernel = HMC({numSteps=1000, verbosity=0})
 -- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
@@ -189,8 +232,8 @@ local scheduleFn = macro(function(iter, currTrace)
 end)
 kernel = Schedule(kernel, scheduleFn)
 local terra doInference()
-	return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	-- return [forwardSample(staticsModel, numsamps)]
+	-- return [mcmc(stackingModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	return [forwardSample(stackingModel, numsamps)]
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
