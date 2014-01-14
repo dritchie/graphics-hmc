@@ -20,9 +20,9 @@ local U = logoUtils()
 local DoubleGrid = image.Image(double, 1)
 local DoubleAlphaGrid = image.Image(double, 2)
 local imgS = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfordS_alpha_34_50.png")
-local imgLoop = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/loop_50_50.png")
+local imgLoop = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/loop_alpha_50_50.png")
 local imgEquals = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/equals_50_50.png")
-local imgCross = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/cross_50_50.png")
+local imgCross = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/cross_alpha_50_50.png")
 
 local function model()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
@@ -42,22 +42,27 @@ local function model()
       {temp=splineTemp, rigidity=rigidity, tension=tension})](&lattice)
 
     -- Target image constraints
-    var c1 = [imageConstraints.RandomPosTransformedSimConstraint(real,
-      {target=imgS, softness=tgtSoftness})](&lattice)
-    var c2 = [imageConstraints.RandomPosTransformedSimConstraint(real,
-      {target=imgLoop, softness=tgtSoftness})](&lattice)
-    var c3 = [imageConstraints.RandomPosTransformedSimConstraint(real,
-      {target=imgLoop, softness=tgtSoftness})](&lattice)
-    -- var c4 = [imageConstraints.RandomPosTransformedSimConstraint(real,
+    -- var c1 = [imageConstraints.RandomPosTransformedSimConstraint(real,
+    --   {target=imgS, softness=tgtSoftness})](&lattice)
+    -- var c2 = [imageConstraints.RandomPosTransformedSimConstraint(real,
+    --   {target=imgLoop, softness=tgtSoftness})](&lattice)
+    -- var c3 = [imageConstraints.RandomPosTransformedSimConstraint(real,
+    --   {target=imgLoop, softness=tgtSoftness})](&lattice)
+    var c4 = [imageConstraints.RandomPosTransformedSimConstraint(real,
+      {target=imgCross, softness=tgtSoftness})](&lattice)
+    -- var c5 = [imageConstraints.RandomPosTransformedSimConstraint(real,
     --   {target=imgCross, softness=tgtSoftness})](&lattice)
     -- C.printf("c1=(%g, %g)\tc2=(%g, %g)\n", ad.val(c1(0)), ad.val(c1(1)),
     --                                        ad.val(c2(0)), ad.val(c2(1)))
     
     -- Push apart target centers
-    var r = 0.3
-    factor(U.softEq(c1:distSq(c2), r*r, 0.01))
-    factor(U.softEq(c2:distSq(c3), r*r, 0.01))
-    factor(U.softEq(c3:distSq(c1), r*r, 0.01))
+    -- var r = 0.3
+    -- factor(U.softEq(c1:distSq(c2), r*r, 0.01))
+    -- factor(U.softEq(c2:distSq(c3), r*r, 0.01))
+    -- factor(U.softEq(c3:distSq(c1), r*r, 0.01))
+
+    -- Symmetry constraint (reflection across x=width/2)
+    -- [U.SymmetryConstraint(real, {temp=0.00001})](&lattice)
 
     return lattice
   end
@@ -68,8 +73,8 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
 local verbose = true
-local temp = 1000.0
-local kernel = HMC({numSteps=20})
+local temp = 10000.0
+local kernel = HMC({numSteps=20,stepSizeAdapt=false,stepSize=0.0001})  --verbosity=1
 local scheduleFn = macro(function(iter, currTrace)
   return quote
     currTrace.temperature = temp
@@ -83,5 +88,5 @@ local samples = m.gc(doInference())
 
 -- Render the set of gathered samples into a movie
 local moviename = arg[1] or "movie"
-local gridSaver = U.GridSaver(real, U.LightnessColorizer)
+local gridSaver = U.GridSaver(real, U.TrivialColorizer)
 U.renderSamplesToMovie(samples, moviename, gridSaver)

@@ -105,6 +105,28 @@ local SplineConstraint = templatize(function(real, params)
   end)
 end)
 
+-- Image symmetry constraint
+local SymmetryConstraint = templatize(function(real, params)
+  local RealGrid = image.Image(real, 1)
+  local temp = params.temp
+  return pfn(terra(lattice: &RealGrid)
+    var width: uint = lattice.width
+    var height: uint = lattice.height
+    var totalEnergy = real(0.0)
+    for y=1,height-1 do
+      for x=1,width-1 do
+        var x1: uint = width - x
+        var v: real = lattice(x, y)(0)
+        var v1: real = lattice(x1, y)(0)
+        var d = v - v1
+        totalEnergy = totalEnergy + (d * d)
+      end
+    end
+    C.printf("%f\n",ad.val(totalEnergy))
+    factor(-totalEnergy/(temp*(lattice.width)*(lattice.height)))
+  end)
+end)
+
 -- Generate unconstrained random lattice
 local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
@@ -335,7 +357,7 @@ end)
 local LightnessColorizer = templatize(function(real)
   local h2r = HSLtoRGB(real)
   return terra(t: real)
-    var L = 0.75 + t / 4.0
+    var L = 0.5 + t / 2.0
     var c = h2r(0.663, 1.0, L)
     return rgb2bgr(c)
   end
@@ -443,6 +465,7 @@ return {
   bilerp = bilerp,
   softEq = softEq,
   SplineConstraint = SplineConstraint,
+  SymmetryConstraint = SymmetryConstraint,
   RandomLattice = RandomLattice,
   TurbulenceLattice = TurbulenceLattice,
   TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
