@@ -23,9 +23,9 @@ local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfor
 local size = 80
 local function fractalSplineModel()
 
-	-- local splineTemp = 100.0
 	local splineTemp = 1.0
-	local imageTemp = 0.005
+	-- local imageTemp = 0.005
+	local imageTemp = 0.0025
 	local rigidity = 1.0
 	local tension = 0.5
 	local Vec2 = Vec(real, 2)
@@ -78,8 +78,8 @@ local function fractalSplineModel()
 		for y=0,size do
 			for x=0,size do
 				-- var pix = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
-				var pix = ((gaussian(0.5, scale, {structural=false, lowerBound=0.0, upperBound=1.0}) - 0.5)/scale)+0.5
-				-- var pix = logistic(gaussian(0.0, scale, {structural=false})/scale)
+				-- var pix = ((gaussian(0.5, scale, {structural=false, lowerBound=0.0, upperBound=1.0}) - 0.5)/scale)+0.5
+				var pix = logistic(gaussian(0.0, scale, {structural=false})/scale)
 				lattice(x,y)(0) = pix
 			end
 		end
@@ -158,17 +158,21 @@ local function fractalSplineModel()
 		-- var mcr = 0.35
 		-- factor(softEq(circCenter:distSq(mcc), mcr*mcr, 0.01))
 
-		-- -- General image constraint
-		-- var scale = 0.05
-		-- var halfw = (tgtImage.width/2.0) / size
-		-- var halfh = (tgtImage.height/2.0) / size
+		-- General image constraint
+		var scale = 0.01
+		var halfw = (tgtImage.width/2.0) / size
+		var halfh = (tgtImage.height/2.0) / size
 		-- var cx = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
 		-- var cy = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
-		-- cx = rescale(cx, halfw, 1.0-halfw)
-		-- cy = rescale(cy, halfh, 1.0-halfh)
-		-- var center = Vec2.stackAlloc(cx, cy)
-		-- -- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
-		-- factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
+		var cx = logistic(gaussian(0.0, scale, {structural=false})/scale)
+		var cy = logistic(gaussian(0.0, scale, {structural=false})/scale)
+		-- var cx = ((gaussian(0.5, scale, {structural=false, lowerBound=0.0, upperBound=1.0})-0.5)/scale)+0.5
+		-- var cy = ((gaussian(0.5, scale, {structural=false, lowerBound=0.0, upperBound=1.0})-0.5)/scale)+0.5
+		cx = rescale(cx, halfw, 1.0-halfw)
+		cy = rescale(cy, halfh, 1.0-halfh)
+		var center = Vec2.stackAlloc(cx, cy)
+		-- C.printf("(%g, %g)                \n", ad.val(cx), ad.val(cy))
+		factor(tgtImagePenaltyFn(&lattice, ad.val(center)))
 
 		return lattice
 	end
@@ -179,7 +183,8 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
 local verbose = true
-local temp = 1000.0
+-- local temp = 1000.0
+local temp = 5000.0
 local kernel = HMC({numSteps=20})
 
 
