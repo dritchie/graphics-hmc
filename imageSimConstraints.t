@@ -11,6 +11,15 @@ local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
 
+local logistic = macro(function(x)
+	return `1.0 / (1.0 + ad.math.exp(-x))
+end)
+
+-- 'x' assumed to be between 0 and 1
+local rescale = macro(function(x, lo, hi)
+	return `lo + x*(hi-lo)
+end)
+
 local lerp = macro(function(lo, hi, t)
 	return `(1.0-t)*lo + t*hi
 end)
@@ -219,12 +228,36 @@ local TransformedSimConstraint = templatize(function(real)
 	end
 end)
 
+-- Choose uniform position for transformed similarity constrain
+local RandomPosTransformedSimConstraint = templatize(function(real, params)
+  local RealGrid = image.Image(real, 1)
+  local Vec2 = Vec(real, 2)
+  local tgtPenaltyFn = TransformedSimConstraint(real)(params.target, params.softness)
+  return pfn(terra(lattice: &RealGrid)
+    var tgt = params.target
+    var scale = 0.05
+    var halfw = (tgt.width/2.0) / lattice.width
+    var halfh = (tgt.height/2.0) / lattice.height
+    var cx = gaussian(0.0, scale, {structural=false})
+    var cy = gaussian(0.0, scale, {structural=false})
+    cx = logistic(cx/scale)
+    cy = logistic(cy/scale)
+    cx = rescale(cx, halfw, 1.0-halfw)
+    cy = rescale(cy, halfh, 1.0-halfh)
+    var center = Vec2.stackAlloc(cx, cy)
+    -- C.printf("(%g, %g)\n", ad.val(cx), ad.val(cy))
+    factor(tgtPenaltyFn(lattice, ad.val(center)))
+    return center
+  end)
+end)
+
 return
 {
 	DirectSimConstraint = DirectSimConstraint,
 	DirectSimDeltaConstraint = DirectSimDeltaConstraint,
 	ConvolutionalSimConstraint = ConvSimConstraint,
-	TransformedSimConstraint = TransformedSimConstraint
+	TransformedSimConstraint = TransformedSimConstraint,
+	RandomPosTransformedSimConstraint = RandomPosTransformedSimConstraint
 }
 
 

@@ -58,6 +58,53 @@ local bilerp = macro(function(image, x, y, VecT)
   end
 end)
 
+local softEq = macro(function(x, target, softness)
+  return `[rand.gaussian_logprob(real)](x, target, softness)
+end)
+
+-- Variational spline smoothness constraint
+local SplineConstraint = templatize(function(real, params)
+  local RealGrid = image.Image(real, 1)
+  local temp = params.temp
+  local rigidity = params.rigidity or 1.0
+  local tension = params.tension or 0.5
+
+  -- Discrete derivatives
+  local Dx = macro(function(f, x, y, h)
+    return `(f(x+1,y) - f(x-1,y))/(2*h)
+  end)
+  local Dy = macro(function(f, x, y, h)
+    return `(f(x,y+1) - f(x,y-1))/(2*h)
+  end)
+  local Dxx = macro(function(f, x, y, h)
+    return `(f(x+1,y) - 2.0*f(x,y) + f(x-1,y))/(2*h*h)
+  end)
+  local Dyy = macro(function(f, x, y, h)
+    return `(f(x,y+1) - 2.0*f(x,y) + f(x,y-1))/(2*h*h)
+  end)
+  local Dxy = macro(function(f, x, y, h)
+    return `(f(x+1,y+1) - f(x+1,y) - f(x,y+1) + f(x,y))/(h*h)
+  end)
+
+  return pfn(terra(lattice: &RealGrid)
+    var h = 1.0 / lattice.width
+    var totalEnergy = real(0.0)
+    for y=1,lattice.height-1 do
+      for x=1,lattice.width-1 do
+        var dx = Dx(lattice, x, y, h)
+        var dy = Dy(lattice, x, y, h)
+        var dxx = Dxx(lattice, x, y, h)
+        var dyy = Dyy(lattice, x, y, h)
+        var dxy = Dxy(lattice, x, y, h)
+        var energy = 0.5 * rigidity *
+          ((1.0-tension)*(dx*dx + dy*dy) + tension*(dxx*dxx + dyy*dyy + dxy*dxy))
+        totalEnergy = totalEnergy + energy(0)
+      end
+    end
+    factor(-totalEnergy/(temp*(lattice.width-1)*(lattice.height-1)))
+  end)
+end)
+
 -- Generate unconstrained random lattice
 local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
@@ -394,6 +441,8 @@ return {
   lerp = lerp,
   ease = ease,
   bilerp = bilerp,
+  softEq = softEq,
+  SplineConstraint = SplineConstraint,
   RandomLattice = RandomLattice,
   TurbulenceLattice = TurbulenceLattice,
   TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
