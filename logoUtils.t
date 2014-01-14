@@ -18,6 +18,10 @@ local C = terralib.includecstring [[
 
 return function()
 
+local logistic = macro(function(x)
+  return `1.0 / (1.0 + ad.math.exp(-x))
+end)
+
 -- Interpolation functions
 local lerp = macro(function(lo, hi, t)
   return `(1.0-t)*lo + t*hi
@@ -58,10 +62,12 @@ end)
 local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   return pfn(terra(width: int, height: int)
+    var scale = 0.01
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
-        lattice(x,y)(0) = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0, mass=1.0})
+        lattice(x,y)(0) = logistic(gaussian(0.0, scale, {structural=false})/scale)
+        -- lattice(x,y)(0) = uniform(0.5, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0, mass=1.0})
       end
     end
     return lattice

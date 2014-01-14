@@ -31,7 +31,7 @@ local tgtImage = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/stanfor
 local function cloudModel()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
   
-  local imageTemp = 0.001
+  local imageTemp = 0.005
   local Vec2 = Vec(real, 2)
   local DeltaSimConstraint = imageConstraints.DirectSimDeltaConstraint(real)
   local deltaSim = DeltaSimConstraint(0.2)
@@ -41,11 +41,11 @@ local function cloudModel()
     return `lo + x*(hi-lo)
   end)
 
-  local size = 128
+  local size = 80
   local params = {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=5.0, turbSize=64.0}
   return terra()
     
-    var maxSubdiv: int = 5 -- 2^6 = 64
+    var maxSubdiv: int = 3 -- 2^6 = 64
     -- var lattice = [U.TurbulenceLattice(real)](params.width, params.height, maxSubdiv)
     var lattice = [U.TurbulenceBySubsampleLattice(real)](params.width, params.height, maxSubdiv)
 
@@ -70,8 +70,8 @@ end
 -- Do HMC inference on the model
 local numsamps = 100
 local verbose = true
-local temp = 10000.0
-local kernel = HMC({numSteps=1})
+local temp = 1000.0
+local kernel = HMC({numSteps=20})
 local scheduleFn = macro(function(iter, currTrace)
   return quote
     currTrace.temperature = temp
@@ -84,5 +84,5 @@ local terra doInference()
 end
 local samples = m.gc(doInference())
 local moviename = arg[1] or "movie"
-local gridSaver = U.GridSaver(real, U.LightnessColorizer)
+local gridSaver = U.GridSaver(real, U.TrivialColorizer)
 U.renderSamplesToMovie(samples, moviename, gridSaver)
