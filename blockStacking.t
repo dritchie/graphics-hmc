@@ -108,9 +108,19 @@ local function stackingModel()
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
 
-	local boundedUniform = macro(function(lo, hi)
+	local logistic = macro(function(x)
+		return `1.0 / (1.0 + ad.math.exp(-x))
+	end)
+
+	-- Option 1: use 'proper' bounds
+	local boundedVar = macro(function(lo, hi)
 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
 	end)
+	-- -- Option 2: use the scaling trick
+	-- local boundedVarScale = 0.05
+	-- local boundedVar = macro(function(lo, hi)
+	-- 	return `lo + (hi - lo) * logistic(gaussian(0.0, boundedVarScale, {structural=false})/boundedVarScale)
+	-- end)
 
 	-- A force is defined by its vector direction/magnitude and the point on
 	--    which it acts
@@ -213,22 +223,22 @@ local function stackingModel()
 		var structure = StructureT.stackAlloc(roomWidth, roomHeight)
 
 		-- Generate the bottom block
-		var botBlockLength = boundedUniform(blockMinLength, blockMaxLength)
-		var botBlockHeight = boundedUniform(blockMinHeight, blockMaxHeight)
+		var botBlockLength = boundedVar(blockMinLength, blockMaxLength)
+		var botBlockHeight = boundedVar(blockMinHeight, blockMaxHeight)
 		var botBlockCenter = Vec2.stackAlloc(bottomBlockCenterX, groundHeight + botBlockHeight/2.0)
 		structure.blocks:push(BlockT.stackAlloc(botBlockCenter, botBlockLength, botBlockHeight))
 		
 		-- Generate the stack of blocks above it
 		for i=1,numBlocks do
-			var length = boundedUniform(blockMinLength, blockMaxLength)
-			var height = boundedUniform(blockMinHeight, blockMaxHeight)
+			var length = boundedVar(blockMinLength, blockMaxLength)
+			var height = boundedVar(blockMinHeight, blockMaxHeight)
 			-- This block must be 'locally stable' (the center of mass lies atop the
 			--    the block beneath this one)
 			var supportBlock = structure.blocks:getPointer(i-1)
 			var y = supportBlock:top() + 0.5*height
 			var xlo = supportBlock:left()
 			var xhi = supportBlock:right()
-			var x = rescale(boundedUniform(0.0, 1.0), xlo, xhi)
+			var x = rescale(boundedVar(0.0, 1.0), xlo, xhi)
 			var com = Vec2.stackAlloc(x, y)
 			structure.blocks:push(BlockT.stackAlloc(com, length, height))
 		end
