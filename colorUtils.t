@@ -29,6 +29,7 @@ inline double fmax(double a, double b)
 #endif
 ]]
 
+local useRGB = false
 
 local gaussian_logprob = rand.gaussian_logprob
 
@@ -146,7 +147,12 @@ local UnaryLightnessConstraint = templatize(function(real)
 
 		var totalScore = real(0.0)
 		for i=0,pattern.numGroups do
-			var L = [RGBtoLAB(real)](pattern(i))(0)/100.0
+			var L = real(0.0)
+			if (useRGB) then
+				L = [RGBtoLAB(real)](pattern(i))(0)/100.0
+			else
+				L = pattern(i)(0)/100.0
+			end
 			var score = [gaussian_logprob(real)](L, mu, sigma)
 
 			--if it's the background allow darkness, otherwise prefer lighter colors
@@ -169,7 +175,10 @@ local UnarySaturationConstraint = templatize(function(real)
 		var sigma = 1.0
 		var totalScore = real(0.0)
 		for i=0,pattern.numGroups do
-			var lab = [RGBtoLAB(real)](pattern(i))
+			var lab = pattern(i)
+			if (useRGB) then
+				lab = [RGBtoLAB(real)](pattern(i))
+			end
 			var chroma = lab(1)*lab(1) + lab(2)*lab(2)
 			var saturation = real(0.0)
 			if ((chroma + lab(0)*lab(0)) > 0.0) then
@@ -210,8 +219,14 @@ local BinaryPerceptualConstraint = templatize(function(real)
 		var maxDist = ad.math.sqrt(100.0*100.0+200.0*200.0+200.0*200.0)
 		for i=0,pattern.adjacencies.size do
 			var adj = pattern.adjacencies:get(i)
-			var first = [RGBtoLAB(real)](pattern(adj:get(0)))
-			var second = [RGBtoLAB(real)](pattern(adj:get(1)))
+			var first = pattern(adj:get(0))
+			var second = pattern(adj:get(1))
+			
+			if (useRGB) then
+				first = [RGBtoLAB(real)](first)
+				second = [RGBtoLAB(real)](second)
+			end
+
 			var dist = first:dist(second)/maxDist
 			--C.printf("dist %g\n", ad.val(dist))
 			var score = [gaussian_logprob(real)](dist, mu, sigma)
@@ -236,8 +251,17 @@ local BinaryLightnessConstraint = templatize(function(real)
 		var numAdj = pattern.adjacencies.size
 		for i=0,pattern.adjacencies.size do
 			var adj = pattern.adjacencies:get(i)
-			var first = [RGBtoLAB(real)](pattern(adj:get(0)))(0)
-			var second = [RGBtoLAB(real)](pattern(adj:get(1)))(0)
+			var first = real(0.0)
+			var second = real(0.0)
+				
+			if (useRGB) then
+				first = [RGBtoLAB(real)](pattern(adj:get(0)))(0)
+				second = [RGBtoLAB(real)](pattern(adj:get(1)))(0)
+			else
+				first = pattern(adj:get(0))(0)
+				second = pattern(adj:get(1))(0)
+			end
+
 			var dist = ad.math.fabs(first-second)/maxDist
 
 			if (adj:get(0)==pattern.backgroundId or adj:get(1)==pattern.backgroundId) then
@@ -260,7 +284,8 @@ return {
 	UnaryLightnessConstraint = UnaryLightnessConstraint,
 	UnarySaturationConstraint = UnarySaturationConstraint,
 	BinaryPerceptualConstraint = BinaryPerceptualConstraint,
-	BinaryLightnessConstraint = BinaryLightnessConstraint
+	BinaryLightnessConstraint = BinaryLightnessConstraint,
+	useRGB = useRGB
 }
 
 
