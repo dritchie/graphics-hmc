@@ -1,6 +1,6 @@
 function [ ] = drawFunction( fn, xrange, yrange )
 z = discretize2DFunction(fn, xrange, yrange);
-pcolor(z);
+pcolor(xrange, yrange, z);
 % contourf(xrange, yrange, z, 0:0.1:1);
 colormap(1-gray);
 shading interp;

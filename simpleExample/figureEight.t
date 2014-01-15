@@ -25,7 +25,8 @@ local xmax = 1.5
 local ymin = -1.5
 local ymax = 1.5
 local targetIsoval = 0.25
-local softness = 0.075
+-- local softness = 0.075
+local softness = 0.005
 local function figureEightModel()
 	
 	local Vec2 = Vec(real, 2)
@@ -112,14 +113,30 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 	print("done.")
 end
 
+local function writeSamplesToCSV(samples, filename)
+	local fname = string.format("%s.csv", filename)
+	local numsamps = samples.size
+	local terra doWrite()
+		var f = C.fopen(fname, "w")
+		for i=0,numsamps do
+			var p = samples(i).value
+			var t = double(i)/numsamps
+			C.fprintf(f, "%g,%g,%g\n", p(0), p(1), t)
+		end
+		C.fclose(f)
+	end
+	doWrite()
+end
+
 ----------------------------------
-local numsamps = 2000
+-- local numsamps = 2000
+local numsamps = 200000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
 local imageHeight = 500
-local kernel = HMC({numSteps=100, verbosity=0})
--- local kernel = RandomWalk()
+-- local kernel = HMC({numSteps=100})
+local kernel = GaussianDrift({bandwidth=0.075})
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
 		currTrace.temperature = temp
@@ -130,8 +147,10 @@ local terra doInference()
 	return [mcmc(figureEightModel, kernel, {numsamps=numsamps, verbose=verbose})]
 end
 local samples = m.gc(doInference())
-moviename = arg[1] or "movie"
+local moviename = arg[1] or "movie"
 renderSamples(samples, moviename, imageWidth, imageHeight)
+local filename = arg[1] or "samples"
+writeSamplesToCSV(samples, filename)
 
 
 
