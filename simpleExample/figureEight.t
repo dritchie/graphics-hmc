@@ -113,6 +113,19 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 	print("done.")
 end
 
+local function subsample(samples, numToTake)
+	local SamplesType = terralib.typeof(samples)
+	local skip = samples.size / numToTake
+	local terra dosubsample()
+		var reducedSamps = SamplesType.stackAlloc()
+		for i=0,samples.size,skip do
+			reducedSamps:push(samples(i))
+		end
+		return reducedSamps
+	end
+	return m.gc(dosubsample())
+end
+
 local function writeSamplesToCSV(samples, filename)
 	local fname = string.format("%s.csv", filename)
 	local numsamps = samples.size
@@ -150,7 +163,7 @@ local samples = m.gc(doInference())
 local moviename = arg[1] or "movie"
 renderSamples(samples, moviename, imageWidth, imageHeight)
 local filename = arg[1] or "samples"
-writeSamplesToCSV(samples, filename)
+writeSamplesToCSV(subsample(samples, 2000), filename)
 
 
 
