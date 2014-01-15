@@ -232,10 +232,10 @@ end)
 local RandomPosTransformedSimConstraint = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local Vec2 = Vec(real, 2)
+  local scale = params.scale or 0.05
   local tgtPenaltyFn = TransformedSimConstraint(real)(params.target, params.softness)
   return pfn(terra(lattice: &RealGrid)
     var tgt = params.target
-    var scale = 0.05
     var halfw = (tgt.width/2.0) / lattice.width
     var halfh = (tgt.height/2.0) / lattice.height
     var cx = gaussian(0.0, scale, {structural=false})

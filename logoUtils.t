@@ -130,8 +130,10 @@ end)
 -- Generate unconstrained random lattice
 local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
-  return pfn(terra(width: int, height: int)
-    var scale = 0.01
+  local width = params.width or 128
+  local height = params.height or params.width
+  local scale = params.scale or 0.01
+  return pfn(terra()
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
@@ -144,12 +146,15 @@ local RandomLattice = templatize(function(real, params)
 end)
 
 -- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
-local TurbulenceLattice = templatize(function(real)
+local TurbulenceLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
-  return terra(width: int, height: int, maxZoomLevel: double)
+  local width = params.width or 128
+  local height = params.height or 128
+  local maxZoomLevel = params.maxZoomLevel or 6.0
+  return terra()
     var maxZoom: double = ad.math.pow(2.0, maxZoomLevel)
-    var R = [RandomLattice(real)](width, height)
+    var R = [RandomLattice(real, params)]()
     var Rturb = RealGrid.stackAlloc(width, height)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
     for x=0,width do
@@ -170,23 +175,26 @@ local TurbulenceLattice = templatize(function(real)
 end)
 
 -- Turbulence lattice by top-down summing of random grid subdivisions
-local TurbulenceBySubdivLattice = templatize(function(real)
+local TurbulenceBySubdivLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local DoubleAlphaGrid = image.Image(double, 2)
   local Vec1 = Vec(real, 1)
-  return terra(width: int, height: int, maxSubdivLevel: int)
+  local width = params.width or 128
+  local height = params.height or 128
+  local levels = params.levels or 6
+  return terra()
     -- Create random lattices for all subdivision levels
     var Rs: Vector(RealGrid)
     m.init(Rs)
-    for i=0,maxSubdivLevel do
+    for i=0,levels do
       var subdivFactor = ad.math.pow(2, i)
       var currW = [int](ad.math.ceil(width / [double](subdivFactor))) + 1
       var currH = [int](ad.math.ceil(height / [double](subdivFactor))) + 1
-      Rs:push([RandomLattice(real)](currW, currH))
+      Rs:push([RandomLattice(real, {width=currW, height=currH})])
     end
 
     -- Sum lattices together into result lattice
-    var maxSubdivFactor = ad.math.pow(2, maxSubdivLevel) -- for normalization
+    var maxSubdivFactor = ad.math.pow(2, levels) -- for normalization
     var Rturb = RealGrid.stackAlloc(width, height)
     var first = Rs:getPointer(0)(0, 0)
     var zero = first - first -- Get zero of lattice element type
@@ -194,7 +202,7 @@ local TurbulenceBySubdivLattice = templatize(function(real)
       for x=0,width do
         var val = zero
         var subdivFactor = 1.0
-        for i=0,maxSubdivLevel do
+        for i=0,levels do
           var xi = x / subdivFactor
           var yi = y / subdivFactor
           var Ri = Rs:getPointer(i)
@@ -211,15 +219,18 @@ local TurbulenceBySubdivLattice = templatize(function(real)
 end)
 
 -- Turbulence lattice by summing subsampled versions of a random noise grid
-local TurbulenceBySubsampleLattice = templatize(function(real)
+local TurbulenceBySubsampleLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
-  return terra(width: int, height: int, maxLevel: int)
-    -- Create random noise field lattice and subsample up to maxLevel
-    var R = [RandomLattice(real)](width, height)
+  local width = params.width or 128
+  local height = params.height or 128
+  local levels = params.levels or 6
+  return terra()
+    -- Create random noise field lattice and subsample up to levels
+    var R = [RandomLattice(real, params)]
     var Rs: Vector(RealGrid)
     m.init(Rs)
-    for i=0,maxLevel do
+    for i=0,levels do
       var subdivFactor = [double](ad.math.pow(2.0, double(i)))
       var currW = [int](ad.math.ceil(width / subdivFactor)) + 1
       var currH = [int](ad.math.ceil(height / subdivFactor)) + 1
@@ -237,7 +248,7 @@ local TurbulenceBySubsampleLattice = templatize(function(real)
     end
 
     -- Sum sub-sampled versions of lattice into result lattice
-    var maxSubdivFactor = ad.math.pow(2.0, maxLevel) -- for normalization
+    var maxSubdivFactor = ad.math.pow(2.0, levels) -- for normalization
     var Rturb = RealGrid.stackAlloc(width, height)
     var first = Rs:getPointer(0)(0, 0)
     var zero = first - first -- Get zero of lattice element type
@@ -245,7 +256,7 @@ local TurbulenceBySubsampleLattice = templatize(function(real)
       for x=0,width do
         var val = zero
         var subdivFactor = 1.0
-        for i=0,maxLevel do
+        for i=0,levels do
           var Ri = Rs:getPointer(i)
           var xi = (x / double(width)) * (Ri.width - 1)
           var yi = (y / double(height)) * (Ri.height - 1)
@@ -267,14 +278,19 @@ end)
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
 local MarbleLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
-  local p = params
+  local width = params.width or 128
+  local height = params.height or 128
+  local xPeriod = params.xPeriod or 5.0
+  local yPeriod = params.yPeriod or 10.0
+  local turbPower = params.turbPower or 5.0
+  local turbLevels = params.levels or 6
   return terra()
-    var T = [TurbulenceLattice(real)](p.width, p.height, p.turbSize)
-    var marble = RealGrid.stackAlloc(p.width, p.height)
+    var T = [TurbulenceLattice(real, params)]()
+    var marble = RealGrid.stackAlloc(width, height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
-    for x=0,p.width do
-      for y=0,p.height do
-        var xyValue = (x * p.xPeriod / p.width) + (y * p.yPeriod / p.height) + (p.turbPower * T(x, y)(0))
+    for x=0,width do
+      for y=0,height do
+        var xyValue: real = (x * xPeriod / width) + (y * yPeriod / height) + (turbPower * T(x, y)(0))
         marble(x, y)(0) = ad.math.fabs(ad.math.sin(xyValue * 3.14159))
       end
     end
@@ -291,7 +307,7 @@ local WoodLattice = templatize(function(real, params)
     var height = p.height
     var turbSize = p.turbSize
     var turbPower = p.turbPower
-    var T = [TurbulenceLattice(real)](width, height, turbSize)
+    var T = [TurbulenceLattice(real, params)]
     var wood = RealGrid.stackAlloc(width, height)
     var zero = T(0, 0) - T(0, 0) -- Get zero of lattice element type
     for x=0,width do
