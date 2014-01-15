@@ -137,7 +137,12 @@ local RandomLattice = templatize(function(real, params)
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
-        lattice(x,y)(0) = logistic(gaussian(0.0, scale, {structural=false})/scale)
+        var val = logistic(gaussian(0.0, scale, {structural=false})/scale)
+        -- [util.optionally(prior, function() return quote
+        --   var p = prior
+        --   val = 0.5 * (p(x,y)(0) + val)
+        -- end end)]
+        lattice(x,y)(0) = val
         -- lattice(x,y)(0) = uniform(0.5, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0, mass=1.0})
       end
     end

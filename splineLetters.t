@@ -29,8 +29,9 @@ local function model()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
   local Vec2 = Vec(real, 2)
 
-  local size = 80
+  local size = 100
   local splineTemp = 0.25
+  local distTemp = 100.0
   local tgtSoftness = 0.001
   local rigidity = 1.0
   local tension = 0.5
@@ -54,20 +55,20 @@ local function model()
     --                                        ad.val(c2(0)), ad.val(c2(1)))
     
     -- Encourage targets to not overlap
-    factor(c0:distSq(c1))
+    -- factor(c0:distSq(c1)/distTemp)
 
     -- -- Symmetry constraint (reflection across x=width/2)
     -- [U.SymmetryConstraint(real, {temp=0.0001})](&lattice)
 
     -- -- -- Take product with Marble texture
-    -- var marble = [U.MarbleLattice(real,
-    --   {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=1.0, turbSize=2.0})]()
-    -- for y=0,size do
-    --   for x=0,size do
-    --     lattice(x, y)(0) = marble(x,y)(0) * lattice(x, y)(0)
-    --   end
-    -- end
-
+    var marble = [U.MarbleLattice(real,
+      {width=size, height=size, xPeriod=5.0, yPeriod=10.0, turbPower=1.0, turbSize=2.0})]()
+    for y=0,size do
+      for x=0,size do
+        lattice(x, y)(0) = 0.5 * (marble(x,y)(0) + lattice(x, y)(0))
+      end
+    end
+    
     return lattice
   end
 end
@@ -77,7 +78,7 @@ end
 -- (Switch to RandomWalk to see random walk metropolis instead)
 local numsamps = 1000
 local verbose = true
-local temp = 10000.0
+local temp = 5000.0
 local kernel = HMC({numSteps=20})--stepSizeAdapt=false,stepSize=0.0001})  --verbosity=1
 local scheduleFn = macro(function(iter, currTrace)
   return quote
