@@ -11,6 +11,7 @@ local Vec = terralib.require('linalg').Vec
 local Pattern = terralib.require("pattern")
 local ColorUtils = terralib.require('colorUtils')
 local ad = terralib.require("ad")
+local templatize = terralib.require("templatize")
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -19,17 +20,44 @@ local C = terralib.includecstring [[
 #include <math.h>
 ]]
 
+--init random number generator
+rand.initrand()
+
 local useRGB = ColorUtils.useRGB
 
-local function colorCompatModel()
+
+local CreateFireflies = templatize(function(real)
+	local RealPattern = Pattern(real)
+
+	return terra()
+		--------FIREFLY PATTERN
+		var numGroups = 5
+		var adjacencies = Vector.fromItems(Vector.fromItems(0,1), 
+											Vector.fromItems(1,2), 
+											Vector.fromItems(1,4),
+											Vector.fromItems(2,3),
+											Vector.fromItems(2,4),
+											Vector.fromItems(3,4))
+		var sizes = Vector.fromItems(0.002575, 0.01575, 0.057375, 0.7566, 0.1677)
+		var tid = 36751
+		var backgroundId = 3
+			
+		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid, sizes)
+		m.destruct(adjacencies)
+
+		return pattern
+	end
+end)
+
+local GetPatternLogProb = templatize(function(real)
+
 	local temp = 1
-	local constraintTemp = 1
-	local glowRange = 1
+	local glowRange = 1--5
 	local hueRange = 2
-	local compatScale = 0.01 -- scaling compatibility to other factors...
+	local compatScale = 0.01
 
 	local RealPattern = Pattern(real)
-	
+
 	local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
 	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
 	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
@@ -46,6 +74,7 @@ local function colorCompatModel()
 	local terra glowConstraint(pattern:&RealPattern, l_indices:Vector(int), h_indices:Vector(int), l_range:double, h_range:double)
 		var endIdx = l_indices.size-1
 		var maxldiff = 100.0
+		var result = real(0.0)
 		for i=0,endIdx do
 			var light = pattern(l_indices:get(i))
 			var dark = pattern(l_indices:get(i+1))
@@ -58,7 +87,8 @@ local function colorCompatModel()
 			var target = 20/maxldiff
 
 			--constrain lightness
-			factor(softEq(ldiff, target, l_range/maxldiff)/constraintTemp)
+			--factor(softEq(ldiff, target, l_range/maxldiff))
+			result = result + softEq(ldiff, target, l_range/maxldiff)
 
 		end
 
@@ -78,10 +108,49 @@ local function colorCompatModel()
 			var target = 0.0/maxhdiff
 
 			--constrain hue
-			factor(softEq(hdiff, target, h_range/maxhdiff)/constraintTemp)
+			--factor(softEq(hdiff, target, h_range/maxhdiff))
+			result = result + softEq(hdiff, target, h_range/maxhdiff)
 		end
+		return result
 	end
 	
+
+	return terra(pattern:&RealPattern)
+		var lightness = 0.9*lightnessFn(pattern) --Unary lightness might be more arbitrary
+		var saturation = 1.3*saturationFn(pattern)
+		var diff = 1.4*diffFn(pattern)
+		var lightnessDiff = 0.5*lightnessDiffFn(pattern) 
+
+		var glowScore = glowConstraint(pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2), glowRange, hueRange)
+		
+		var score = compatScale*(lightness+saturation+diff+lightnessDiff)/temp + glowScore
+		return score
+	end
+end)
+
+
+
+local function colorCompatModel()
+	local temp = 1
+	local glowRange = 1--5
+	local hueRange = 2
+	local compatScale = 0.01 -- scaling compatibility to other factors...
+
+	local RealPattern = Pattern(real)
+	
+	local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
+	local saturationFn = ColorUtils.UnarySaturationConstraint(real)
+	local diffFn = ColorUtils.BinaryPerceptualConstraint(real)
+	local lightnessDiffFn = ColorUtils.BinaryLightnessConstraint(real)
+
+	local logistic = macro(function(x)
+                return `1.0 / (1.0 + ad.math.exp(-x))
+    	end)
+
+	local softEq = macro(function(x, target, softness)
+		return `[rand.gaussian_logprob(real)](x, target, softness)
+	end)
+
 	return terra()
 		var numGroups = 5
 		--------BIRD PATTERN
@@ -99,19 +168,7 @@ local function colorCompatModel()
 		-- var tid = 105065 --bird pattern
 		-- var backgroundId = 0
 
-		--------FIREFLY PATTERN
-		var adjacencies = Vector.fromItems(Vector.fromItems(0,1), 
-											Vector.fromItems(1,2), 
-											Vector.fromItems(1,4),
-											Vector.fromItems(2,3),
-											Vector.fromItems(2,4),
-											Vector.fromItems(3,4))
-		var sizes = Vector.fromItems(0.002575, 0.01575, 0.057375, 0.7566, 0.1677)
-		var tid = 36751
-		var backgroundId = 3
-		
-		var pattern = RealPattern.stackAlloc(numGroups, adjacencies, backgroundId, tid, sizes)
-		m.destruct(adjacencies)
+		var pattern:RealPattern = [CreateFireflies(real)]()
 
 		-- Priors
 		var scale = 1.0
@@ -132,36 +189,19 @@ local function colorCompatModel()
 		end
 
 		-- Constraints
-		var lightness = 0.9*lightnessFn(&pattern) --Unary lightness might be more arbitrary
-		var saturation = 1.3*saturationFn(&pattern)
-		var diff = 1.4*diffFn(&pattern)
-		var lightnessDiff = 0.5*lightnessDiffFn(&pattern) 
-
-		factor(compatScale*(lightness+saturation+diff+lightnessDiff)/temp)
-
-		glowConstraint(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2), glowRange, hueRange)
-		--glowConstraint2(&pattern, Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2,3), glowRange, hueRange)
+		var score = [GetPatternLogProb(real)](&pattern)
+		factor(score)
 
 		return pattern
 	end
 end
 
 
+
 -- Do HMC inference on the model
--- (Switch to RandomWalk to see random walk metropolis instead)
---local kernelType = HMC
---local kernelType = RandomWalk
 local hmcNumSteps = 20
 local numsamps = 10000--10000
 local verbose = true
-
---if kernelType == RandomWalk then numsamps = hmcNumSteps*numsamps end
---local kernel = nil
---if kernelType == RandomWalk then
---        kernel = RandomWalk()
---else
---        kernel = HMC({numSteps=hmcNumSteps})
---end
 
 local terra doHMCInference()
 	-- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
@@ -252,6 +292,9 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 	local SampleValue = Vec(double, dims)
 	local SampleValueList = Vector(SampleValue)
 
+	local RealPattern = Pattern(real)
+	local RealPatternList = Vector(RealPattern)
+
 	local terra ComputeMean(patternValues:&SampleValueList)
 		var mean = SampleValue.stackAlloc()
 		var numsamps = patternValues.size
@@ -270,17 +313,89 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 		var numsamps = patternValues.size
 		for i=0,numsamps do
 			var patternValue = patternValues(i)
-			--C.printf("num %f\n", patternValue(0))
 			variance = variance + mean:distSq(patternValue)
-			--C.printf("distSq %f\n", mean:distSq(patternValue))
 		end
-		--C.printf("varb %f\n", variance)
 		if (numsamps > 0) then
 			variance = variance/numsamps
 		end
-		--C.printf("var %f\n", variance)
 		return variance
 	end 
+
+	--Since there are such strict constraints, it's really difficult to get
+	--decent scoring samples...
+	local estimateNumSamps = 600000
+	local terra EstimateTrueStats()
+		C.printf("Estimating true stats...\n")
+		--var numsamps = 1000000
+		var numsamps = estimateNumSamps
+		-- var samples = RealPatternList.stackAlloc()
+		-- for i=0,numsamps do
+		-- 	var sample = [CreateFireflies(real)]()
+		-- 	for g=0,numGroups do
+		-- 		sample(g)(0) = rand.random()
+		-- 		sample(g)(1) = rand.random()
+		-- 		sample(g)(2) = rand.random()
+
+		-- 		if (not useRGB) then
+		-- 			sample(g)(0) = sample(g)(0) * 100
+		-- 			sample(g)(1) = sample(g)(1) * 200 - 100
+		-- 			sample(g)(2) = sample(g)(2) * 200 - 100
+		-- 		end
+
+		-- 	end
+		-- 	samples:push(sample)
+		-- 	C.printf("sample:%d\r",i)
+		-- end
+		--var samples = [mcmc(colorCompatModel,  HMC({numSteps=hmcNumSteps}) , {numsamps=estimateNumSamps, verbose=true})]
+		var samples = [mcmc(colorCompatModel,  RandomWalk() , {numsamps=estimateNumSamps, verbose=true})]
+
+		var patternValues = SampleValueList.stackAlloc()
+		for i=0,numsamps do
+			--var pattern = samples(i)
+			var pattern = samples(i).value
+			var patternValue = SampleValue.stackAlloc()
+			for g=0,numGroups do
+				patternValue(3*g) = pattern(g)(0)
+				patternValue(3*g+1) = pattern(g)(1)
+				patternValue(3*g+2) = pattern(g)(2)
+			end
+			patternValues:push(patternValue)
+		end
+
+		-- var mean = SampleValue.stackAlloc()
+		-- var totalScore = 0.0
+		-- for i=0,numsamps do
+		-- 	var score = C.exp([GetPatternLogProb(real)](&samples(i)))
+		-- 	mean = mean + score*patternValues(i)
+		-- 	totalScore = totalScore + score
+		-- end
+		-- if (totalScore > 0) then
+		-- 	mean = mean/totalScore
+		-- end
+
+		-- var variance = 0.0
+		-- for i=0,numsamps do
+		-- 	--var logscore = [GetPatternLogProb(real)](&samples(i))
+		-- 	var score = C.exp([GetPatternLogProb(real)](&samples(i)))
+		-- 	variance = variance + score*(mean:distSq(patternValues(i)))
+		-- 	--C.printf("dist %f score %f\n", mean:distSq(patternValues(i)), logscore)
+		-- end
+		-- if (totalScore > 0) then
+		-- 	variance = variance/totalScore
+		-- end
+		var mean = ComputeMean(&patternValues)
+		var variance = ComputeVariance(&patternValues, mean)
+
+		C.printf("estimated mean:\n")
+		for i=0,dims do
+			C.printf("%f\t", mean(i))
+		end
+		C.printf("\nestimated variance: %f\n", variance)
+
+
+		C.printf("done!\n")
+		return mean, variance
+	end
 
 	--compute autocorrelation of samples
 	local function AutoCorrelation(fname, samples, mean, variance)
@@ -314,7 +429,6 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 
 			--compute the variance
 			--var variance = stats(1)--ComputeVariance(&patternValues, mean)
-			C.printf("variance %f\n", variance)
 
 			--compute the autocorrelation at different times t
 			--write to file
@@ -357,16 +471,18 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 				var pattern = samples(i).value
 				var patternValue = SampleValue.stackAlloc()
 				for g=0,numGroups do
-					patternValue(3*g) = pattern(g)(0)
-					patternValue(3*g+1) = pattern(g)(1)
-					patternValue(3*g+2) = pattern(g)(2)
+					--if (not(g==3)) then
+						patternValue(3*g) = pattern(g)(0)
+						patternValue(3*g+1) = pattern(g)(1)
+						patternValue(3*g+2) = pattern(g)(2)
+					--end
 				end
 				patternValues:push(patternValue)
 			end
 
 			var esjd = 0.0
 			for t=0,(numsamps-numSteps) do
-				esjd = esjd + patternValues(t):dot(patternValues(t+numSteps))
+				esjd = esjd + patternValues(t):dist(patternValues(t+numSteps))
 			end
 			esjd = esjd/(numsamps-numSteps)
 			C.printf("ESJD %f\n", esjd)
@@ -411,7 +527,7 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 				hmcPatternValues:push(patternValue)
 			end
 
-			for thresh=-10,0 do
+			for thresh=-10,5 do
 				var validHMCSamples = SampleValueList.stackAlloc()
 				var validRandomSamples = SampleValueList.stackAlloc()
 				for i=0, hmcNumSamps do
@@ -436,36 +552,16 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 		HighScoreVariance()
 	end
 
-	local terra ComputeHMCMean()
-		var patternValues = SampleValueList.stackAlloc()
-		var numsamps = hmcSamples.size
 
-		--convert patterns to vectors
-		for i=0,numsamps do
-			var pattern = hmcSamples(i).value
-			var patternValue = SampleValue.stackAlloc()
-			for g=0,numGroups do
-				patternValue(3*g) = pattern(g)(0)
-				patternValue(3*g+1) = pattern(g)(1)
-				patternValue(3*g+2) = pattern(g)(2)
-			end
-			patternValues:push(patternValue)
-		end
-
-		--compute the mean
-		var mean = ComputeMean(&patternValues)
-
-		return mean
-	end
-
-	local terra ComputeHMCVariance(mean:SampleValue)
+	local terra ComputeHMCStats()
 		--compute the variance
 		var patternValues = SampleValueList.stackAlloc()
-		var numsamps = hmcSamples.size
+		var samples = hmcSamples
+		var numsamps = samples.size
 
 		--convert patterns to vectors
 		for i=0,numsamps do
-			var pattern = hmcSamples(i).value
+			var pattern = samples(i).value
 			var patternValue = SampleValue.stackAlloc()
 			for g=0,numGroups do
 				patternValue(3*g) = pattern(g)(0)
@@ -474,12 +570,55 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 			end
 			patternValues:push(patternValue)
 		end
+		var mean = ComputeMean(&patternValues)
 		var variance = ComputeVariance(&patternValues, mean)
-		return variance
+		return mean, variance
 	end
 
-	local hmcMean = ComputeHMCMean()
-	local hmcVariance = ComputeHMCVariance(hmcMean)
+	local terra ComputeRandomStats()
+		--compute the variance
+		var patternValues = SampleValueList.stackAlloc()
+		var samples = randomSamples
+		var numsamps = samples.size
+
+		--convert patterns to vectors
+		for i=0,numsamps do
+			var pattern = samples(i).value
+			var patternValue = SampleValue.stackAlloc()
+			for g=0,numGroups do
+				patternValue(3*g) = pattern(g)(0)
+				patternValue(3*g+1) = pattern(g)(1)
+				patternValue(3*g+2) = pattern(g)(2)
+			end
+			patternValues:push(patternValue)
+		end
+		var mean = ComputeMean(&patternValues)
+		var variance = ComputeVariance(&patternValues, mean)
+		return mean, variance
+	end
+
+	local hmean, hvariance = ComputeHMCStats()
+	local rmean, rvariance = ComputeRandomStats()
+
+	local terra CombineStats(hmean:SampleValue, rmean:SampleValue, hvariance:double, rvariance:double)
+		var mean = 0.5 * rmean + 0.5 * hmean
+		var variance = 0.5 * rvariance + 0.5 * hvariance
+
+		C.printf("estimated mean:\n")
+		for i=0,dims do
+			C.printf("%f\t", mean(i))
+		end
+		C.printf("\nestimated variance: %f\n", variance)
+
+		return mean, variance
+	end
+
+	--local mean, variance = CombineStats(hmean, rmean, hvariance, rvariance)
+	local mean, variance = EstimateTrueStats()
+
+	
+
+	
 
 	C.printf("HMC ESJD\n")
 	ESJD(hmcSamples,1)
@@ -490,9 +629,9 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 
 
 	C.printf("HMC:\n")
-	AutoCorrelation("HMCAutoCorrelation.csv", hmcSamples, hmcMean, hmcVariance)
+	AutoCorrelation("HMCAutoCorrelation.csv", hmcSamples, mean, variance)
 	C.printf("Random:\n")
-	AutoCorrelation("randomAutoCorrelation.csv", randomSamples, hmcMean, hmcVariance)
+	AutoCorrelation("randomAutoCorrelation.csv", randomSamples, mean, variance)
 	HighScoreVariance(randomSamples, hmcSamples)
 
 end

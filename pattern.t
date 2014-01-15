@@ -72,6 +72,7 @@ local Pattern = templatize(function(real)
 	end
 
 	terra PatternInfo:__destruct()
+		--C.printf("Destructing\n")
 		C.free(self.vars)
 		m.destruct(self.adjacencies)
 	end
