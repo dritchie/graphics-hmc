@@ -157,9 +157,7 @@ local TurbulenceLattice = templatize(function(real, params)
   local width = params.width or params.size or 128
   local height = params.height or params.size or 128
   local levels = params.levels or params.turbSize or 6.0
-  local source = params.noiseSource or RandomLattice(real, params)
-  return terra()
-    var R = source()
+  return terra(R: &RealGrid)
     var maxZoom: double = ad.math.pow(2.0, levels)
     var Rturb = RealGrid.stackAlloc(width, height)
     var zero = R(0, 0) - R(0, 0) -- Get zero of lattice element type
@@ -232,10 +230,8 @@ local TurbulenceBySubsampleLattice = templatize(function(real, params)
   local width = params.width or params.size or 128
   local height = params.height or params.size or 128
   local levels = params.levels or params.turbSize or 6.0
-  local source = params.noiseSource or RandomLattice(real, params)
-  return terra()
-    -- Create random noise field lattice and subsample up to levels
-    var R = source()
+  return terra(R: &RealGrid)
+    -- subsample random lattice up to # levels
     var Rs: Vector(RealGrid)
     m.init(Rs)
     for i=0,levels do
@@ -284,17 +280,15 @@ end)
 
 
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
-local MarbleLattice = templatize(function(real, params)
+local Marbleify = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local p = params
-  local source = p.noiseSource or TurbulenceLattice(real, params)
-  return terra()
+  return terra(T: &RealGrid)
     var width: uint      = p.width
     var height: uint     = p.height
     var xPeriod: double  = p.xPeriod
     var yPeriod: double  = p.yPeriod
     var turbPower:double = p.turbPower
-    var T: RealGrid      = source()
     var marble: RealGrid = RealGrid.stackAlloc(width, height)
     var xNorm: double    = double(xPeriod) / double(width)
     var yNorm: double    = double(yPeriod) / double(height)
@@ -310,17 +304,15 @@ local MarbleLattice = templatize(function(real, params)
 end)
 
 -- Wood-like patterns by summing circular "sine" repetitions over domain with turbulence
-local WoodLattice = templatize(function(real, params)
+local Woodify = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local p = params
-  local source = p.noiseSource or TurbulenceLattice(real, params)
-  return terra()
+  return terra(T: &RealGrid)
     var width: uint       = p.width
     var height: uint      = p.height
     var turbSize: double  = p.turbSize
     var turbPower: double = p.turbPower
     var xyPeriod: double  = p.xyPeriod
-    var T: RealGrid       = source()
     var wood: RealGrid    = RealGrid.stackAlloc(width, height)
     
     for x=0,width do
@@ -334,6 +326,21 @@ local WoodLattice = templatize(function(real, params)
     return wood
   end
 end)
+
+-- local TransformRealGrid = templatize(function(real)
+--   local RealGrid = image.Image(real, 1)
+--   return terra(grid: &RealGrid, transformFun: &RealGrid -> &RealGrid)
+--     var width = grid.width
+--     var height = grid.height
+--     var im = RGBImage.stackAlloc(width, height)
+--     for x = 0,width do
+--       for y = 0,height do
+--         im(x,y) = transferFun(grid(x,y)(0))
+--       end
+--     end
+--     return im
+--   end
+-- end)
 
 -- Color conversion
 local HSLtoRGB = templatize(function(real)
@@ -463,7 +470,8 @@ local testTurbulence = function(params, imgFilename)
   local p = params
   local RGBImage = image.Image(double, 3)
   local terra test()
-    var lattice = [TurbulenceBySubsampleLattice(real, params)]()
+    var R = [RandomLattice(real, params)]()
+    var lattice = [TurbulenceLattice(real, params)](&R)
     [GridSaver(real, LightnessColorizer)](&lattice, imgFilename)
   end
   test()
@@ -472,7 +480,9 @@ end
 local testMarble = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
-    var lattice = [MarbleLattice(real, params)]()
+    var R = [RandomLattice(real, params)]()
+    var T = [TurbulenceLattice(real, params)](&R)
+    var lattice = [Marbleify(real, params)](&T)
     [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
   test()
@@ -481,7 +491,9 @@ end
 local testWood = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
-    var lattice = [WoodLattice(real, params)]()
+    var R = [RandomLattice(real, params)]()
+    var T = [TurbulenceLattice(real, params)](&R)
+    var lattice = [Woodify(real, params)](&T)
     [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
   test()
@@ -498,8 +510,8 @@ return {
   TurbulenceLattice = TurbulenceLattice,
   TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
   TurbulenceBySubsampleLattice = TurbulenceBySubsampleLattice,
-  MarbleLattice = MarbleLattice,
-  WoodLattice = WoodLattice,
+  Marbleify = Marbleify,
+  Woodify = Woodify,
   HSLtoRGB = HSLtoRGB,
   TrivialColorizer = TrivialColorizer,
   LightnessColorizer = LightnessColorizer,
