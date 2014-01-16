@@ -15,13 +15,13 @@ softness = 0.005;
 
 % Render and save everything
 drawIsoline(@figureEightFieldFunction, xrange, yrange, targetIsoval);
-saveas(gcf, 'isoline.png');
+saveas(gcf, 'isoline.pdf');
 drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, softness);
-saveas(gcf, 'isoridge.png');
+saveas(gcf, 'isoridge.pdf');
 drawSamplingTrace('random.csv', axisBounds);
-saveas(gcf, 'randomSamps.png');
+saveas(gcf, 'randomSamps.pdf');
 drawSamplingTrace('hmc.csv', axisBounds);
-saveas(gcf, 'hmcSamps.png');
+saveas(gcf, 'hmcSamps.pdf');
 close;
 
 end
