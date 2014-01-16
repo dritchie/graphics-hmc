@@ -309,7 +309,6 @@ local Woodify = templatize(function(real, params)
   return terra(T: &RealGrid)
     var width: uint       = p.width
     var height: uint      = p.height
-    var turbSize: double  = p.turbSize
     var turbPower: double = p.turbPower
     var xyPeriod: double  = p.xyPeriod
     var wood: RealGrid    = RealGrid.stackAlloc(width, height)

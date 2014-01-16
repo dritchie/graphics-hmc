@@ -29,7 +29,7 @@ local size = 80
 
 -- Parameters for turbulence texture generator
 local marbleParams = {width=size, height=size, xyPeriod=12.0, xPeriod=15.0, yPeriod=25.0, turbPower=1.0}
-U.testMarble(marbleParams, "renders/test.png")
+-- U.testMarble(marbleParams, "renders/test.png")
 
 local function model()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
@@ -56,7 +56,7 @@ local function model()
     {target=imgHojo, softness=tgtSoftness, scale=0.005})
 
   -- Turbulent texture generator
-  local texturize = U.Marbleify(real, marbleParams)
+  local texturize = U.Woodify(real, marbleParams)
 
   return terra()
     
@@ -73,7 +73,7 @@ local function model()
     --                                        ad.val(c2(0)), ad.val(c2(1)))
     
     -- Encourage targets to not overlap
-    -- factor(c0:distSq(c1)/distTemp)
+    factor(c0:distSq(c1)/distTemp)
 
     -- -- Symmetry constraint (reflection across x=width/2)
     -- [U.SymmetryConstraint(real, {temp=0.0001})](&lattice)
@@ -85,7 +85,7 @@ end
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 100
+local numsamps = 1000
 local verbose = true
 local temp = 10000.0
 local kernel = HMC({numSteps=20}) --,stepSizeAdapt=false,stepSize=0.0001})  --verbosity=1
@@ -98,5 +98,5 @@ local samples = m.gc(doInference())
 
 -- Render the set of gathered samples into a movie
 local moviename = arg[1] or "movie"
-local gridSaver = U.GridSaver(real, U.TrivialColorizer)
+local gridSaver = U.GridSaver(real, U.WeightedRGBColorizer)
 U.renderSamplesToMovie(samples, moviename, gridSaver)
