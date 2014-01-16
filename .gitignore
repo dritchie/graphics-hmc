@@ -1,2 +1,3 @@
-*.mp4
+renders/*.mp4
+renders/*.png
 colorSamples.txt

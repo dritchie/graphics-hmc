@@ -137,7 +137,7 @@ local RandomLattice = templatize(function(real, params)
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
-        var val = logistic(gaussian(0.0, scale, {structural=false})/scale)
+        var val = logistic(gaussian(0.0, scale, {structural=false,initialVal=0.0})/scale)
         -- [util.optionally(prior, function() return quote
         --   var p = prior
         --   val = 0.5 * (p(x,y)(0) + val)
@@ -151,7 +151,7 @@ local RandomLattice = templatize(function(real, params)
 end)
 
 -- Turbulence lattice (weighted sum of zoomed in windows on random lattice)
-local TurbulenceLattice = templatize(function(real, params)
+local Turbulenceify = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
   local width = params.width or params.size or 128
@@ -223,8 +223,8 @@ local TurbulenceBySubdivLattice = templatize(function(real, params)
   end
 end)
 
--- Turbulence lattice by summing subsampled versions of a random noise grid
-local TurbulenceBySubsampleLattice = templatize(function(real, params)
+-- Turbulence by summing subsampled versions of input noise
+local TurbulenceifyBySubsampling = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local Vec1 = Vec(real, 1)
   local width = params.width or params.size or 128
@@ -278,7 +278,6 @@ local TurbulenceBySubsampleLattice = templatize(function(real, params)
   end
 end)
 
-
 -- Marble-like patterns by summing "sine" repetitions over domain with turbulence
 local Marbleify = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
@@ -295,8 +294,8 @@ local Marbleify = templatize(function(real, params)
     
     for x=0,width do
       for y=0,height do
-        var xyValue = (x * xNorm) + (y * yNorm) + (turbPower * T(x, y)(0))
-        marble(x, y)(0) = (ad.math.sin(xyValue * 3.14159) + 1.0) * 0.5
+        var xyValue = (x * xNorm) + (y * yNorm) + (turbPower * (T(x, y)(0) * 2.0 - 1.0))
+        marble(x, y)(0) = (ad.math.sin(xyValue * [math.pi]) + 1.0) * 0.5
       end
     end
     return marble
@@ -320,7 +319,7 @@ local Woodify = templatize(function(real, params)
         var xVal = (x - width / 2.0) / width
         var yVal = (y - height / 2.0) / height
         var dVal = ad.math.sqrt(xVal * xVal + yVal * yVal) + (turbPower * T(x, y)(0))
-        wood(x, y)(0) = 0.25 * (ad.math.sin(2.0 * xyPeriod * dVal * 3.14159) + 1.0)
+        wood(x, y)(0) = 0.25 * (ad.math.sin(2.0 * xyPeriod * dVal * [math.pi]) + 1.0)
       end
     end
     return wood
@@ -456,7 +455,7 @@ local testTurbulence = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var R = [RandomLattice(real, params)]()
-    var lattice = [TurbulenceLattice(real, params)](&R)
+    var lattice = [Turbulenceify(real, params)](&R)
     [GridSaver(real, LightnessColorizer)](&lattice, imgFilename)
   end
   test()
@@ -466,7 +465,7 @@ local testMarble = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var R = [RandomLattice(real, params)]()
-    var T = [TurbulenceLattice(real, params)](&R)
+    var T = [Turbulenceify(real, params)](&R)
     var lattice = [Marbleify(real, params)](&T)
     [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
@@ -477,7 +476,7 @@ local testWood = function(params, imgFilename)
   local RGBImage = image.Image(double, 3)
   local terra test()
     var R = [RandomLattice(real, params)]()
-    var T = [TurbulenceLattice(real, params)](&R)
+    var T = [Turbulenceify(real, params)](&R)
     var lattice = [Woodify(real, params)](&T)
     [GridSaver(real, WeightedRGBColorizer)](&lattice, imgFilename)
   end
@@ -492,9 +491,9 @@ return {
   SplineConstraint = SplineConstraint,
   SymmetryConstraint = SymmetryConstraint,
   RandomLattice = RandomLattice,
-  TurbulenceLattice = TurbulenceLattice,
+  Turbulenceify = Turbulenceify,
   TurbulenceBySubdivLattice = TurbulenceBySubdivLattice,
-  TurbulenceBySubsampleLattice = TurbulenceBySubsampleLattice,
+  TurbulenceifyBySubsampling = TurbulenceifyBySubsampling,
   Marbleify = Marbleify,
   Woodify = Woodify,
   HSLtoRGB = HSLtoRGB,

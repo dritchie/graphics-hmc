@@ -27,17 +27,16 @@ local imgHojo = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/triforce
 
 local size = 80
 
--- Parameters for turbulence applied on result lattice to produce finer texture
-local marbleParams = {width=size, height=size, xyPeriod=12.0,
-  xPeriod=10.0, yPeriod=20.0, turbPower=5.0, turbSize=3.0}
--- U.testMarble(marbleParams, "renders/test.png")
+-- Parameters for turbulence texture generator
+local marbleParams = {width=size, height=size, xyPeriod=12.0, xPeriod=15.0, yPeriod=25.0, turbPower=1.0}
+U.testMarble(marbleParams, "renders/test.png")
 
 local function model()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
   local Vec2 = Vec(real, 2)
 
-  local splineTemp = 0.25
-  local distTemp = 100.0
+  local splineTemp = 0.5
+  local distTemp = 1000.0
   local tgtSoftness = 0.001
   local rigidity = 1.0
   local tension = 0.5
@@ -57,12 +56,14 @@ local function model()
     {target=imgHojo, softness=tgtSoftness, scale=0.005})
 
   -- Turbulent texture generator
-  local marbleify = U.Marbleify(real, marbleParams)
+  local texturize = U.Marbleify(real, marbleParams)
 
   return terra()
     
-    var lattice = makeLattice()
-    splineConstraint(&lattice)
+    var grid = makeLattice()
+    splineConstraint(&grid)
+    -- var lattice = grid
+    var lattice = texturize(&grid)
 
     -- Target image constraints
     var c0 = Vec2.stackAlloc(0.5, 0.5)
@@ -77,16 +78,14 @@ local function model()
     -- -- Symmetry constraint (reflection across x=width/2)
     -- [U.SymmetryConstraint(real, {temp=0.0001})](&lattice)
     
-    var out = marbleify(&lattice)
-    
-    return out
+    return lattice
   end
 end
 
 
 -- Do HMC inference on the model
 -- (Switch to RandomWalk to see random walk metropolis instead)
-local numsamps = 1000
+local numsamps = 100
 local verbose = true
 local temp = 10000.0
 local kernel = HMC({numSteps=20}) --,stepSizeAdapt=false,stepSize=0.0001})  --verbosity=1
@@ -99,5 +98,5 @@ local samples = m.gc(doInference())
 
 -- Render the set of gathered samples into a movie
 local moviename = arg[1] or "movie"
-local gridSaver = U.GridSaver(real, U.WeightedRGBColorizer)
+local gridSaver = U.GridSaver(real, U.TrivialColorizer)
 U.renderSamplesToMovie(samples, moviename, gridSaver)
