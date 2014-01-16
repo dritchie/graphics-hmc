@@ -26,9 +26,11 @@ local imgCross2 = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/cross2
 local imgHojo = DoubleAlphaGrid.methods.load(image.Format.PNG, "targets/triforce_alpha_50_50.png")
 
 local size = 80
--- Parameters for turbulence field to apply on result lattice
+
+-- Parameters for turbulence applied on result lattice to produce finer texture
 local marbleParams = {width=size, height=size, xyPeriod=12.0,
   xPeriod=10.0, yPeriod=20.0, turbPower=5.0, turbSize=3.0}
+-- U.testMarble(marbleParams, "renders/test.png")
 
 local function model()
   local U = logoUtils()  -- Need new U here to make sure random var tracking used on functions defined inside
@@ -54,6 +56,9 @@ local function model()
   local tgtImgConstraint = imageConstraints.RandomPosTransformedSimConstraint(real,
     {target=imgHojo, softness=tgtSoftness, scale=0.005})
 
+  -- Turbulent texture generator
+  local marbleify = U.Marbleify(real, marbleParams)
+
   return terra()
     
     var lattice = makeLattice()
@@ -71,8 +76,10 @@ local function model()
 
     -- -- Symmetry constraint (reflection across x=width/2)
     -- [U.SymmetryConstraint(real, {temp=0.0001})](&lattice)
-
-    return lattice
+    
+    var out = marbleify(&lattice)
+    
+    return out
   end
 end
 
@@ -83,20 +90,14 @@ local numsamps = 1000
 local verbose = true
 local temp = 10000.0
 local kernel = HMC({numSteps=20}) --,stepSizeAdapt=false,stepSize=0.0001})  --verbosity=1
-local scheduleFn = macro(function(iter, currTrace)
-  return quote
-    currTrace.temperature = temp
-  end
-end)
+local scheduleFn = macro(function(iter, currTrace) return quote currTrace.temperature = temp end end)
 kernel = Schedule(kernel, scheduleFn)
 local terra doInference()
   return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
 end
--- local samples = m.gc(doInference())
+local samples = m.gc(doInference())
 
--- -- Render the set of gathered samples into a movie
--- local moviename = arg[1] or "movie"
--- local gridSaver = U.GridSaver(real, U.TrivialColorizer)
--- U.renderSamplesToMovie(samples, moviename, gridSaver)
-
-U.testMarble(marbleParams, "renders/test.png")
+-- Render the set of gathered samples into a movie
+local moviename = arg[1] or "movie"
+local gridSaver = U.GridSaver(real, U.WeightedRGBColorizer)
+U.renderSamplesToMovie(samples, moviename, gridSaver)

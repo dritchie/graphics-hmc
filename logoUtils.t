@@ -327,21 +327,6 @@ local Woodify = templatize(function(real, params)
   end
 end)
 
--- local TransformRealGrid = templatize(function(real)
---   local RealGrid = image.Image(real, 1)
---   return terra(grid: &RealGrid, transformFun: &RealGrid -> &RealGrid)
---     var width = grid.width
---     var height = grid.height
---     var im = RGBImage.stackAlloc(width, height)
---     for x = 0,width do
---       for y = 0,height do
---         im(x,y) = transferFun(grid(x,y)(0))
---       end
---     end
---     return im
---   end
--- end)
-
 -- Color conversion
 local HSLtoRGB = templatize(function(real)
   local Color = Vec(real, 3)
