@@ -238,8 +238,8 @@ local RandomPosTransformedSimConstraint = templatize(function(real, params)
     var tgt = params.target
     var halfw = (tgt.width/2.0) / lattice.width
     var halfh = (tgt.height/2.0) / lattice.height
-    var cx = gaussian(0.0, scale, {structural=false})
-    var cy = gaussian(0.0, scale, {structural=false})
+    var cx = gaussian(0.0, scale, {structural=false,initialVal=0.0})
+    var cy = gaussian(0.0, scale, {structural=false,initialVal=0.0})
     cx = logistic(cx/scale)
     cy = logistic(cy/scale)
     -- cx = rescale(cx, halfw, 1.0-halfw)

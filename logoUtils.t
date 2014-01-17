@@ -130,10 +130,10 @@ end)
 -- Generate unconstrained random lattice
 local RandomLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
-  local width = params.width or params.size or 128
-  local height = params.height or params.width
-  local scale = params.scale or 0.01
   return pfn(terra()
+    var width: uint = params.width
+    var height: uint = params.height
+    var scale: double = params.scale
     var lattice = RealGrid.stackAlloc(width, height)
     for y=0,height do
       for x=0,width do
@@ -183,10 +183,10 @@ local TurbulenceBySubdivLattice = templatize(function(real, params)
   local RealGrid = image.Image(real, 1)
   local DoubleAlphaGrid = image.Image(double, 2)
   local Vec1 = Vec(real, 1)
-  local width = params.width or params.size or 128
-  local height = params.height or params.size or 128
-  local levels = params.levels or params.turbSize or 6.0
   return terra()
+    var width: uint = params.width
+    var height: uint = params.height
+    var levels: double = params.levels
     -- Create random lattices for all subdivision levels
     var Rs: Vector(RealGrid)
     m.init(Rs)
@@ -194,7 +194,7 @@ local TurbulenceBySubdivLattice = templatize(function(real, params)
       var subdivFactor = ad.math.pow(2, i)
       var currW = [int](ad.math.ceil(width / [double](subdivFactor))) + 1
       var currH = [int](ad.math.ceil(height / [double](subdivFactor))) + 1
-      var R = [RandomLattice(real, {width=currW, height=currH})]()
+      var R = [RandomLattice(real, {width=currW, height=currH, scale=params.scale})]()
       Rs:push(R)
     end
 
@@ -425,22 +425,42 @@ local GridSaver = templatize(function(real, Colorizer)
 end)
 
 -- Render the set of gathered samples into a movie
-local renderSamplesToMovie = function(samples, moviename, GridSaver)
+local renderSamplesToMovie = function(samples, moviename, GridSaver, sortedByLogProb)
   local moviefilename = string.format("renders/%s.mp4", moviename)
   local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
+  local movieframebasenameWithProb = "renders/p_%f.png"
   local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
   io.write("Rendering video...")
   io.flush()
   local numsamps = samples.size
   local frameSkip = math.ceil(numsamps / 1000.0)
+
   local terra renderFrames()
+    if sortedByLogProb then
+      -- Sort samples by logprob
+      for i=1,samples.size do
+        var x = samples(i)
+        var j = i
+        while (j > 0 and samples(j - 1).logprob > x.logprob) do
+          samples(j) = samples(j - 1)
+          j = j - 1
+        end
+        samples(j) = x
+      end
+    end
+
     var framename : int8[1024]
     var framenumber = 0
     for i=0,numsamps,frameSkip do
       C.sprintf(framename, movieframebasename, framenumber)
       var imagePtr = &samples(i).value
+      var logprob: double = samples(i).logprob
+      C.printf("%d:%f\n",i, logprob)
       GridSaver(imagePtr, framename)
       framenumber = framenumber + 1
+      -- Also save image with probability
+      C.sprintf(framename, movieframebasenameWithProb, logprob)
+      GridSaver(imagePtr, framename)
     end
   end
   renderFrames()
