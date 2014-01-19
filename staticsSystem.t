@@ -55,22 +55,22 @@ local function staticsModel()
 	local simpleScene1 = pfn(terra()
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 
-		var hingeBot = groundHeight + 2.0
+		var hingeBot = groundHeight
 		var hingeRad = 2.0
-		var hinge = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.666, hingeBot+hingeRad))
+		var hinge = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5, hingeBot+hingeRad))
 		
 		var beamBot = Vec2.stackAlloc(hinge.location(0), hingeBot)
 		var beamLen = 20.0
 		var beamAngle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
 		var beamTop = beamBot + polar2rect(beamLen, beamAngle)
-		var beamWidth = 5.0
+		var beamWidth = 3.0
 		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
 		hinge:addBeam(beam)
 
-		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.333, groundHeight-1.0), beam)
+		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.2, groundHeight-0.1), beam)
 		var beamPin = Connections.CablePinT.heapAlloc(beamTop + 0.05*(beamBot-beamTop), beam)
 		
-		var cableWidth = 1.0
+		var cableWidth = 0.5
 		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth, false, true)
 		groundPin:addCable(cable, 0)
 		beamPin:addCable(cable, 1)

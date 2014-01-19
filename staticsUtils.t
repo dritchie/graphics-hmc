@@ -47,7 +47,7 @@ local terra drawBar(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
 	var dir = top - bot
 	dir:normalize()
 	var w = width / 2.0
-	var perp = Vec2d.stackAlloc(dir(1), dir(0))
+	var perp = Vec2d.stackAlloc(-dir(1), dir(0))
 	var p0 = bot - w*perp
 	var p1 = bot + w*perp
 	var p2 = top + w*perp
@@ -235,6 +235,9 @@ local Beam = templatize(function(real)
 		self.endpoints[0] = other.endpoints[0]
 		self.endpoints[1] = other.endpoints[1]
 		self.width = other.width
+		[util.optionally(real==double, function() return quote
+			self.color = other.color
+		end end)]
 	end
 	terra BeamT:newcopy() : &RigidObjectT
 		var newbeam = m.new(BeamT)
