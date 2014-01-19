@@ -160,7 +160,8 @@ local function model()
 
   local makeChild = pfn(terra(parent: &ShapeGroupT)
     var childSize = parent.size * parent.childSizeRatio
-    var polarPos = Vec2.stackAlloc(1.5 * parent.size, nuniformNoPrior(0.0, [2*math.pi]))
+    var theta = nuniformNoPrior(0.0, [2*math.pi])
+    var polarPos = Vec2.stackAlloc(1.5 * parent.size, theta)
     -- var polarPos = Vec2.stackAlloc(nuniformNoPrior(0.0, parent.size), nuniformNoPrior(0.0, [2*math.pi]))
     -- clamp(polarPos(0), 0.0, parent.size, 0.2)  -- Soft bound child position
     var childPos = parent.pos + polar2rect(polarPos)
@@ -171,7 +172,7 @@ local function model()
   local terra makeShapeGroupImpl(numChildren: int, pos: Vec2) : ShapeGroupT
     var size = 10.0 --ngaussian(10.0, 1.0)
     -- bound(size, 5.0, 15.0, 0.1)
-    var childSizeRatio = 0.4 --nuniformNoPrior(size/5.0, size/2.0)
+    var childSizeRatio = 0.5 --nuniformNoPrior(size/5.0, size/2.0)
     var t = ShapeGroupT.stackAlloc(pos, size, groupColor, childSizeRatio)
     for i=0,numChildren do
       t.children:push(makeChild(&t))
@@ -222,10 +223,22 @@ local function model()
           for l=0,numChildren do
             var gi_l = gi.children:getPointer(l)
             factor(softEq(gi_l:intersectArea(gj_k), 0.0, 1.0))
+            var d = gi_l.pos:dist(gj_k.pos)
+            lowerBound(d, gi_l.size + gj_k.size, 0.1)
           end
         end
-        
+      end
+    end
 
+    -- Enforce child distance constraint
+    for i=0,groups.size do
+      var gi = groups:getPointer(i)
+      for j=0,numChildren-1 do
+        var gi_j = gi.children:getPointer(j)
+        for k=j+1,numChildren do
+          var gi_k = gi.children:getPointer(k)
+          factor(softEq(gi_j.pos:dist(gi_k.pos), 2.0*gi.size, 0.01))
+        end
       end
     end
 
@@ -239,8 +252,8 @@ local function model()
         for k=0,numChildren do
           var gi_k = gi.children:getPointer(k)
           var gj_k = gj.children:getPointer(k)
-          factor(softEq(gi_k.pos:dist(gj.pos), 1.1*touchDist, 1.0))
-          factor(softEq(gj_k.pos:dist(gi.pos), 1.1*touchDist, 1.0))
+          factor(softEq(gi_k.pos:dist(gj.pos), 1.5*touchDist, 1.0))
+          factor(softEq(gj_k.pos:dist(gi.pos), 1.5*touchDist, 1.0))
         end
       end
     end
