@@ -26,9 +26,6 @@ local RGBImage = image.Image(uint8, 3)
 
 local function staticsModel()
 	local gravityConstant = `9.8
-	local sceneWidth = `50.0
-	local sceneHeight = `50.0
-	local groundHeight = `2.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = staticsUtils.Force(real)
@@ -64,26 +61,32 @@ local function staticsModel()
 				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0})
 			end
 		end
-		-- Calculate residuals
-		var totalfres = real(0.0)
-		var totaltres = real(0.0)
+		-- Calculate residuals and apply factors
+		var fres = Vec2.stackAlloc(0.0, 0.0)
+		var tres = [Vector(real)].stackAlloc()
 		for i=0,scene.objects.size do
-			var fres, tres = scene.objects(i):calculateResiduals()
-			totalfres = totalfres + fres
-			totaltres = totaltres + tres
+			tres:clear()
+			-- var fres, tres = scene.objects(i):calculateResiduals()
+			scene.objects(i):calculateResiduals(&fres, &tres)
+			factor(softEq(fres(0), 0.0, 1.0))
+			factor(softEq(fres(1), 0.0, 1.0))
+			for j=0,tres.size do
+				factor(softEq(tres(j), 0.0, 1.0))
+			end
+			-- factor(softEq(fres, 0.0, 1.0))
+			-- factor(softEq(tres, 0.0, 1.0))
 		end
-		-- Add factors encouraging zero residual
-		factor(softEq(totalfres, 0.0, 1.0))
-		factor(softEq(totaltres, 0.0, 1.0))
-		-- C.printf("Total Force Residual: %g\n", ad.val(totalfres))
-		-- C.printf("Total Torque Residual: %g\n", ad.val(totaltres))
+		m.destruct(tres)
 	end)
 
 	-- Define a simple scene with a beam rotating on a hinge
 		--    attached to the ground. There's also a cable connecting
 		--    the beam to the ground. The cable is inactive; it applies
 		--    forces, but we don't solve for its equilibrium.
-	local simpleScene1 = pfn(terra()
+	local simpleBeamHingeCableScene = pfn(terra()
+		var groundHeight = 2.0
+		var sceneWidth = 50.0
+		var sceneHeight = 50.0
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 
 		var hingeY = groundHeight
@@ -99,11 +102,10 @@ local function staticsModel()
 		hinge:addBeam(beam)
 
 		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.2, groundHeight), ground)
-		-- var beamPin = Connections.CablePinT.heapAlloc(beamTop + 0.05*(beamBot-beamTop), beam)
 		var beamPin = Connections.CablePinT.heapAlloc(beamTop, beam)
 		
 		var cableWidth = 0.5
-		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth, false, true)
+		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth)
 		groundPin:addCable(cable, 0)
 		beamPin:addCable(cable, 1)
 
@@ -123,10 +125,54 @@ local function staticsModel()
 		return scene
 	end)
 
+	-- Slightly more complicated example: two hinged beams connected at the top
+	--    by a cable.
+	local twoBeamsConnectedByCableScene = pfn(terra()
+		var groundHeight = 2.0
+		var sceneWidth = 50.0
+		var sceneHeight = 50.0
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		var hinge1 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth/3.0, groundHeight))
+		var hinge2 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
+		var beamLength = 20.0
+		var beamWidth = 3.0
+		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var beam2angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		-- var beam1angle = [3*math.pi/4]
+		-- var beam2angle = [math.pi/4]
+		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
+		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
+		hinge1:addBeam(beam1)
+		hinge2:addBeam(beam2)
+		var cable = CableT.heapAlloc(beam1.endpoints[1], beam2.endpoints[1], 0.5)
+		var beam1Pin = Connections.CablePinT.heapAlloc(beam1.endpoints[1], beam1)
+		var beam2Pin = Connections.CablePinT.heapAlloc(beam2.endpoints[1], beam2)
+		beam1Pin:addCable(cable, 0)
+		beam2Pin:addCable(cable, 1)
+
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		scene.objects:push(ground)
+		scene.objects:push(beam1)
+		scene.objects:push(beam2)
+		scene.objects:push(cable)
+		var connections = [Vector(&Connections.RigidConnectionT)].stackAlloc()
+		connections:push(hinge1)
+		connections:push(hinge2)
+		connections:push(beam1Pin)
+		connections:push(beam2Pin)
+
+		enforceStability(&scene, &connections)
+
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
 	----------------------------------
 
 	return terra()
-		return simpleScene1()
+		-- return simpleBeamHingeCableScene()
+		return twoBeamsConnectedByCableScene()
 	end
 end
 
@@ -134,7 +180,7 @@ end
 ----------------------------------
 
 local forceScale = 0.1
-local function renderSamples(samples, moviename, imageWidth, imageHeight)
+local function renderSamples(samples, moviename, imageWidth)
 	local moviefilename = string.format("renders/%s.mp4", moviename)
 	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
 	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
@@ -145,7 +191,10 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 	local terra renderFrames()
 		var argc = 0
 		gl.glutInit(&argc, nil)
-		gl.glutInitWindowSize(imageWidth, imageHeight)
+		var scene0 = &samples(0).value
+		var aspectRatio = scene0.height / scene0.width
+		var imageHeight = int(aspectRatio*imageWidth)
+		gl.glutInitWindowSize(imageWidth, imageWidth)
 		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
 		gl.glutCreateWindow("Render")
 		gl.glViewport(0, 0, imageWidth, imageHeight)
@@ -155,9 +204,9 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 		for i=0,numsamps,frameSkip do
 			C.sprintf(framename, movieframebasename, framenumber)
 			framenumber = framenumber + 1
+			var scene = &samples(i).value
 			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
-			var scene = &samples(i).value
 			scene:draw(forceScale)
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
@@ -173,12 +222,12 @@ end
 
 ----------------------------------
 local numsamps = 2000
--- local numsamps = 1000000
+-- local numsamps = 2000000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
-local imageHeight = 500
-local kernel = HMC({numSteps=100, verbosity=0})
+local kernel = HMC({numSteps=1000, verbosity=0})
+-- local kernel = GaussianDrift({bandwidth=0.1})
 -- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
@@ -192,7 +241,7 @@ local terra doInference()
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
-renderSamples(samples, moviename, imageWidth, imageHeight)
+renderSamples(samples, moviename, imageWidth)
 
 
 

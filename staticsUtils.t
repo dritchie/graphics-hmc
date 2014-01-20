@@ -162,7 +162,7 @@ local RigidObject = templatize(function(real)
 	end
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
 	-- Calculate force and torque residuals
-	terra RigidObjectT:calculateResiduals()
+	terra RigidObjectT:calculateResiduals(fresOut: &Vec2, tresOut: &Vector(real))
 		-- Inactive objects have zero residual
 		if not self.active then
 			return real(0.0), real(0.0)
@@ -203,7 +203,9 @@ local RigidObject = templatize(function(real)
 			for i=0,self.forces.size do
 				totalf = totalf + self.forces(i).vec
 			end
-			var fres = totalf:norm()
+			-- var fres = totalf:norm()
+			-- var fres = ad.math.fabs(totalf(0)) + ad.math.fabs(totalf(1))
+			@fresOut = totalf
 			-- Compute torque residual
 			var tsumsq = real(0.0)
 			for i=0,cor.size do
@@ -212,11 +214,14 @@ local RigidObject = templatize(function(real)
 					var t = self.forces(j):torque(cor(i))
 					indvidualResidual = indvidualResidual + t
 				end
-				tsumsq = tsumsq + indvidualResidual*indvidualResidual
+				-- tsumsq = tsumsq + indvidualResidual*indvidualResidual
+				-- tsumsq = tsumsq + ad.math.fabs(indvidualResidual)
+				tresOut:push(indvidualResidual)
 			end
-			var tres = ad.math.sqrt(tsumsq/cor.size)
+			-- var tres = ad.math.sqrt(tsumsq/cor.size)
+			-- var tres = tsumsq/cor.size
 			-- Return
-			return fres, tres
+			-- return fres, tres
 		end
 	end
 	terra RigidObjectT:mass() : real
@@ -338,9 +343,9 @@ local Cable = templatize(function(real)
 		self.endpoints[1] = top
 		self.width = w
 	end
-	-- Cables are active and visible by default
+	-- Cables are inactive and visible by default
 	terra CableT:__construct(bot: Vec2, top: Vec2, w: real) : {}
-		self:__construct(bot, top, w, true, true)
+		self:__construct(bot, top, w, false, true)
 	end
 	-- (Inherit parent destructor)
 	terra CableT:__copy(other: &CableT)
