@@ -31,6 +31,7 @@ local function staticsModel()
 	local groundHeight = `2.0
 
 	local Vec2 = Vec(real, 2)
+	local ForceT = staticsUtils.Force(real)
 	local RigidObjectT = staticsUtils.RigidObject(real)
 	local BeamT = staticsUtils.Beam(real)
 	local CableT = staticsUtils.Cable(real)
@@ -47,6 +48,34 @@ local function staticsModel()
 	end)
 
 	----------------------------------
+
+	-- Enforce static equilibrium of a scene given some connections
+	local enforceStability = pfn(terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnectionT))
+		-- Apply internal forces
+		for i=0,connections.size do
+			connections(i):applyForces()
+		end
+		-- Apply gravity to everything affected by it
+		var down = Vec2.stackAlloc(0.0, -1.0)
+		for i=0,scene.objects.size do
+			var obj = scene.objects(i)
+			if obj.affectedByGravity then
+				var gforce = gravityConstant * obj:mass() * down
+				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 1})
+			end
+		end
+		-- Calculate residuals
+		var totalfres = real(0.0)
+		var totaltres = real(0.0)
+		for i=0,scene.objects.size do
+			var fres, tres = scene.objects(i):calculateResiduals()
+			totalfres = totalfres + fres
+			totaltres = totaltres + tres
+		end
+		-- Add factors encouraging zero residual
+		factor(softEq(totalfres, 0.0, 1.0))
+		factor(softEq(totaltres, 0.0, 1.0))
+	end)
 
 	-- Define a simple scene with a beam rotating on a hinge
 		--    attached to the ground. There's also a cable connecting
@@ -72,6 +101,11 @@ local function staticsModel()
 		
 		var cableWidth = 0.5
 		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth, false, true)
+		-- C.printf("pin locs: (%g,%g), (%g,%g) | cable endpoints: (%g,%g), (%g,%g)\n",
+		-- 	ad.val(groundPin.location(0)), ad.val(groundPin.location(1)),
+		-- 	ad.val(beamPin.location(0)), ad.val(beamPin.location(1)),
+		-- 	ad.val(cable.endpoints[0](0)), ad.val(cable.endpoints[0](1)),
+		-- 	ad.val(cable.endpoints[1](0)), ad.val(cable.endpoints[1](1)))
 		groundPin:addCable(cable, 0)
 		beamPin:addCable(cable, 1)
 
@@ -84,7 +118,7 @@ local function staticsModel()
 		connections:push(groundPin)
 		connections:push(beamPin)
 
-		-- TODO: Enforce equilibrium
+		enforceStability(&scene, &connections)
 
 		connections:clearAndDelete()
 		m.destruct(connections)
@@ -145,7 +179,7 @@ local verbose = true
 local temp = 1.0
 local imageWidth = 500
 local imageHeight = 500
-local kernel = HMC({numSteps=1000, verbosity=0})
+local kernel = HMC({numSteps=100, verbosity=0})
 -- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
@@ -154,8 +188,8 @@ local scheduleFn = macro(function(iter, currTrace)
 end)
 kernel = Schedule(kernel, scheduleFn)
 local terra doInference()
-	-- return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	return [forwardSample(staticsModel, numsamps)]
+	return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	-- return [forwardSample(staticsModel, numsamps)]
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"

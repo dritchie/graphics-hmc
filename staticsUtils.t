@@ -79,7 +79,7 @@ local Force = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint }
 	terra ForceT:torque(centerOfRotation: Vec2)
-		var d = self.point - centerOfRotation
+		var d = self.pos - centerOfRotation
 		return self.vec(0)*d(1) - self.vec(1)*d(0)
 	end
 	return ForceT
@@ -116,6 +116,10 @@ local RigidObject = templatize(function(real)
 		self.visible = other.visible
 		self.forces = m.copy(other.forces)
 	end
+	terra RigidObjectT:centerOfMass() : Vec2
+		util.fatalError("centerOfMass left unimplemented in RigidObject subclass\n")
+	end
+	inheritance.virtual(RigidObjectT, "centerOfMass")
 	-- Create a heap-allocated dynamic copy
 	inheritance.purevirtual(RigidObjectT, "newcopy", {}->{&RigidObjectT})
 	-- IMPORTANT!: apply only one force at any given location,
@@ -139,55 +143,64 @@ local RigidObject = templatize(function(real)
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
 	-- Calculate force and torque residuals
 	terra RigidObjectT:calculateResiduals()
-		-- Figure out how many force degrees of freedom we have
-		var numDOF = 0
-		for i=0,self.forces.size do
-			numDOF = numDOF + self.forces(i).dof
-		end
-		-- Figure out how many force equations we have
-		-- If all forces are 1-DOF and act along the same line, then we have 1
-		-- Otherwise, we have 2
-		var numForceEqns = self.forces(0).dof
-		if numForceEqns == 1 then
-			for i=1,self.forces.size do
-				var f = self.forces:getPointer(i)
-				if f.dof > 1 or not collinear(f, self.forces(0)) then
-					numForceEqns = 2
-					break
+		-- Inactive objects have zero residual
+		if not self.active then
+			return real(0.0), real(0.0)
+		else
+			-- Figure out how many force degrees of freedom we have
+			var numDOF = 0
+			for i=0,self.forces.size do
+				numDOF = numDOF + self.forces(i).dof
+			end
+			-- Figure out how many force equations we have
+			-- If all forces are 1-DOF and act along the same line, then we have 1
+			-- Otherwise, we have 2
+			var numForceEqns = self.forces(0).dof
+			if numForceEqns == 1 then
+				for i=1,self.forces.size do
+					var f = self.forces:getPointer(i)
+					if f.dof > 1 or not collinear(f.vec, self.forces(0).vec) then
+						numForceEqns = 2
+						break
+					end
 				end
 			end
-		end
-		-- We need (numDOF - numForceEqns) torque equations to have a fully-determined
-		--    system. And we always have at least one torque equation, just to be
-		--    sure that we satisfy static equilibrium. This may make some configurations
-		--    over-determined. That's fine--the system should (in theory) try to avoid those.
-		var numTorqueEqns = min(numDOF - numForceEqns, 1)
-		-- Get the centers of rotation we'll use for torque calculations
-		var cor = [Vector(Vec2)].stackAlloc()
-		if not self:getCentersOfRotation(numTorqueEqns, &cor) then
-			util.fatalError("RigidObject - Was not given enough centers of rotation to enforce torque equilibrium\n")
-		end
-		------------------------------------------------------------------------------
-		-- TODO: Not sure if computing residuals this way is the best way to do it...
-		------------------------------------------------------------------------------
-		-- Compute force residual
-		var totalf = Vec2.stackAlloc(0.0)
-		for i=0,self.forces.size do
-			totalf = totalf + self.forces(i)
-		end
-		var fres = totalf:norm()
-		-- Compute torque residual
-		var tsumsq = real(0.0)
-		for i=0,cor.size do
-			for j=0,self.forces.size do
-				var t = self.forces(j):torque(cor(i))
-				tsumsq = tsumsq + t*t
+			-- We need (numDOF - numForceEqns) torque equations to have a fully-determined
+			--    system. And we always have at least one torque equation, just to be
+			--    sure that we satisfy static equilibrium. This may make some configurations
+			--    over-determined. That's fine--the system should (in theory) try to avoid those.
+			var numTorqueEqns = min(numDOF - numForceEqns, 1)
+			-- Get the centers of rotation we'll use for torque calculations
+			var cor = [Vector(Vec2)].stackAlloc()
+			if not self:getCentersOfRotation(numTorqueEqns, &cor) then
+				util.fatalError("RigidObject - Was not given enough centers of rotation to enforce torque equilibrium\n")
 			end
+			------------------------------------------------------------------------------
+			-- TODO: Not sure if computing residuals this way is the best way to do it...
+			------------------------------------------------------------------------------
+			-- Compute force residual
+			var totalf = Vec2.stackAlloc(0.0)
+			for i=0,self.forces.size do
+				totalf = totalf + self.forces(i).vec
+			end
+			var fres = totalf:norm()
+			-- Compute torque residual
+			var tsumsq = real(0.0)
+			for i=0,cor.size do
+				for j=0,self.forces.size do
+					var t = self.forces(j):torque(cor(i))
+					tsumsq = tsumsq + t*t
+				end
+			end
+			var tres = ad.math.sqrt(tsumsq/cor.size)
+			-- Return
+			return fres, tres
 		end
-		var tres = ad.math.sqrt(tsumsq/cor.size)
-		-- Return
-		return fres, tres
 	end
+	terra RigidObjectT:mass() : real
+		return 0.0
+	end
+	inheritance.virtual(RigidObjectT, "mass")
 	-- OpenGL drawing
 	if real == double then
 		inheritance.purevirtual(RigidObjectT, "drawImpl", {}->{})
@@ -204,13 +217,15 @@ end)
 
 -- A Beam is a rigid bar of finite area
 local beamColor = colors.Tableau10.Blue
+local beamDensity = 0.1
 local Beam = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local RigidObjectT = RigidObject(real)
 	local struct BeamT
 	{
 		endpoints: Vec2[2],
-		width: real
+		width: real,
+		density: real
 	}
 	if real == double then
 		BeamT.entries:insert({field="color", type=Color3d})
@@ -221,6 +236,7 @@ local Beam = templatize(function(real)
 		self.endpoints[0] = bot
 		self.endpoints[1] = top
 		self.width = w
+		self.density = beamDensity
 		[util.optionally(real==double, function() return quote
 			self.color = Color3d.stackAlloc([beamColor])
 		end end)]
@@ -235,6 +251,7 @@ local Beam = templatize(function(real)
 		self.endpoints[0] = other.endpoints[0]
 		self.endpoints[1] = other.endpoints[1]
 		self.width = other.width
+		self.density = other.density
 		[util.optionally(real==double, function() return quote
 			self.color = other.color
 		end end)]
@@ -245,6 +262,10 @@ local Beam = templatize(function(real)
 		return newbeam
 	end
 	inheritance.virtual(BeamT, "newcopy")
+	terra BeamT:centerOfMass() : Vec2
+		return 0.5 * (self.endpoints[0] + self.endpoints[1])
+	end
+	inheritance.virtual(BeamT, "centerOfMass")
 	-- TODO: Uncomment and finish this if it seems like we actually need it.
 	-- -- Beams can generate arbitrarily many centers of rotation by randomly
 	-- --    sampling inside their bounds
@@ -259,6 +280,10 @@ local Beam = templatize(function(real)
 	-- 	return true
 	-- end
 	-- inheritance.virtual(BeamT, "getCentersOfRotation")
+	terra BeamT:mass() : real
+		return (self.endpoints[1] - self.endpoints[0]):norm() * self.width * self.density
+	end
+	inheritance.virtual(BeamT, "mass")
 	-- OpenGL drawing code
 	if real == double then
 		terra BeamT:drawImpl() : {}
@@ -456,7 +481,7 @@ local function Connections()
 	terra RigidConnectionT:applyForces()
 		self:applyForcesImpl()
 	end
-	RigidConnectionT.methods.applyForces = pfn(RigidConnectionT.methods.applyForces, {ismethod=true})
+	RigidConnectionT.methods.applyForces = pmethod(RigidConnectionT.methods.applyForces)
 
 	-- A Hinge applies a 2-DOF force to a Beam
 	-- It can be connected to one or more Beams
@@ -504,12 +529,8 @@ local function Connections()
 		m.destruct(self.cables)
 		m.destruct(self.cableEndpoints)
 	end
+	-- Assumption is that the endpoint is colocated with the pin location
 	terra CablePinT:addCable(cable: &CableT, endpoint: uint)
-		-- Cable endpoint must coincide with the location of this pin
-		-- TODO: kind of weird. better way to implicitly enforce this constraint?
-		if not (cable.endpoints[endpoint] == self.location) then
-			util.fatalError("CablePin: Cables must touch a CablePin to connect to it.\n")
-		end
 		self.cables:push(cable)
 		self.cableEndpoints:push(endpoint)
 	end
@@ -558,12 +579,8 @@ local function Connections()
 		m.destruct(self.cables)
 		m.destruct(self.cableEndpoints)
 	end
+	-- Assumption is that the endpoint is colocated with the knot location
 	terra CableKnotT:addCable(cable: &CableT, endpoint: uint)
-		-- Cable endpoint must coincide with the location of this knot
-		-- TODO: kind of weird. better way to implicitly enforce this constraint?
-		if not (cable.endpoints[endpoint] == self.location) then
-			util.fatalError("CableKnot: Cables must touch a CableKnot to connect to it.\n")
-		end
 		self.cables:push(cable)
 		self.cableEndpoints:push(endpoint)
 	end
@@ -641,6 +658,7 @@ end
 
 return
 {
+	Force = Force,
 	RigidObject = RigidObject,
 	Beam = Beam,
 	Cable = Cable,
