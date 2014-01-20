@@ -61,7 +61,7 @@ local function staticsModel()
 			var obj = scene.objects(i)
 			if obj.affectedByGravity then
 				var gforce = gravityConstant * obj:mass() * down
-				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 1})
+				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0})
 			end
 		end
 		-- Calculate residuals
@@ -75,6 +75,8 @@ local function staticsModel()
 		-- Add factors encouraging zero residual
 		factor(softEq(totalfres, 0.0, 1.0))
 		factor(softEq(totaltres, 0.0, 1.0))
+		-- C.printf("Total Force Residual: %g\n", ad.val(totalfres))
+		-- C.printf("Total Torque Residual: %g\n", ad.val(totaltres))
 	end)
 
 	-- Define a simple scene with a beam rotating on a hinge
@@ -84,28 +86,24 @@ local function staticsModel()
 	local simpleScene1 = pfn(terra()
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 
-		var hingeBot = groundHeight
-		var hingeRad = 2.0
-		var hinge = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5, hingeBot+hingeRad))
+		var hingeY = groundHeight
+		var hinge = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5, hingeY))
 		
-		var beamBot = Vec2.stackAlloc(hinge.location(0), hingeBot)
+		var beamBot = Vec2.stackAlloc(hinge.location(0), hingeY)
 		var beamLen = 20.0
+		-- var beamAngle = [math.pi/4]
 		var beamAngle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
 		var beamTop = beamBot + polar2rect(beamLen, beamAngle)
 		var beamWidth = 3.0
 		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
 		hinge:addBeam(beam)
 
-		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.2, groundHeight-0.1), beam)
-		var beamPin = Connections.CablePinT.heapAlloc(beamTop + 0.05*(beamBot-beamTop), beam)
+		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.2, groundHeight), ground)
+		-- var beamPin = Connections.CablePinT.heapAlloc(beamTop + 0.05*(beamBot-beamTop), beam)
+		var beamPin = Connections.CablePinT.heapAlloc(beamTop, beam)
 		
 		var cableWidth = 0.5
 		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth, false, true)
-		-- C.printf("pin locs: (%g,%g), (%g,%g) | cable endpoints: (%g,%g), (%g,%g)\n",
-		-- 	ad.val(groundPin.location(0)), ad.val(groundPin.location(1)),
-		-- 	ad.val(beamPin.location(0)), ad.val(beamPin.location(1)),
-		-- 	ad.val(cable.endpoints[0](0)), ad.val(cable.endpoints[0](1)),
-		-- 	ad.val(cable.endpoints[1](0)), ad.val(cable.endpoints[1](1)))
 		groundPin:addCable(cable, 0)
 		beamPin:addCable(cable, 1)
 
@@ -135,6 +133,7 @@ end
 
 ----------------------------------
 
+local forceScale = 0.1
 local function renderSamples(samples, moviename, imageWidth, imageHeight)
 	local moviefilename = string.format("renders/%s.mp4", moviename)
 	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
@@ -159,7 +158,7 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
 			var scene = &samples(i).value
-			scene:draw()
+			scene:draw(forceScale)
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
 				gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)

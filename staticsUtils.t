@@ -43,6 +43,15 @@ local collinear = macro(function(v1, v2)
 	return `v1(0)*v2(1) - v1(1)*v2(0) == 0.0
 end)
 
+local terra drawLine(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
+	gl.glLineWidth(width)
+	gl.glColor3d(color(0), color(1), color(2))
+	gl.glBegin(gl.mGL_LINES())
+	gl.glVertex2d(bot(0), bot(1))
+	gl.glVertex2d(top(0), top(1))
+	gl.glEnd()
+end
+
 local terra drawBar(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
 	var dir = top - bot
 	dir:normalize()
@@ -61,6 +70,7 @@ local terra drawBar(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
 	gl.glVertex2d(p3(0), p3(1))
 	gl.glEnd()
 	-- Draw black outline
+	gl.glLineWidth(2.0)
 	gl.glColor3d(0.0, 0.0, 0.0)
 	gl.glBegin(gl.mGL_LINE_LOOP())
 	gl.glVertex2d(p0(0), p0(1))
@@ -75,12 +85,22 @@ end
 --    * A position indicating where the force is applied
 --    * A number indicating the number of degrees of freedom in the force
 --      (i.e. is it constrained to point in a particular direction, or is it free?)
+local forceColor = colors.Tableau10.Red
+local forceLineWidth = 3.0
 local Force = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint }
 	terra ForceT:torque(centerOfRotation: Vec2)
 		var d = self.pos - centerOfRotation
-		return self.vec(0)*d(1) - self.vec(1)*d(0)
+		-- C.printf("f: (%g, %g), d: (%g, %g)\n", 
+		-- 	ad.val(self.vec(0)), ad.val(self.vec(1)), ad.val(d(0)), ad.val(d(1)))
+		return d(0)*self.vec(1) - d(1)*self.vec(0)
+	end
+	if real==double then
+		terra ForceT:draw(scale: double)
+			var endpoint = self.pos + scale*self.vec
+			drawLine(self.pos, endpoint, forceLineWidth, Color3d.stackAlloc([forceColor]))
+		end
 	end
 	return ForceT
 end)
@@ -187,10 +207,12 @@ local RigidObject = templatize(function(real)
 			-- Compute torque residual
 			var tsumsq = real(0.0)
 			for i=0,cor.size do
+				var indvidualResidual = real(0.0)
 				for j=0,self.forces.size do
 					var t = self.forces(j):torque(cor(i))
-					tsumsq = tsumsq + t*t
+					indvidualResidual = indvidualResidual + t
 				end
+				tsumsq = tsumsq + indvidualResidual*indvidualResidual
 			end
 			var tres = ad.math.sqrt(tsumsq/cor.size)
 			-- Return
@@ -368,6 +390,7 @@ local Ground = templatize(function(real)
 		var bot = Vec2.stackAlloc(midx, groundHeight - groundTallness)
 		var w = right - left
 		var beam = BeamT.heapAlloc(bot, top, w, false, true)
+		beam.affectedByGravity = false
 		[util.optionally(real==double, function() return quote
 			beam.color = Color3d.stackAlloc([groundColor])
 		end end)]
@@ -405,14 +428,24 @@ local RigidScene = templatize(function(real)
 	end
 	-- OpenGL drawing code
 	if real == double then
-		terra RigidSceneT:draw()
+		terra RigidSceneT:draw(forceScale: double)
 			gl.glMatrixMode(gl.mGL_PROJECTION())
 			gl.glLoadIdentity()
 			gl.gluOrtho2D(0, self.width, 0, self.height)
 			gl.glMatrixMode(gl.mGL_MODELVIEW())
 			gl.glLoadIdentity()
+			-- Pass 1: Draw objects
 			for i=0,self.objects.size do
 				self.objects(i):draw()
+			end
+			-- Pass 2: Draw forces
+			if forceScale > 0.0 then
+				for i=0,self.objects.size do
+					-- Also draw forces
+					for j=0,self.objects(i).forces.size do
+						self.objects(i).forces(j):draw(forceScale)
+					end
+				end
 			end
 		end
 	end
@@ -426,7 +459,7 @@ end)
 -------------------------------------------------------------------------------
 
 local function Connections()
-	local forcePriorVariance = 10000.0
+	local forcePriorVariance = 100000000000.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
