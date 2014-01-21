@@ -189,7 +189,7 @@ local RigidObject = templatize(function(real)
 			--    system. And we always have at least one torque equation, just to be
 			--    sure that we satisfy static equilibrium. This may make some configurations
 			--    over-determined. That's fine--the system should (in theory) try to avoid those.
-			var numTorqueEqns = min(numDOF - numForceEqns, 1)
+			var numTorqueEqns = max(numDOF - numForceEqns, 1)
 			-- Get the centers of rotation we'll use for torque calculations
 			var cor = [Vector(Vec2)].stackAlloc()
 			if not self:getCentersOfRotation(numTorqueEqns, &cor) then
