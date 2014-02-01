@@ -10,6 +10,8 @@ local rand =terralib.require("prob.random")
 local gl = terralib.require("gl")
 local image = terralib.require("image")
 
+local GradientAscent = terralib.require("gradientAscent")
+
 local staticsUtils = terralib.require("staticsUtils")
 
 local C = terralib.includecstring [[
@@ -65,16 +67,16 @@ local function staticsModel()
 		var fres = Vec2.stackAlloc(0.0, 0.0)
 		var tres = [Vector(real)].stackAlloc()
 		for i=0,scene.objects.size do
-			tres:clear()
-			-- var fres, tres = scene.objects(i):calculateResiduals()
-			scene.objects(i):calculateResiduals(&fres, &tres)
-			factor(softEq(fres(0), 0.0, 1.0))
-			factor(softEq(fres(1), 0.0, 1.0))
-			for j=0,tres.size do
-				factor(softEq(tres(j), 0.0, 1.0))
+			if scene.objects(i).active then
+				tres:clear()
+				-- var fres, tres = scene.objects(i):calculateResiduals()
+				scene.objects(i):calculateResiduals(&fres, &tres)
+				factor(softEq(fres(0), 0.0, 1.0))
+				factor(softEq(fres(1), 0.0, 1.0))
+				for j=0,tres.size do
+					factor(softEq(tres(j), 0.0, 1.0))
+				end
 			end
-			-- factor(softEq(fres, 0.0, 1.0))
-			-- factor(softEq(tres, 0.0, 1.0))
 		end
 		m.destruct(tres)
 	end)
@@ -246,6 +248,8 @@ local function staticsModel()
 		var beamWidth = 4.0
 		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
 		var beam2angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		-- var beam1angle = [math.pi/2]
+		-- var beam2angle = [math.pi/2]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
 		hinge1:addBeam(beam1)
@@ -265,6 +269,7 @@ local function staticsModel()
 			var centerx = platxmin + t*platxrange
 			var centery = uniform(10.0, 40.0, {structural=false, lowerBound=10.0, upperBound=40.0})
 			var center = Vec2.stackAlloc(centerx, centery)
+			-- var rot = 0.0
 			-- var rot = gaussian(0.0, [math.pi/20], {structural=false})
 			var rot = uniform([-math.pi/6], [math.pi/6], {structural=false, lowerBound=[-math.pi/6], upperBound=[math.pi/6]})
 			var width = 1.5
@@ -329,7 +334,8 @@ end
 
 ----------------------------------
 
-local forceScale = 0.1
+-- local forceScale = 0.1
+local forceScale = 1.0
 local function renderSamples(samples, moviename, imageWidth)
 	local moviefilename = string.format("renders/%s.mp4", moviename)
 	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
@@ -371,18 +377,21 @@ local function renderSamples(samples, moviename, imageWidth)
 end
 
 ----------------------------------
--- local numsamps = 10000
-local numsamps = 2000
+local numsamps = 1000
+-- local numsamps = 3000
 -- local numsamps = 2000000
+-- local numsamps = 200000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
 local kernel = HMC({numSteps=1000, verbosity=0})
+-- local kernel = GradientAscent({stepSize=0.0001})
 -- local kernel = GaussianDrift({bandwidth=0.1})
 -- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
-		currTrace.temperature = temp
+			-- currTrace.temperature = numsamps/(iter+1)
+			currTrace.temperature = temp
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)

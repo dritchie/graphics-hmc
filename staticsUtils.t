@@ -464,7 +464,10 @@ end)
 -------------------------------------------------------------------------------
 
 local function Connections()
+	local forcePriorMean = 0.0
 	local forcePriorVariance = 100000000000.0
+	-- local forcePriorMean = 100.0
+	-- local forcePriorVariance = 100.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
@@ -474,7 +477,7 @@ local function Connections()
 	-- Generate a 1-DOF force along a particular direction
 	local gen1DForce = macro(function(pos, dir)
 		return quote
-			var mag = gaussian(0.0, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0}) 
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1}
 		end
@@ -483,8 +486,8 @@ local function Connections()
 	-- Generate a completely unconstrained 2-DOF force
 	local genUnconstrained2DForce = macro(function(pos)
 		return quote
-			var x = gaussian(0.0, forcePriorVariance, {structural=false, initialVal=0.0}) 
-			var y = gaussian(0.0, forcePriorVariance, {structural=false, initialVal=0.0}) 
+			var x = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0}) 
+			var y = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
 		in
 			ForceT { Vec2.stackAlloc(x, y), pos, 2}
 		end
