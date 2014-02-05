@@ -334,8 +334,8 @@ end
 
 ----------------------------------
 
--- local forceScale = 0.1
-local forceScale = 1.0
+local forceScale = 0.1
+-- local forceScale = 1.0
 local function renderSamples(samples, moviename, imageWidth)
 	local moviefilename = string.format("renders/%s.mp4", moviename)
 	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
@@ -384,13 +384,17 @@ local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
-local kernel = HMC({numSteps=1000, verbosity=0})
+local kernel = HMC({numSteps=1000, verbosity=0, temperingMult=1.0})
 -- local kernel = GradientAscent({stepSize=0.0001})
 -- local kernel = GaussianDrift({bandwidth=0.1})
 -- local kernel = RandomWalk()
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
-			-- currTrace.temperature = numsamps/(iter+1)
+			-- if iter < numsamps/2 then
+			-- 	currTrace.temperature = (numsamps/2.0)/(iter+1)
+			-- 	-- currTrace.temperature = numsamps/(iter/2.0+1)
+			-- end
+			-- currTrace.temperature = double(numsamps)/(iter+1)
 			currTrace.temperature = temp
 	end
 end)
