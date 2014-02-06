@@ -376,11 +376,16 @@ local function renderSamples(samples, moviename, imageWidth)
 	print("done.")
 end
 
+local lerp = macro(function(lo, hi, t)
+	return `(1.0-t)*lo + t*hi
+end)
+local expinterp = macro(function(lo, hi, t)
+	return `ad.math.exp( (1.0-t)*ad.math.log(lo) + t*ad.math.log(hi) )
+end)
+
 ----------------------------------
-local numsamps = 1000
--- local numsamps = 3000
--- local numsamps = 2000000
--- local numsamps = 200000
+local numsamps = 3000
+-- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
@@ -389,18 +394,13 @@ local kernel = HMC({numSteps=1000, verbosity=0, --stepSize=0.0001, stepSizeAdapt
 					temperGuideHamiltonian=false,
 					temperInitialMomentum=false})
 -- local kernel = GradientAscent({stepSize=0.0001})
--- local kernel = GaussianDrift({bandwidth=0.1})
+-- local kernel = GaussianDrift({bandwidth = function(temp) return `lerp(0.5, 3.0, temp/100.0) end})
+-- local kernel = GaussianDrift({bandwidth = 1.5})
 -- local kernel = RandomWalk()
-local lerp = macro(function(lo, hi, t)
-	return `(1.0-t)*lo + t*hi
-end)
-local expinterp = macro(function(lo, hi, t)
-	return `ad.math.exp( (1.0-t)*ad.math.log(lo) + t*ad.math.log(hi) )
-end)
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
 			-- currTrace.temperature = lerp(100.0, 1.0, iter/double(numsamps))
-			-- currTrace.temperature = expinterp(10.0, 1.0, iter/double(numsamps))
+			-- currTrace.temperature = expinterp(100.0, 1.0, iter/double(numsamps))
 			-- currTrace.temperature = 100.0
 	end
 end)
