@@ -363,7 +363,7 @@ local function renderSamples(samples, moviename, imageWidth)
 			var scene = &samples(i).value
 			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
-			scene:draw(forceScale)
+			scene:draw(forceScale) 
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
 				gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
@@ -384,18 +384,24 @@ local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local imageWidth = 500
-local kernel = HMC({numSteps=1000, verbosity=0, temperingMult=1.0})
+local kernel = HMC({numSteps=1000, verbosity=0, --stepSize=0.0001, stepSizeAdapt=false,
+					temperAcceptHamiltonian=false,
+					temperGuideHamiltonian=false,
+					temperInitialMomentum=false})
 -- local kernel = GradientAscent({stepSize=0.0001})
 -- local kernel = GaussianDrift({bandwidth=0.1})
 -- local kernel = RandomWalk()
+local lerp = macro(function(lo, hi, t)
+	return `(1.0-t)*lo + t*hi
+end)
+local expinterp = macro(function(lo, hi, t)
+	return `ad.math.exp( (1.0-t)*ad.math.log(lo) + t*ad.math.log(hi) )
+end)
 local scheduleFn = macro(function(iter, currTrace)
 	return quote
-			-- if iter < numsamps/2 then
-			-- 	currTrace.temperature = (numsamps/2.0)/(iter+1)
-			-- 	-- currTrace.temperature = numsamps/(iter/2.0+1)
-			-- end
-			-- currTrace.temperature = double(numsamps)/(iter+1)
-			currTrace.temperature = temp
+			-- currTrace.temperature = lerp(100.0, 1.0, iter/double(numsamps))
+			-- currTrace.temperature = expinterp(10.0, 1.0, iter/double(numsamps))
+			-- currTrace.temperature = 100.0
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)
