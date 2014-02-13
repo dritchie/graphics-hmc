@@ -8,7 +8,6 @@ local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
 local rand =terralib.require("prob.random")
 local gl = terralib.require("gl")
-local image = terralib.require("image")
 
 local GradientAscent = terralib.require("gradientAscent")
 
@@ -20,7 +19,6 @@ local C = terralib.includecstring [[
 
 local Vec2d = Vec(double, 2)
 local Color3d = Vec(double, 3)
-local RGBImage = image.Image(uint8, 3)
 
 
 ----------------------------------
@@ -336,105 +334,11 @@ end
 
 ----------------------------------
 
-local trace = terralib.require("prob.trace")
-local inf = terralib.require("prob.inference")
-local newton = terralib.require("prob.newton")
-local spec = terralib.require("prob.specialize")
-local inheritance = terralib.require("inheritance")
+local rendering = terralib.require("rendering")
 
--- Turn traceUpdate into a function that can be passed into
---    a newton solver
-local function makeNewtonFn(adTrace)
-	return newton.wrapDualFn(macro(function(x, y)
-		return quote
-			-- Copy inputs into the nonstructural vars
-			adTrace:setRawNonStructuralReals(x)
-			-- Update the trace
-			[trace.traceUpdate({structureChange=false})](adTrace)
-			-- Copy the new manifold values out of the trace
-			y:resize(adTrace.manifolds.size)
-			for i=0,adTrace.manifolds.size do
-				y(i) = adTrace.manifolds(i)
-			end
-			-- C.printf("%u x %u\n", x.size, y.size)
-		end
-	end))
-end
-
--- Run Newton's method to project a trace's continuous variables onto
---    the manifold.
--- Modifies currTrace in place.
-local terra newtonManifoldProjection(currTrace: &trace.BaseTrace(double))
-	-- We need to touch the .manifolds member, so this only works for GlobalTrace
-	util.assert([inheritance.isInstanceOf(trace.GlobalTrace(double))](currTrace))
-	var globTrace = [&trace.GlobalTrace(double)](currTrace)
-	var x = [Vector(double)].stackAlloc()
-	globTrace:getRawNonStructuralReals(&x)
-	var adTrace = [&trace.GlobalTrace(ad.num)]([trace.BaseTrace(double).deepcopy(ad.num)](globTrace))
-	var retcode = [newton.newtonLeastSquares(makeNewtonFn(adTrace))](&x)
-	m.delete(adTrace)
-	globTrace:setRawNonStructuralReals(&x)
-	[trace.traceUpdate({structureChange=false})](globTrace)
-	return retcode
-end
-
--- Alternate newton with hmc until we hit the manifold
--- May modify and/or delete currTrace. Returns the updated trace object; use that instead.
-local function newtonPlusHMCManifoldProjection(computation, hmcKernelParams, mcmcParams, maxTotalSamps)
-	-- Tell HMC to use relaxed manifolds
-	hmcKernelParams.relaxManifolds = true
-	local maxIters = maxTotalSamps / mcmcParams.numsamps
-	return terra(currTrace: &trace.BaseTrace(double), samples: &inf.types.SampleVectorType(computation))
-		-- The initial trace needs to use a relaxed manifold, because the hmc will, and if we don't
-		--    do this, then probably none of the hmc proposals will be accepted
-		[trace.traceUpdate({structureChange=false, relaxManifolds=true})](currTrace)
-		var kernel = [HMC(hmcKernelParams)()]
-		var retcode = newton.ReturnCodes.DidNotConverge
-		[util.optionally(mcmcParams.verbose, function() return quote
-			C.printf("Newton-HMC manifold projection\n")
-		end end)]
-		for iter=0,maxIters do
-			[util.optionally(mcmcParams.verbose, function() return quote
-				C.printf("iteration %d\n", iter)
-			end end)]
-			var newTrace = currTrace:deepcopy()
-			-- Attempt a Newton projection
-			var retcode = newtonManifoldProjection(newTrace)
-			-- If that worked, return
-			if retcode == newton.ReturnCodes.ConvergedToSolution then
-				[util.optionally(mcmcParams.verbose, function() return quote
-					C.printf("DONE (Newton projection succeeded)\n")
-				end end)]
-				m.delete(currTrace)
-				currTrace = newTrace
-				break
-			-- If that didn't work, run HMC for a while before trying again
-			else
-				[util.optionally(mcmcParams.verbose, function() return quote
-					C.printf("Newton projection failed; doing HMC...\n")
-				end end)]
-				currTrace = [inf.mcmcSample(computation, mcmcParams)](currTrace, kernel, samples)
-			end
-		end
-		m.delete(kernel)
-		return currTrace
-	end
-end
-
-
-----------------------------------
-
-local forceScale = 0.1
--- local forceScale = 1.0
-local function renderSamples(samples, moviename, imageWidth)
-	local moviefilename = string.format("renders/%s.mp4", moviename)
-	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
-	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
-	io.write("Rendering video...")
-	io.flush()
-	local numsamps = samples.size
-	local frameSkip = math.ceil(numsamps / 1000.0)
-	local terra renderFrames()
+local imageWidth = 500
+local function renderInitFn(samples, im)
+	return quote
 		var argc = 0
 		gl.glutInit(&argc, nil)
 		var scene0 = &samples(0).value
@@ -444,27 +348,25 @@ local function renderSamples(samples, moviename, imageWidth)
 		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
 		gl.glutCreateWindow("Render")
 		gl.glViewport(0, 0, imageWidth, imageHeight)
-		var im = RGBImage.stackAlloc(imageWidth, imageHeight)
-		var framename: int8[1024]
-		var framenumber = 0
-		for i=0,numsamps,frameSkip do
-			C.sprintf(framename, movieframebasename, framenumber)
-			framenumber = framenumber + 1
-			var scene = &samples(i).value
-			gl.glClearColor(1.0, 1.0, 1.0, 1.0)
-			gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
-			scene:draw(forceScale) 
-			gl.glFlush()
-			gl.glReadPixels(0, 0, imageWidth, imageHeight,
-				gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
-			[RGBImage.save()](&im, image.Format.PNG, framename)
-		end
+		im:resize(imageWidth, imageHeight)
 	end
-	renderFrames()
-	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
-	util.wait(string.format("rm -f %s", movieframewildcard))
-	print("done.")
 end
+
+local forceScale = 0.1
+-- local forceScale = 1.0
+local function renderDrawFn(sample, im)
+	return quote
+		var scene = &sample.value
+		gl.glClearColor(1.0, 1.0, 1.0, 1.0)
+		gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
+		scene:draw(forceScale) 
+		gl.glFlush()
+		gl.glReadPixels(0, 0, im.width, im.height,
+			gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
+	end
+end
+
+----------------------------------
 
 local lerp = macro(function(lo, hi, t)
 	return `(1.0-t)*lo + t*hi
@@ -474,11 +376,11 @@ local expinterp = macro(function(lo, hi, t)
 end)
 
 ----------------------------------
+
 local numsamps = 1000
 -- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
-local imageWidth = 500
 local kernel = HMC({numSteps=1000, verbosity=0, --stepSize=0.0001, stepSizeAdapt=false,
 					temperAcceptHamiltonian=false,
 					temperGuideHamiltonian=false,
@@ -495,24 +397,28 @@ local scheduleFn = macro(function(iter, currTrace)
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)
+local spec = terralib.require("prob.specialize")
+local newton = terralib.require("prob.newtonProj")
+local inf = terralib.require("prob.inference")
+local trace = terralib.require("prob.trace")
 staticsModel = spec.ensureProbComp(staticsModel)
 local terra doInference()
 	-- return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
 	-- return [forwardSample(staticsModel, numsamps)]
 
-	var samples = [inf.types.SampleVectorType(staticsModel)].stackAlloc()
+	var samples = [inf.SampleVectorType(staticsModel)].stackAlloc()
 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(staticsModel)]
-	samples:push([inf.types.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
-	-- newtonManifoldProjection(currTrace)
-	currTrace = [newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
-	-- currTrace = [newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, nil)
-	samples:push([inf.types.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
+	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
+	-- newton.newtonManifoldProjection(currTrace)
+	currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
+	-- currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, nil)
+	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
 	m.delete(currTrace)
 	return samples
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
-renderSamples(samples, moviename, imageWidth)
+rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, imageWidth)
 
 
 
