@@ -3,7 +3,6 @@ terralib.require("prob")
 local util = terralib.require("util")
 local m = terralib.require("mem")
 local templatize = terralib.require("templatize")
-local inheritance = terralib.require("inheritance")
 local ad = terralib.require("ad")
 local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
@@ -274,7 +273,7 @@ local function staticsModel()
 			var centery = uniform(10.0, 40.0, {structural=false, lowerBound=10.0, upperBound=40.0})
 			var center = Vec2.stackAlloc(centerx, centery)
 			-- var rot = 0.0
-			-- var rot = gaussian(0.0, [math.pi/20], {structural=false})
+			-- var rot = gaussian(0.0, [math.pi/100], {structural=false})
 			var rot = uniform([-math.pi/6], [math.pi/6], {structural=false, lowerBound=[-math.pi/6], upperBound=[math.pi/6]})
 			var width = 1.5
 			var length = 4.0
@@ -341,6 +340,7 @@ local trace = terralib.require("prob.trace")
 local inf = terralib.require("prob.inference")
 local newton = terralib.require("prob.newton")
 local spec = terralib.require("prob.specialize")
+local inheritance = terralib.require("inheritance")
 
 -- Turn traceUpdate into a function that can be passed into
 --    a newton solver
@@ -380,21 +380,20 @@ end
 
 -- Alternate newton with hmc until we hit the manifold
 -- May modify and/or delete currTrace. Returns the updated trace object; use that instead.
-local function newtonPlusHMCManifoldProjection(computation, hmcKernelParams, mcmcParams)
+local function newtonPlusHMCManifoldProjection(computation, hmcKernelParams, mcmcParams, maxTotalSamps)
 	-- Tell HMC to use relaxed manifolds
 	hmcKernelParams.relaxManifolds = true
-	return terra(currTrace: &trace.BaseTrace(double))
+	local maxIters = maxTotalSamps / mcmcParams.numsamps
+	return terra(currTrace: &trace.BaseTrace(double), samples: &inf.types.SampleVectorType(computation))
 		-- The initial trace needs to use a relaxed manifold, because the hmc will, and if we don't
 		--    do this, then probably none of the hmc proposals will be accepted
 		[trace.traceUpdate({structureChange=false, relaxManifolds=true})](currTrace)
 		var kernel = [HMC(hmcKernelParams)()]
 		var retcode = newton.ReturnCodes.DidNotConverge
-		var iter = 0
 		[util.optionally(mcmcParams.verbose, function() return quote
 			C.printf("Newton-HMC manifold projection\n")
 		end end)]
-		while true do
-			iter = iter + 1
+		for iter=0,maxIters do
 			[util.optionally(mcmcParams.verbose, function() return quote
 				C.printf("iteration %d\n", iter)
 			end end)]
@@ -414,7 +413,7 @@ local function newtonPlusHMCManifoldProjection(computation, hmcKernelParams, mcm
 				[util.optionally(mcmcParams.verbose, function() return quote
 					C.printf("Newton projection failed; doing HMC...\n")
 				end end)]
-				currTrace = [inf.mcmcSample(computation, mcmcParams)](currTrace, kernel, nil)
+				currTrace = [inf.mcmcSample(computation, mcmcParams)](currTrace, kernel, samples)
 			end
 		end
 		m.delete(kernel)
@@ -475,7 +474,7 @@ local expinterp = macro(function(lo, hi, t)
 end)
 
 ----------------------------------
-local numsamps = 3000
+local numsamps = 1000
 -- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
@@ -505,7 +504,8 @@ local terra doInference()
 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(staticsModel)]
 	samples:push([inf.types.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
 	-- newtonManifoldProjection(currTrace)
-	currTrace = [newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true})](currTrace)
+	currTrace = [newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
+	-- currTrace = [newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, nil)
 	samples:push([inf.types.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
 	m.delete(currTrace)
 	return samples
