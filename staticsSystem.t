@@ -71,10 +71,13 @@ local function staticsModel()
 				tres:clear()
 				-- var fres, tres = scene.objects(i):calculateResiduals()
 				scene.objects(i):calculateResiduals(&fres, &tres)
-				factor(softEq(fres(0), 0.0, 1.0))
-				factor(softEq(fres(1), 0.0, 1.0))
+				-- factor(softEq(fres(0), 0.0, 1.0))
+				manifold(fres(0))
+				-- factor(softEq(fres(1), 0.0, 1.0))
+				manifold(fres(1))
 				for j=0,tres.size do
-					factor(softEq(tres(j), 0.0, 1.0))
+					-- factor(softEq(tres(j), 0.0, 1.0))
+					manifold(tres(j))
 				end
 			end
 		end
@@ -331,6 +334,42 @@ local function staticsModel()
 	end
 end
 
+----------------------------------
+
+local trace = terralib.require("prob.trace")
+local inf = terralib.require("prob.inference")
+local newton = terralib.require("prob.newton")
+local spec = terralib.require("prob.specialize")
+
+local function makeNewtonFn(adTrace)
+	return newton.wrapDualFn(macro(function(x, y)
+		return quote
+			-- Copy inputs into the nonstructural vars
+			adTrace:setRawNonStructuralReals(x)
+			-- Update the trace
+			[trace.traceUpdate({structureChange=false})](adTrace)
+			-- Copy the new manifold values out of the trace
+			y:resize(adTrace.manifolds.size)
+			for i=0,adTrace.manifolds.size do
+				y(i) = adTrace.manifolds(i)
+			end
+			-- C.printf("%u x %u\n", x.size, y.size)
+		end
+	end))
+end
+-- Run Newton's method to project a trace's continuous variables onto
+--    some manifold.
+local terra traceManifoldNewton(globTrace: &trace.GlobalTrace(double))
+	var x = [Vector(double)].stackAlloc()
+	globTrace:getRawNonStructuralReals(&x)
+	var adTrace = [&trace.GlobalTrace(ad.num)]([trace.BaseTrace(double).deepcopy(ad.num)](globTrace))
+	var retcode = [newton.newtonLeastSquares(makeNewtonFn(adTrace))](&x)
+	m.delete(adTrace)
+	-- util.assert(retcode == newton.ReturnCodes.ConvergedToSolution, "Newton solver terminated with return code %d\n", retcode)
+	globTrace:setRawNonStructuralReals(&x)
+	[trace.traceUpdate({structureChange=false, factorEval=false})](globTrace)
+end
+
 
 ----------------------------------
 
@@ -405,9 +444,18 @@ local scheduleFn = macro(function(iter, currTrace)
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)
+staticsModel = spec.ensureProbComp(staticsModel)
 local terra doInference()
-	return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
+	-- return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
 	-- return [forwardSample(staticsModel, numsamps)]
+
+	var samples = [inf.types.SampleVectorType(staticsModel)].stackAlloc()
+	var currTrace = [trace.newTrace(staticsModel)]
+	samples:push([inf.types.SampleType(staticsModel)].stackAlloc(currTrace.returnValue, 0.0))
+	traceManifoldNewton(currTrace)
+	samples:push([inf.types.SampleType(staticsModel)].stackAlloc(currTrace.returnValue, 0.0))
+	m.delete(currTrace)
+	return samples
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
