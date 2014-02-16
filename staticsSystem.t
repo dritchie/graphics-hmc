@@ -381,7 +381,7 @@ local numsamps = 1000
 -- local numsamps = 1000000
 local verbose = true
 local temp = 1.0
-local kernel = HMC({numSteps=1000, verbosity=0, --stepSize=0.0001, stepSizeAdapt=false,
+local kernel = HMC({numSteps=1000, verbosity=0,
 					temperAcceptHamiltonian=false,
 					temperGuideHamiltonian=false,
 					temperInitialMomentum=false})
@@ -406,13 +406,20 @@ local terra doInference()
 	-- return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
 	-- return [forwardSample(staticsModel, numsamps)]
 
+	-- Initialization
 	var samples = [inf.SampleVectorType(staticsModel)].stackAlloc()
 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(staticsModel)]
+
+	-- Burn in (find somewhere on the manifold)
 	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
-	-- newton.newtonManifoldProjection(currTrace)
 	currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
-	-- currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, nil)
 	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
+	
+	-- CHMC
+	var kernel = [HMC({numSteps=10, constrainToManifold=true})()]
+	currTrace = [inf.mcmcSample(staticsModel, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
+	m.delete(kernel)
+
 	m.delete(currTrace)
 	return samples
 end
