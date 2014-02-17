@@ -6,7 +6,7 @@ local templatize = terralib.require("templatize")
 local ad = terralib.require("ad")
 local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
-local rand =terralib.require("prob.random")
+local rand = terralib.require("prob.random")
 local gl = terralib.require("gl")
 
 local GradientAscent = terralib.require("gradientAscent")
