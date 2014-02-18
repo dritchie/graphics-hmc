@@ -416,7 +416,7 @@ local terra doInference()
 	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
 	
 	-- CHMC
-	var kernel = [HMC({numSteps=10, constrainToManifold=true})()]
+	var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0})()]
 	currTrace = [inf.mcmcSample(staticsModel, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
 	m.delete(kernel)
 

@@ -34,9 +34,9 @@ end)
 local means = {`0.0, `0.0, `0.0, `0.0}
 local sds = {`1.0, `1.0, `0.01, `0.01}
 local complexGaussianModel = spec.probcomp(function()
-	local Vec4 = Vec(real, 4)
+	local VecT = Vec(real, 4)
 	return terra()
-		var x = Vec4.stackAlloc(gaussian([means[1]], [sds[1]], {structural=false}),
+		var x = VecT.stackAlloc(gaussian([means[1]], [sds[1]], {structural=false}),
 								gaussian([means[2]], [sds[2]], {structural=false}),
 								gaussian([means[3]], [sds[3]], {structural=false}),
 								gaussian([means[4]], [sds[4]], {structural=false}))
@@ -62,8 +62,9 @@ local terra doInference()
 	C.printf("Burned-in state: "); burnedInState:print(); C.printf("\n")
 	
 	-- CHMC
-	var kernel = [HMC({numSteps=10, constrainToManifold=true})()]
-	currTrace = [inf.mcmcSample(model, {numsamps=1000, verbose=true})](currTrace, kernel, &samples)
+	var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0})()]
+	-- var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0, stepSizeAdapt=false, stepSize=0.015})()] --0.00025
+	currTrace = [inf.mcmcSample(model, {numsamps=1000, burnin=100, verbose=true})](currTrace, kernel, &samples)
 	m.delete(kernel)
 
 	m.delete(currTrace)
