@@ -19,7 +19,7 @@ local xmean = `2.0
 local xsd = `1.0
 local ymean = `1.0
 local ysd = `0.5
-local simpleGaussianModel = spec.probcomp(function()
+local simpleGaussianModel = probcomp(function()
 	return terra()
 		var x = gaussian(xmean, xsd, {structural=false})
 		var y = gaussian(ymean, ysd, {structural=false})

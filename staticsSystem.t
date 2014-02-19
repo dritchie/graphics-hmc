@@ -24,7 +24,7 @@ local Color3d = Vec(double, 3)
 ----------------------------------
 
 
-local function staticsModel()
+local staticsModel = probcomp(function()
 	local gravityConstant = `9.8
 
 	local Vec2 = Vec(real, 2)
@@ -67,7 +67,6 @@ local function staticsModel()
 		for i=0,scene.objects.size do
 			if scene.objects(i).active then
 				tres:clear()
-				-- var fres, tres = scene.objects(i):calculateResiduals()
 				scene.objects(i):calculateResiduals(&fres, &tres)
 				-- factor(softEq(fres(0), 0.0, 1.0))
 				manifold(fres(0), 1.0)
@@ -330,7 +329,7 @@ local function staticsModel()
 		-- return singleLinkWackyBridge()
 		-- return multiLinkWackyBridge(5)
 	end
-end
+end)
 
 ----------------------------------
 
@@ -382,6 +381,7 @@ local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
+					relaxManifolds=true,
 					temperAcceptHamiltonian=false,
 					temperGuideHamiltonian=false,
 					temperInitialMomentum=false})
@@ -397,27 +397,26 @@ local scheduleFn = macro(function(iter, currTrace)
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)
-local spec = terralib.require("prob.specialize")
 local newton = terralib.require("prob.newtonProj")
 local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")
-staticsModel = spec.ensureProbComp(staticsModel)
+local model = staticsModel
 local terra doInference()
-	-- return [mcmc(staticsModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	-- return [forwardSample(staticsModel, numsamps)]
+	-- return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
+	-- return [forwardSample(model, numsamps)]
 
 	-- Initialization
-	var samples = [inf.SampleVectorType(staticsModel)].stackAlloc()
-	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(staticsModel)]
+	var samples = [inf.SampleVectorType(model)].stackAlloc()
+	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
 
 	-- Burn in (find somewhere on the manifold)
-	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
+	samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
 	currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
-	samples:push([inf.SampleType(staticsModel)].stackAlloc([inf.extractReturnValue(staticsModel)](currTrace), 0.0))
+	samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
 	
 	-- CHMC
 	var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0})()]
-	currTrace = [inf.mcmcSample(staticsModel, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
+	currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
 	m.delete(kernel)
 
 	m.delete(currTrace)
