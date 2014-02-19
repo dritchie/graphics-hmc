@@ -402,25 +402,25 @@ local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")
 local model = staticsModel
 local terra doInference()
-	-- return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
+	return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
 	-- return [forwardSample(model, numsamps)]
 
-	-- Initialization
-	var samples = [inf.SampleVectorType(model)].stackAlloc()
-	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
+	-- -- Initialization
+	-- var samples = [inf.SampleVectorType(model)].stackAlloc()
+	-- var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
 
-	-- Burn in (find somewhere on the manifold)
-	samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
-	currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
-	samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
+	-- -- Burn in (find somewhere on the manifold)
+	-- samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
+	-- currTrace = [newton.newtonPlusHMCManifoldProjection(staticsModel, {numSteps=1000}, {numsamps=50, verbose=true}, 2500)](currTrace, &samples)
+	-- samples:push([inf.SampleType(model)].stackAlloc([inf.extractReturnValue(model)](currTrace), 0.0))
 	
-	-- CHMC
-	var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0})()]
-	currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
-	m.delete(kernel)
+	-- -- CHMC
+	-- var kernel = [HMC({numSteps=10, constrainToManifold=true, verbosity=0})()]
+	-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=verbose})](currTrace, kernel, &samples)
+	-- m.delete(kernel)
 
-	m.delete(currTrace)
-	return samples
+	-- m.delete(currTrace)
+	-- return samples
 end
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"

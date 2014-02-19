@@ -46,11 +46,11 @@ SuperpixelImage = templatize(function(real)
 
 	SuperpixelImageT.__templatecopy = templatize(function(real2)
 		return terra(self: &SuperpixelImageT, other: &SuperpixelImage(real2))
-			self.superpixelColors = [m.templatecopy(Color3)](other.superpixelColors)
+			self.superpixelColors = [m.templatecopy(Vector(Color3))](other.superpixelColors)
 			self.superpixelNeighbors = m.copy(other.superpixelNeighbors)
+			self.superpixelNeighborWeights = [m.templatecopy(Vector(Vector(real)))](other.superpixelNeighborWeights)
 			self.pixelNeighbors = m.copy(other.pixelNeighbors)
-			self.superpixelNeighborWeights = [m.templatecopy(Vector(real))](other.superpixelNeighborWeights)
-			self.pixelNeighborWeights = [m.templatecopy(real)](other.pixelNeighborWeights)
+			self.pixelNeighborWeights = [m.templatecopy(Grid2D(Vector(real)))](other.pixelNeighborWeights)
 		end
 	end)
 
@@ -133,13 +133,13 @@ local Layering = templatize(function(real)
 	end
 
 	terra LayeringT:numLayers()
-		return layerColors.size
+		return self.layerColors.size
 	end
 	util.inline(LayeringT.methods.numLayers)
 
 	-- Apply this layering to a SuperpixelImage, modifying it in place
 	LayeringT.apply = templatize(function(blendMode)
-		return terra(spImage: &SuperpixelImageT)
+		return terra(self: &LayeringT, spImage: &SuperpixelImageT)
 			for s=0,spImage:numSuperpixels() do
 				var color = Color3.stackAlloc(0.0, 0.0, 0.0)
 				for l=0,self:numLayers() do
@@ -179,10 +179,10 @@ local function modelGenerator(spImage, numLayers, blendMode)
 		--    scratch work in evaluating certain factors
 		local scratchImage = global(SuperpixelImage(real))
 		local terra copySpImage()
-			scratchImage = [m.templatecopy(real)](spImage)
+			scratchImage = [m.templatecopy(SuperpixelImage(real))](spImage)
 		end
 		copySpImage()
-		scratchImage = m.gc(scratchImage)
+		m.gc(scratchImage:get())
 
 		-- ERP shorthand
 		local boundedUniform = macro(function(lo, hi)
@@ -191,7 +191,7 @@ local function modelGenerator(spImage, numLayers, blendMode)
 
 		-- This is the actual computation we do inference on
 		return terra()
-			var layering = [Layering(real)].stackAlloc(numLayers)
+			var layering = [Layering(real)].stackAlloc(&scratchImage, numLayers)
 			-- Sample random layer colors
 			for l=0,numLayers do
 				layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0),
@@ -206,12 +206,12 @@ local function modelGenerator(spImage, numLayers, blendMode)
 			end
 
 			-- Apply layering to the scratch image
-			[Layering(real).apply(blendMode)](&scratchImage)
+			[Layering(real).apply(blendMode)](&layering, &scratchImage)
 
 			-- Unity constraint
 			-- TODO: disable when using alpha blending?
 			for s=0,scratchImage:numSuperpixels() do
-				wsum = real(0.0)
+				var wsum = real(0.0)
 				for l=0,numLayers do
 					wsum = wsum + layering.layerWeights(s)(l)
 				end
@@ -221,9 +221,9 @@ local function modelGenerator(spImage, numLayers, blendMode)
 			-- Local linearity constraint
 			for s=0,scratchImage:numSuperpixels() do
 				var csum = Color3.stackAlloc(0.0, 0.0, 0.0)
-				for ni=0,scratchImage.superpixelNeighbors.size do
-					var n = scratchImage.superpixelNeighbors(ni)
-					var w = scratchImage.superpixelNeighborWeights(ni)
+				for ni=0,scratchImage.superpixelNeighbors(s).size do
+					var n = scratchImage.superpixelNeighbors(s)(ni)
+					var w = scratchImage.superpixelNeighborWeights(s)(ni)
 					csum = csum + w*scratchImage.superpixelColors(n)
 				end
 				var err = csum - scratchImage.superpixelColors(s)
