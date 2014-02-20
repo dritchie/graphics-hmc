@@ -6,4 +6,6 @@ simpleExample/isoline.pdf
 simpleExample/isoridge.pdf
 simpleExample/random.csv
 simpleExample/randomSamps.pdf
-superpixelExamples/
+superpixelExamples_400/
+superpixelExamples_4000/
+renders/
