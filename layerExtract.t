@@ -11,6 +11,12 @@ local image = terralib.require("image")
 local Color3d = Vec(double, 3)
 local RGBImaged = image.Image(double, 3)
 
+local C = terralib.includecstring [[
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+]]
+
 
 -- Input images to the system have been decomposed into superpixels
 --    but contain enough information to have their full resolution
@@ -39,9 +45,79 @@ SuperpixelImage = templatize(function(real)
 		m.init(self.pixelNeighborWeights)
 	end
 
-	terra SuperpixelImageT:__construct(filename: rawstring) : {}
-		self:__construct()
-		-- TODO: Load from file
+	local numSuperpixelNeighbors = 30
+	local numPixelNeighbors = 10
+	SuperpixelImageT.fromFiles = function(dirname)
+		local superpixelInfoFilename = string.format("%s/superpixelInfo.txt", dirname)
+		local pixelInfoFilename = string.format("%s/pixelInfo.txt", dirname)
+		local superpixelAssignmentsFilename = string.format("%s/superpixelAssignments.txt", dirname)
+		return terra()
+			var spimg = SuperpixelImageT.stackAlloc()
+			var buffer : int8[1024]
+			var bufptr : &int8 = nil
+			-- Read info about superpixels
+			var spfile = C.fopen(superpixelInfoFilename, "r")
+			bufptr = C.fgets(buffer, 1023, spfile)	-- skip header
+			while C.feof(spfile) == 0 do
+				-- Each line has: id, r, g, b, x, y, neighbors, neighborWeights
+				bufptr = C.fgets(buffer, 1023, spfile)
+				if bufptr == nil then break end
+				var id = C.atoi(C.strtok(buffer, "\t"))
+				var r = C.atoi(C.strtok(nil, "\t"))/255.0
+				var g = C.atoi(C.strtok(nil, "\t"))/255.0
+				var b = C.atoi(C.strtok(nil, "\t"))/255.0
+				spimg.superpixelColors:push(Color3.stackAlloc(r,g,b))
+				var x = C.atoi(C.strtok(nil, "\t"))
+				var y = C.atoi(C.strtok(nil, "\t"))
+				spimg.superpixelNeighbors:resize(id+1)
+				spimg.superpixelNeighbors:backPointer():resize(numSuperpixelNeighbors)
+				for i=0,numSuperpixelNeighbors do
+					var ni = C.atoi(C.strtok(nil, "\t"))
+					spimg.superpixelNeighbors:backPointer()(i) = ni
+				end
+				spimg.superpixelNeighborWeights:resize(id+1)
+				spimg.superpixelNeighborWeights:backPointer():resize(numSuperpixelNeighbors)
+				for i=0,numSuperpixelNeighbors do
+					var nw = C.atof(C.strtok(nil, "\t"))
+					spimg.superpixelNeighborWeights:backPointer()(i) = nw
+				end
+			end
+			C.fclose(spfile)
+			-- Figure out the resolution of the full-res image
+			var assfile = C.fopen(superpixelAssignmentsFilename, "r")
+			bufptr = C.fgets(buffer, 1023, assfile)
+			var height = C.atoi(C.strtok(buffer, "\t"))
+			var width = C.atoi(C.strtok(nil, "\t"))
+			C.fclose(assfile)
+			spimg.pixelNeighbors:resize(width, height)
+			spimg.pixelNeighborWeights:resize(width, height)
+			-- Read info about pixels
+			var pfile = C.fopen(pixelInfoFilename, "r")
+			bufptr = C.fgets(buffer, 1023, pfile)	-- skip header
+			while C.feof(pfile) == 0 do
+				-- Each line has: id, r, g, b, x, y, neighbors, neighborWeights
+				bufptr = C.fgets(buffer, 1023, pfile)
+				if bufptr == nil then break end
+				var id = C.atoi(C.strtok(buffer, "\t"))
+				var r = C.atoi(C.strtok(nil, "\t"))/255.0
+				var g = C.atoi(C.strtok(nil, "\t"))/255.0
+				var b = C.atoi(C.strtok(nil, "\t"))/255.0
+				var x = C.atoi(C.strtok(nil, "\t"))
+				var y = C.atoi(C.strtok(nil, "\t"))
+				spimg.pixelNeighbors(x,y):resize(numPixelNeighbors)
+				for i=0,numPixelNeighbors do
+					var ni = C.atoi(C.strtok(nil, "\t"))
+					spimg.pixelNeighbors(x,y)(i) = ni
+				end
+				spimg.pixelNeighborWeights(x,y):resize(numPixelNeighbors)
+				for i=0,numPixelNeighbors do
+					var nw = C.atof(C.strtok(nil, "\t"))
+					spimg.pixelNeighborWeights(x,y)(i) = nw
+				end
+			end
+			C.fclose(pfile)
+			return spimg
+		end
 	end
 
 	SuperpixelImageT.__templatecopy = templatize(function(real2)
@@ -68,7 +144,7 @@ SuperpixelImage = templatize(function(real)
 	util.inline(SuperpixelImageT.methods.numSuperpixels)
 
 	terra SuperpixelImageT:reconstructFullRes()
-		var img = RGBImage.stackAlloc(self.pixelNeighbors.width, self.pixelNeighbors.height)
+		var img = RGBImage.stackAlloc(self.pixelNeighbors.rows, self.pixelNeighbors.cols)
 		for y=0,img.height do
 			for x=0,img.width do
 				var color = Color3.stackAlloc(0.0, 0.0, 0.0)
@@ -77,7 +153,7 @@ SuperpixelImage = templatize(function(real)
 					var nw = self.pixelNeighborWeights(x,y)(n)
 					color = color + nw*self.superpixelColors(ni)
 				end
-				img:setPixel(x, y, &color)
+				img:setPixel(x, img.height-y-1, &color)
 			end
 		end
 		return img
@@ -253,16 +329,21 @@ end
 
 
 
-local spimgFilename = "unknown"
+local spimgdir = "superpixelExamples/bird"
 local numLayers = 5
 local blendMode = LayerBlendMode.Linear
-local spimg = global(SuperpixelImage(double))
-spimg:getpointer():__construct(spimgFilename)
+local spimg = SuperpixelImage(double).fromFiles(spimgdir)()
 local model = modelGenerator(spimg, numLayers, blendMode)
 local terra doInference()
 	return [mcmc(model, HMC({numSteps=1000, relaxManifolds=true}), {numsamps=1000, verbose=true})]
 end
 -- local samps = m.gc(doInference())
+
+local terra imgTest()
+	var img = spimg:reconstructFullRes()
+	[RGBImaged.save(uint8)](&img, image.Format.PNG, "reconstruction.png")
+end
+imgTest()
 
 
 
