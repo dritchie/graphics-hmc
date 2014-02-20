@@ -248,7 +248,7 @@ local Layering = templatize(function(real)
 				var weight = real(0.0)
 				for i=0,spImage.pixelNeighbors(x,y).size do
 					var ni = spImage.pixelNeighbors(x,y)(i)
-					weight = weight + self.layerWeights(ni)(layerIndex)
+					weight = weight + spImage.pixelNeighborWeights(x,y)(i)*self.layerWeights(ni)(layerIndex)
 				end
 				var color = [Vec(real, 3)].stackAlloc(weight, weight, weight)
 				layermask:setPixel(x, layermask.height-y-1, &color)
@@ -262,14 +262,22 @@ end)
 
 
 -- The model is parameterized by:
--- * a SuperpixelImage(double)
--- * a number of desired layers
--- * a LayerBlendMode
+--   * a SuperpixelImage(double)
+--   * a number of desired layers
+--   * a LayerBlendMode
+--   * an optional table containing layer colors. If this is provided, then
+--     colors will be fixed to these values.
 -- TODO: Potentially also let the numer of layers be variable?
-local function modelGenerator(spImage, numLayers, blendMode)
-	local unityStrength = 0.001
-	local localLinearityStrength = 0.001
-	local reconstructionStrength = 0.01
+local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
+	-- In the paper, the weights were reported as:
+	--   * lambda_manifold = 1
+	--   * lambda_reconstruct = 0.5
+	--   * lambda_unity = 0.1
+	-- So we should have the manifold constraint be twice as tight as the
+	--    reconstruction constraint and ten times as tight as the unity constraint(?)
+	local localLinearityStrength = 0.01
+	local reconstructionStrength = 0.02
+	local unityStrength = 0.1
 	return probcomp(function()
 		local Color3 = Vec(real, 3)
 
@@ -283,24 +291,40 @@ local function modelGenerator(spImage, numLayers, blendMode)
 		m.gc(scratchImage)
 
 		-- ERP shorthand
-		local boundedUniform = macro(function(lo, hi)
-			return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+		local boundedUniform = macro(function(lo, hi, optInitVal)
+			if optInitVal then
+				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi, initialVal=optInitVal})
+			else
+				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+			end
 		end)
 
 		-- This is the actual computation we do inference on
 		return terra()
 			var layering = [Layering(real)].stackAlloc(&scratchImage, numLayers)
 
-			-- Sample random layer colors
-			for l=0,numLayers do
-				layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0),
-															boundedUniform(0.0, 1.0),
-															boundedUniform(0.0, 1.0))
-			end
+			-- Use fixed layer colors...
+			[util.optionally(optLayerColors, function()
+				local stmts = {}
+				for i,c in pairs(optLayerColors) do
+					table.insert(stmts, quote layering.layerColors([i-1]) = Color3.stackAlloc([c]) end)
+				end
+				return stmts
+			end)]
+			-- ...or sample random layer colors
+			[util.optionally(not optLayerColors, function() return quote
+				for l=0,numLayers do
+					layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0),
+																boundedUniform(0.0, 1.0),
+																boundedUniform(0.0, 1.0))
+				end
+			end end)]
+			
 			-- Sample random layer weights
 			for s=0,scratchImage:numSuperpixels() do
 				for l=0,numLayers do
-					layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0)
+					-- layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0)
+					layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0, 1.0/numLayers)
 				end
 			end
 
@@ -314,7 +338,8 @@ local function modelGenerator(spImage, numLayers, blendMode)
 				for l=0,numLayers do
 					wsum = wsum + layering.layerWeights(s)(l)
 				end
-				manifold(wsum, unityStrength)
+				var err = 1.0 - wsum
+				manifold(err, unityStrength)
 			end
 
 			-- Local linearity constraint
@@ -447,16 +472,31 @@ end
 
 
 
+
+
 local spimgdir = "superpixelExamples_400/bird"
 local numLayers = 5
+local layerColors = nil
+-- local layerColors = {{21/255.0, 28/255.0, 25/255.0},
+-- 					 {147/255.0, 70/255.0, 16/255.0},
+-- 					 {102/255.0, 97/255.0, 14/255.0},
+-- 					 {24/255.0, 160/255.0, 230/255.0},
+-- 					 {231/255.0, 159/255.0, 14/255.0}}
 local blendMode = LayerBlendMode.Linear
 local spimg = SuperpixelImage(double).fromFiles(spimgdir)()
-local model = modelGenerator(spimg, numLayers, blendMode)
+local model = modelGenerator(spimg, numLayers, blendMode, layerColors)
 local terra doInference()
-	return [mcmc(model, HMC({numSteps=1, relaxManifolds=true}), {numsamps=100, verbose=true})]
+	return [mcmc(model, HMC({numSteps=1, relaxManifolds=true}), {numsamps=40, lag=200, verbose=true})]
 end
 local samps = m.gc(doInference())
-visualizeSamples("renders/layerExtract/bird", samps, spimg, blendMode)
+visualizeSamples("renders/layerExtract/bird_freeColors2", samps, spimg, blendMode)
+
+-- local terra imgTest()
+-- 	var img = RGBImaged.stackAlloc()
+-- 	spimg:reconstructFullRes(&img)
+-- 	[RGBImaged.save(uint8)](&img, image.Format.PNG, "reconstruction.png")
+-- end
+-- imgTest()
 
 
 
