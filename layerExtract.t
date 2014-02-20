@@ -181,7 +181,7 @@ local Layering = templatize(function(real)
 	local struct LayeringT
 	{
 		layerColors: Vector(Color3),
-		layerWeights: Vector(Vector(double))
+		layerWeights: Vector(Vector(real))
 	}
 
 	terra LayeringT:__construct() : {}
@@ -245,20 +245,22 @@ end)
 -- * a LayerBlendMode
 -- TODO: Potentially also let the numer of layers be variable?
 local function modelGenerator(spImage, numLayers, blendMode)
-	local unityStrength = 0.0001
-	local localLinearityStrength = 0.0001
-	local reconstructionStrength = 0.001
+	local unityStrength = 0.001
+	local localLinearityStrength = 0.001
+	local reconstructionStrength = 0.01
 	return probcomp(function()
 		local Color3 = Vec(real, 3)
 
 		-- We have a (global) copy of spImage that we use for
 		--    scratch work in evaluating certain factors
-		local scratchImage = global(SuperpixelImage(real))
+		-- local scratchImage = global(SuperpixelImage(real))
+		local scratchImage = terralib.new(SuperpixelImage(real))
 		local terra copySpImage()
 			scratchImage = [m.templatecopy(SuperpixelImage(real))](spImage)
 		end
 		copySpImage()
-		m.gc(scratchImage:get())
+		-- m.gc(scratchImage:get())
+		m.gc(scratchImage)
 
 		-- ERP shorthand
 		local boundedUniform = macro(function(lo, hi)
@@ -268,6 +270,7 @@ local function modelGenerator(spImage, numLayers, blendMode)
 		-- This is the actual computation we do inference on
 		return terra()
 			var layering = [Layering(real)].stackAlloc(&scratchImage, numLayers)
+
 			-- Sample random layer colors
 			for l=0,numLayers do
 				layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0),
@@ -310,7 +313,7 @@ local function modelGenerator(spImage, numLayers, blendMode)
 
 			-- Reconstruction constraint
 			for s=0,scratchImage:numSuperpixels() do
-				var err = scratchImage.superpixelColors(s) - spImage.superpixelColors(s)
+				var err = scratchImage.superpixelColors(s) - Color3(spImage.superpixelColors(s))
 				manifold(err(0), reconstructionStrength)
 				manifold(err(1), reconstructionStrength)
 				manifold(err(2), reconstructionStrength)
@@ -335,15 +338,15 @@ local blendMode = LayerBlendMode.Linear
 local spimg = SuperpixelImage(double).fromFiles(spimgdir)()
 local model = modelGenerator(spimg, numLayers, blendMode)
 local terra doInference()
-	return [mcmc(model, HMC({numSteps=1000, relaxManifolds=true}), {numsamps=1000, verbose=true})]
+	return [mcmc(model, HMC({numSteps=1, relaxManifolds=true}), {numsamps=1000, verbose=true})]
 end
--- local samps = m.gc(doInference())
+local samps = m.gc(doInference())
 
-local terra imgTest()
-	var img = spimg:reconstructFullRes()
-	[RGBImaged.save(uint8)](&img, image.Format.PNG, "reconstruction.png")
-end
-imgTest()
+-- local terra imgTest()
+-- 	var img = spimg:reconstructFullRes()
+-- 	[RGBImaged.save(uint8)](&img, image.Format.PNG, "reconstruction.png")
+-- end
+-- imgTest()
 
 
 
