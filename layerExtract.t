@@ -7,6 +7,7 @@ local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
 local Grid2D = terralib.require("grid").Grid2D
 local image = terralib.require("image")
+local ad = terralib.require("ad")
 
 local Color3d = Vec(double, 3)
 local RGBImaged = image.Image(double, 3)
@@ -275,9 +276,15 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 	--   * lambda_unity = 0.1
 	-- So we should have the manifold constraint be twice as tight as the
 	--    reconstruction constraint and ten times as tight as the unity constraint(?)
-	local localLinearityStrength = 0.01
-	local reconstructionStrength = 0.02
-	local unityStrength = 0.1
+	local masterConstraintSoftness = 0.01
+	local localLinearitySoftness = masterConstraintSoftness
+	local reconstructionSoftness = 2 * masterConstraintSoftness
+	local unitySoftness = 10 * masterConstraintSoftness
+	local colorDiversitySoftness = 10 * masterConstraintSoftness
+
+	local maxColorDistSq = 3.0
+	local maxColorDist = math.sqrt(maxColorDistSq)
+
 	return probcomp(function()
 		local Color3 = Vec(real, 3)
 
@@ -298,6 +305,15 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
 			end
 		end)
+
+		-- Utility
+		local terra softmin(vals: &Vector(real), strength: real)
+			var sum = real(0.0)
+			for i=0,vals.size do
+				sum = sum + ad.math.exp(-strength*vals(i))
+			end
+			return -ad.math.log(sum) / strength
+		end
 
 		-- This is the actual computation we do inference on
 		return terra()
@@ -332,15 +348,17 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			[Layering(real).apply(blendMode)](&layering, &scratchImage)
 
 			-- Unity constraint
-			-- TODO: disable when using alpha blending?
-			for s=0,scratchImage:numSuperpixels() do
-				var wsum = real(0.0)
-				for l=0,numLayers do
-					wsum = wsum + layering.layerWeights(s)(l)
+			-- (Disable when using alpha blending)
+			[util.optionally(blendMode ~= LayerBlendMode.Over, function() return quote
+				for s=0,scratchImage:numSuperpixels() do
+					var wsum = real(0.0)
+					for l=0,numLayers do
+						wsum = wsum + layering.layerWeights(s)(l)
+					end
+					var err = 1.0 - wsum
+					manifold(err, unitySoftness)
 				end
-				var err = 1.0 - wsum
-				manifold(err, unityStrength)
-			end
+			end end)]
 
 			-- Local linearity constraint
 			for s=0,scratchImage:numSuperpixels() do
@@ -351,23 +369,31 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 					csum = csum + w*scratchImage.superpixelColors(n)
 				end
 				var err = csum - scratchImage.superpixelColors(s)
-				manifold(err(0), localLinearityStrength)
-				manifold(err(1), localLinearityStrength)
-				manifold(err(2), localLinearityStrength)
+				manifold(err(0), localLinearitySoftness)
+				manifold(err(1), localLinearitySoftness)
+				manifold(err(2), localLinearitySoftness)
 			end
 
 			-- Reconstruction constraint
 			for s=0,scratchImage:numSuperpixels() do
 				var err = scratchImage.superpixelColors(s) - Color3(spImage.superpixelColors(s))
-				manifold(err(0), reconstructionStrength)
-				manifold(err(1), reconstructionStrength)
-				manifold(err(2), reconstructionStrength)
+				manifold(err(0), reconstructionSoftness)
+				manifold(err(1), reconstructionSoftness)
+				manifold(err(2), reconstructionSoftness)
 			end
 
-			-- TODO: Additional constraints, such as:
-			-- * Layer sparsity
-			-- * Layer non-overlap
-			-- * Layer color diversity
+			-- -- Layer color diversity
+			-- for l1=0,numLayers-1 do
+			-- 	for l2=l1+1,numLayers do
+			-- 		var dist = layering.layerColors(l1):dist(layering.layerColors(l2))
+			-- 		var penalty = maxColorDist - dist
+			-- 		manifold(penalty, colorDiversitySoftness)
+			-- 	end
+			-- end
+
+			-- Layer sparsity
+
+			-- Layer non-overlap
 
 			return layering
 		end
@@ -476,20 +502,26 @@ end
 
 local spimgdir = "superpixelExamples_400/bird"
 local numLayers = 5
+local blendMode = LayerBlendMode.Linear
 local layerColors = nil
 -- local layerColors = {{21/255.0, 28/255.0, 25/255.0},
 -- 					 {147/255.0, 70/255.0, 16/255.0},
 -- 					 {102/255.0, 97/255.0, 14/255.0},
 -- 					 {24/255.0, 160/255.0, 230/255.0},
 -- 					 {231/255.0, 159/255.0, 14/255.0}}
-local blendMode = LayerBlendMode.Linear
 local spimg = SuperpixelImage(double).fromFiles(spimgdir)()
 local model = modelGenerator(spimg, numLayers, blendMode, layerColors)
+local numHmcSteps = 10
+local numKeptSamps = 5
+local numDesiredOverallSteps = 8000
+local numDesiredOverallSamps = math.ceil(numDesiredOverallSteps / numHmcSteps)
+assert(numDesiredOverallSamps >= numKeptSamps)
+local lag = math.floor(numDesiredOverallSamps / numKeptSamps)
 local terra doInference()
-	return [mcmc(model, HMC({numSteps=1, relaxManifolds=true}), {numsamps=40, lag=200, verbose=true})]
+	return [mcmc(model, HMC({numSteps=numHmcSteps, relaxManifolds=true}), {numsamps=numKeptSamps, lag=lag, verbose=true})]
 end
 local samps = m.gc(doInference())
-visualizeSamples("renders/layerExtract/bird_freeColors2", samps, spimg, blendMode)
+visualizeSamples("renders/layerExtract/bird_freeColors", samps, spimg, blendMode)
 
 -- local terra imgTest()
 -- 	var img = RGBImaged.stackAlloc()
