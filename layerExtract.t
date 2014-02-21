@@ -36,7 +36,8 @@ SuperpixelImage = templatize(function(real)
 
 		-- Per-pixel data
 		pixelNeighbors: Grid2D(Vector(uint)),
-		pixelNeighborWeights: Grid2D(Vector(real))
+		pixelNeighborWeights: Grid2D(Vector(real)),
+		pixelToSuperpixel: Grid2D(uint)
 	}
 
 	terra SuperpixelImageT:__construct() : {}
@@ -45,6 +46,7 @@ SuperpixelImage = templatize(function(real)
 		m.init(self.superpixelNeighborWeights)
 		m.init(self.pixelNeighbors)
 		m.init(self.pixelNeighborWeights)
+		m.init(self.pixelToSuperpixel)
 	end
 
 	local numSuperpixelNeighbors = 30
@@ -55,8 +57,9 @@ SuperpixelImage = templatize(function(real)
 		local superpixelAssignmentsFilename = string.format("%s/superpixelAssignments.txt", dirname)
 		return terra()
 			var spimg = SuperpixelImageT.stackAlloc()
-			var buffer : int8[1024]
+			var buffer : int8[4096]	-- This is actually dependent on the size of the image...
 			var bufptr : &int8 = nil
+
 			-- Read info about superpixels
 			var spfile = C.fopen(superpixelInfoFilename, "r")
 			bufptr = C.fgets(buffer, 1023, spfile)	-- skip header
@@ -85,14 +88,27 @@ SuperpixelImage = templatize(function(real)
 				end
 			end
 			C.fclose(spfile)
+
 			-- Figure out the resolution of the full-res image
+			--    and read info about pixel-to-superpixel assignments
 			var assfile = C.fopen(superpixelAssignmentsFilename, "r")
 			bufptr = C.fgets(buffer, 1023, assfile)
 			var height = C.atoi(C.strtok(buffer, "\t"))
 			var width = C.atoi(C.strtok(nil, "\t"))
+			spimg.pixelToSuperpixel:resize(width, height)
+			for y=0,height do
+				bufptr = C.fgets(buffer, 4095, assfile)
+				var sid = C.atoi(C.strtok(buffer, "\t"))
+				spimg.pixelToSuperpixel(0, y) = sid
+				for x=1,width do
+					sid = C.atoi(C.strtok(nil, "\t"))
+					spimg.pixelToSuperpixel(x, y) = sid
+				end
+			end
 			C.fclose(assfile)
 			spimg.pixelNeighbors:resize(width, height)
 			spimg.pixelNeighborWeights:resize(width, height)
+
 			-- Read info about pixels
 			var pfile = C.fopen(pixelInfoFilename, "r")
 			bufptr = C.fgets(buffer, 1023, pfile)	-- skip header
@@ -129,6 +145,7 @@ SuperpixelImage = templatize(function(real)
 			self.superpixelNeighborWeights = [m.templatecopy(Vector(Vector(real)))](other.superpixelNeighborWeights)
 			self.pixelNeighbors = m.copy(other.pixelNeighbors)
 			self.pixelNeighborWeights = [m.templatecopy(Grid2D(Vector(real)))](other.pixelNeighborWeights)
+			self.pixelToSuperpixel = [m.templatecopy(Grid2D(uint))](other.pixelToSuperpixel)
 		end
 	end)
 
@@ -138,6 +155,7 @@ SuperpixelImage = templatize(function(real)
 		m.destruct(self.superpixelNeighborWeights)
 		m.destruct(self.pixelNeighbors)
 		m.destruct(self.pixelNeighborWeights)
+		m.destruct(self.pixelToSuperpixel)
 	end
 
 	SuperpixelImageT.methods.numSuperpixels = macro(function(self)
