@@ -31,6 +31,7 @@ SuperpixelImage = templatize(function(real)
 	{
 		-- Per-superpixel data
 		superpixelColors: Vector(Color3),
+		superpixelAreas: Vector(uint),
 		superpixelNeighbors: Vector(Vector(uint)),
 		superpixelNeighborWeights: Vector(Vector(real)),
 
@@ -42,6 +43,7 @@ SuperpixelImage = templatize(function(real)
 
 	terra SuperpixelImageT:__construct() : {}
 		m.init(self.superpixelColors)
+		m.destruct(self.superpixelAreas)
 		m.init(self.superpixelNeighbors)
 		m.init(self.superpixelNeighborWeights)
 		m.init(self.pixelNeighbors)
@@ -134,6 +136,17 @@ SuperpixelImage = templatize(function(real)
 				end
 			end
 			C.fclose(pfile)
+
+			-- Compute superpixel areas
+			m.destruct(spimg.superpixelAreas)
+			spimg.superpixelAreas = [Vector(uint)].stackAlloc(spimg:numSuperpixels(), 0)
+			for y=0,height do
+				for x=0,width do
+					var sid = spimg.pixelToSuperpixel(x,y)
+					spimg.superpixelAreas(sid) = spimg.superpixelAreas(sid) + 1
+				end
+			end
+
 			return spimg
 		end
 	end
@@ -141,6 +154,7 @@ SuperpixelImage = templatize(function(real)
 	SuperpixelImageT.__templatecopy = templatize(function(real2)
 		return terra(self: &SuperpixelImageT, other: &SuperpixelImage(real2))
 			self.superpixelColors = [m.templatecopy(Vector(Color3))](other.superpixelColors)
+			self.superpixelAreas = m.copy(other.superpixelAreas)
 			self.superpixelNeighbors = m.copy(other.superpixelNeighbors)
 			self.superpixelNeighborWeights = [m.templatecopy(Vector(Vector(real)))](other.superpixelNeighborWeights)
 			self.pixelNeighbors = m.copy(other.pixelNeighbors)
@@ -151,6 +165,7 @@ SuperpixelImage = templatize(function(real)
 
 	terra SuperpixelImageT:__destruct()
 		m.destruct(self.superpixelColors)
+		m.destruct(self.superpixelAreas)
 		m.destruct(self.superpixelNeighbors)
 		m.destruct(self.superpixelNeighborWeights)
 		m.destruct(self.pixelNeighbors)
@@ -169,6 +184,18 @@ SuperpixelImage = templatize(function(real)
 	SuperpixelImageT.methods.fullResHeight = macro(function(self)
 		return `self.pixelNeighbors.cols
 	end)
+
+	terra SuperpixelImageT:totalArea()
+		return self:fullResHeight() * self:fullResWidth()
+	end
+
+	terra SuperpixelImageT:avgSuperpixelArea()
+		var sum = 0U
+		for i=0,self:numSuperpixels() do
+			sum = sum + self.superpixelAreas(i)
+		end
+		return double(sum/self:numSuperpixels())
+	end
 
 	terra SuperpixelImageT:reconstructFullRes(img: &RGBImage)
 		img:resize(self:fullResWidth(), self:fullResHeight())
@@ -298,8 +325,13 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 	local localLinearitySoftness = masterConstraintSoftness
 	local reconstructionSoftness = 2 * masterConstraintSoftness
 	local unitySoftness = 10 * masterConstraintSoftness
-	local colorDiversitySoftness = 10 * masterConstraintSoftness
 
+	-- Weights for 'softer' factors/constraints
+	local colorDiversitySoftness = 20 * masterConstraintSoftness
+	local layerSparsitySoftness = 100 * masterConstraintSoftness
+	local layerNonOverlapSoftness = 50 * masterConstraintSoftness
+
+	-- Misc stuff
 	local maxColorDistSq = 3.0
 	local maxColorDist = math.sqrt(maxColorDistSq)
 
@@ -410,8 +442,21 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			-- end
 
 			-- Layer sparsity
+			for l=0,layering.layerColors.size do
+				for s=0,scratchImage:numSuperpixels() do
+					manifold(layering.layerWeights(s)(l), layerSparsitySoftness)
+				end
+			end
 
 			-- Layer non-overlap
+			for s=0,scratchImage:numSuperpixels() do
+				for l1=0,layering.layerColors.size-1 do
+					for l2=l1+1,layering.layerColors.size-1 do
+						var penalty = layering.layerWeights(s)(l1) * layering.layerWeights(s)(l2)
+						manifold(penalty, layerNonOverlapSoftness) 
+					end
+				end
+			end
 
 			return layering
 		end
