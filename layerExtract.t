@@ -327,9 +327,11 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 	local unitySoftness = 10 * masterConstraintSoftness
 
 	-- Weights for 'softer' factors/constraints
-	local colorDiversitySoftness = 20 * masterConstraintSoftness
-	local layerSparsitySoftness = 100 * masterConstraintSoftness
-	local layerNonOverlapSoftness = 50 * masterConstraintSoftness
+	local masterFactorSoftness = 0.01
+	local colorDiversitySoftness = 50 * masterFactorSoftness
+	local layerSparsitySoftness = 100 * masterFactorSoftness
+	local layerNonOverlapSoftness = 50 * masterFactorSoftness
+	local layerEntropySoftness = 50 * masterFactorSoftness
 
 	-- Misc stuff
 	local maxColorDistSq = 3.0
@@ -432,30 +434,42 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 				manifold(err(2), reconstructionSoftness)
 			end
 
-			-- -- Layer color diversity
-			-- for l1=0,numLayers-1 do
-			-- 	for l2=l1+1,numLayers do
-			-- 		var dist = layering.layerColors(l1):dist(layering.layerColors(l2))
-			-- 		var penalty = maxColorDist - dist
-			-- 		manifold(penalty, colorDiversitySoftness)
-			-- 	end
-			-- end
-
-			-- Layer sparsity
-			for l=0,layering.layerColors.size do
-				for s=0,scratchImage:numSuperpixels() do
-					manifold(layering.layerWeights(s)(l), layerSparsitySoftness)
+			-- Layer color diversity
+			for l1=0,numLayers-1 do
+				for l2=l1+1,numLayers do
+					var dist = layering.layerColors(l1):dist(layering.layerColors(l2))
+					var penalty = maxColorDist - dist
+					manifold(penalty, colorDiversitySoftness)
 				end
 			end
 
-			-- Layer non-overlap
+			-- -- Layer sparsity
+			-- for l=0,layering.layerColors.size do
+			-- 	for s=0,scratchImage:numSuperpixels() do
+			-- 		manifold(layering.layerWeights(s)(l), layerSparsitySoftness)
+			-- 	end
+			-- end
+
+			-- -- Layer non-overlap
+			-- for s=0,scratchImage:numSuperpixels() do
+			-- 	for l1=0,layering.layerColors.size-1 do
+			-- 		for l2=l1+1,layering.layerColors.size-1 do
+			-- 			var penalty = layering.layerWeights(s)(l1) * layering.layerWeights(s)(l2)
+			-- 			manifold(penalty, layerNonOverlapSoftness) 
+			-- 		end
+			-- 	end
+			-- end
+
+			-- Layer entropy
 			for s=0,scratchImage:numSuperpixels() do
-				for l1=0,layering.layerColors.size-1 do
-					for l2=l1+1,layering.layerColors.size-1 do
-						var penalty = layering.layerWeights(s)(l1) * layering.layerWeights(s)(l2)
-						manifold(penalty, layerNonOverlapSoftness) 
+				var ent = real(0.0)
+				for l=0,layering.layerColors.size do
+					var p = layering.layerWeights(s)(l)
+					if p > 0.0 then
+						ent = ent + p*ad.math.log(p)
 					end
 				end
+				manifold(ent, layerEntropySoftness)
 			end
 
 			return layering
@@ -520,6 +534,7 @@ local function visualizeSamples(dirname, samples, spImage, blendMode, rowHeight,
 			C.printf(" %d/%u\r", i+1, samples.size)
 			C.flush()
 			var layering = &samples(i).value
+			var lp = samples(i).logprob
 			C.fprintf(htmlfile, "<tr>\n")
 
 			-- Apply layering to scratchImage, write to disk
@@ -528,7 +543,7 @@ local function visualizeSamples(dirname, samples, spImage, blendMode, rowHeight,
 			C.sprintf(filenamebuf, colorImgBasename, i)
 			[RGBImaged.save(uint8)](&reconstImg, image.Format.PNG, filenamebuf)
 			C.sprintf(filenamebuf, colorImgRelBasename, i)
-			C.fprintf(htmlfile, "<td><img src='%s' class='thumb'/></td>\n", filenamebuf)
+			C.fprintf(htmlfile, "<td><img src='%s' class='thumb' title='%g'/></td>\n", filenamebuf, lp)
 
 			-- Visualize each layer, write to disk
 			for l=0,layering:numLayers() do
