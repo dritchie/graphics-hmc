@@ -19,7 +19,6 @@ local C = terralib.includecstring [[
 inline void flush() { fflush(stdout); }
 ]]
 
-
 -- Input images to the system have been decomposed into superpixels
 --    but contain enough information to have their full resolution
 --    reconstructed using a linear combination of superpixels
@@ -159,7 +158,7 @@ SuperpixelImage = templatize(function(real)
 			self.superpixelNeighborWeights = [m.templatecopy(Vector(Vector(real)))](other.superpixelNeighborWeights)
 			self.pixelNeighbors = m.copy(other.pixelNeighbors)
 			self.pixelNeighborWeights = [m.templatecopy(Grid2D(Vector(real)))](other.pixelNeighborWeights)
-			self.pixelToSuperpixel = [m.templatecopy(Grid2D(uint))](other.pixelToSuperpixel)
+			self.pixelToSuperpixel = m.copy(other.pixelToSuperpixel)
 		end
 	end)
 
@@ -457,7 +456,6 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 		end
 	end)
 end
-
 
 -- We visualize the output samples by writing out an HTML file with a bunch of rows, each of
 --    which shows:
