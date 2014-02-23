@@ -328,7 +328,7 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 	-- Weights for 'softer' factors/constraints
 	local masterFactorSoftness = 0.01
 	local colorDiversitySoftness = 100 * masterFactorSoftness
-	local layerEntropySoftness = 50 * masterFactorSoftness
+	local layerEntropySoftness = 100 * masterFactorSoftness
 
 	-- Misc stuff
 	local maxColorDistSq = 3.0
@@ -431,14 +431,14 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 				manifold(err(2), reconstructionSoftness)
 			end
 
-			-- Layer color diversity
-			for l1=0,numLayers-1 do
-				for l2=l1+1,numLayers do
-					var dist = layering.layerColors(l1):dist(layering.layerColors(l2))
-					var penalty = maxColorDist - dist
-					manifold(penalty, colorDiversitySoftness)
-				end
-			end
+			-- -- Layer color diversity
+			-- for l1=0,numLayers-1 do
+			-- 	for l2=l1+1,numLayers do
+			-- 		var dist = layering.layerColors(l1):dist(layering.layerColors(l2))
+			-- 		var penalty = maxColorDist - dist
+			-- 		manifold(penalty, colorDiversitySoftness)
+			-- 	end
+			-- end
 
 			-- Layer entropy
 			for s=0,scratchImage:numSuperpixels() do
@@ -577,6 +577,7 @@ local lag = math.floor(numDesiredOverallSamps / numKeptSamps)
 local terra doInference()
 	-- return [mcmc(model, HMC({numSteps=numHmcSteps, relaxManifolds=true}), {numsamps=numKeptSamps, lag=lag, verbose=true})]
 	return [sampleByRepeatedBurnin(model, HMC({numSteps=10, relaxManifolds=true}), {numsamps=800, verbose=true}, 10)]
+	-- return [mcmc(model, HMC({numSteps=10, relaxManifolds=true}), {numsamps=8000, verbose=true})]
 end
 local samps = m.gc(doInference())
 visualizeSamples("renders/layerExtract/bird_freeColors", samps, spimg, blendMode)
