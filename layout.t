@@ -27,12 +27,17 @@ local Circle = templatize(function(real)
 		var r = self.size
 		var R = other.size
 		var d = self.pos:dist(other.pos)
+		-- No intersection
 		if d > r+R then
 			return real(0.0)
 		end
 		if R < r then
 			r = other.size
 			R = self.size
+		end
+		-- Complete containment
+		if d < R-r then
+			return [math.pi]*r*r
 		end
 		var d2 = d*d
 		var r2 = r*r

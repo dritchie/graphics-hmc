@@ -322,6 +322,7 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 	--    reconstruction constraint and ten times as tight as the unity constraint(?)
 	local masterConstraintSoftness = 0.01
 	local localLinearitySoftness = masterConstraintSoftness
+	-- local localLinearitySoftness = 1000 * masterConstraintSoftness
 	local reconstructionSoftness = 2 * masterConstraintSoftness
 	local unitySoftness = 10 * masterConstraintSoftness
 
@@ -347,13 +348,35 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 		m.gc(scratchImage)
 
 		-- ERP shorthand
-		local boundedUniform = macro(function(lo, hi, optInitVal)
-			if optInitVal then
-				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi, initialVal=optInitVal})
+		local boundedUniform = macro(function(lo, hi, opts)
+			if opts then
+				local OpsType = opts:gettype()
+				local struct NewOpsType {}
+				for _,e in ipairs(OpsType.entries) do
+					table.insert(NewOpsType.entries, {field=e.field, type=e.type})
+				end
+				table.insert(NewOpsType.entries, {field="lowerBound", type=lo:gettype()})
+				table.insert(NewOpsType.entries, {field="upperBound", type=hi:gettype()})
+				table.insert(NewOpsType.entries, {field="structural", type=bool})
+				return quote
+					var newopts = NewOpsType(opts)
+					newopts.structural = false
+					newopts.lowerBound = lo
+					newopts.upperBound = hi
+				in
+					uniform(lo, hi, newopts)
+				end
 			else
 				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
 			end
 		end)
+		-- local boundedUniform = macro(function(lo, hi, optInitVal)
+		-- 	if optInitVal then
+		-- 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi, initialVal=optInitVal})
+		-- 	else
+		-- 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+		-- 	end
+		-- end)
 
 		-- Utility
 		local terra softmin(vals: &Vector(real), strength: real)
@@ -379,9 +402,9 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			-- ...or sample random layer colors
 			[util.optionally(not optLayerColors, function() return quote
 				for l=0,numLayers do
-					layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0),
-																boundedUniform(0.0, 1.0),
-																boundedUniform(0.0, 1.0))
+					layering.layerColors(l) = Color3.stackAlloc(boundedUniform(0.0, 1.0, {mass=1.0}),
+																boundedUniform(0.0, 1.0, {mass=1.0}),
+																boundedUniform(0.0, 1.0, {mass=1.0}))
 				end
 			end end)]
 			
@@ -389,7 +412,7 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			for s=0,scratchImage:numSuperpixels() do
 				for l=0,numLayers do
 					-- layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0)
-					layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0, 1.0/numLayers)
+					layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0, {initialVal=1.0/numLayers, mass=1.0})
 				end
 			end
 
@@ -440,17 +463,17 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			-- 	end
 			-- end
 
-			-- Layer entropy
-			for s=0,scratchImage:numSuperpixels() do
-				var ent = real(0.0)
-				for l=0,layering.layerColors.size do
-					var p = layering.layerWeights(s)(l)
-					if p > 0.0 then
-						ent = ent + p*ad.math.log(p)
-					end
-				end
-				manifold(ent, layerEntropySoftness)
-			end
+			-- -- Layer entropy
+			-- for s=0,scratchImage:numSuperpixels() do
+			-- 	var ent = real(0.0)
+			-- 	for l=0,layering.layerColors.size do
+			-- 		var p = layering.layerWeights(s)(l)
+			-- 		if p > 0.0 then
+			-- 			ent = ent + p*ad.math.log(p)
+			-- 		end
+			-- 	end
+			-- 	manifold(ent, layerEntropySoftness)
+			-- end
 
 			return layering
 		end
@@ -557,15 +580,22 @@ end
 
 
 
-local spimgdir = "superpixelExamples_400/bird"
-local numLayers = 5
-local blendMode = LayerBlendMode.Linear
 local layerColors = nil
+local spimgdir = "superpixelExamples_400/bird"
+local blendMode = LayerBlendMode.Linear
+local numLayers = 5
 -- local layerColors = {{21/255.0, 28/255.0, 25/255.0},
 -- 					 {147/255.0, 70/255.0, 16/255.0},
 -- 					 {102/255.0, 97/255.0, 14/255.0},
 -- 					 {24/255.0, 160/255.0, 230/255.0},
 -- 					 {231/255.0, 159/255.0, 14/255.0}}
+-- local spimgdir = "superpixelExamples_400/alphaCircles"
+-- local blendMode = LayerBlendMode.Over
+-- local numLayers = 4
+-- local layerColors = {{`1.0, `0.0, `0.0},
+-- 					 {`0.0, `0.0, `1.0},
+-- 					 {`0.0, `1.0, `0.0},
+-- 					 {`1.0, `1.0, `1.0}}
 local spimg = SuperpixelImage(double).fromFiles(spimgdir)()
 local model = modelGenerator(spimg, numLayers, blendMode, layerColors)
 local numHmcSteps = 10
@@ -574,13 +604,29 @@ local numDesiredOverallSteps = 8000
 local numDesiredOverallSamps = math.ceil(numDesiredOverallSteps / numHmcSteps)
 assert(numDesiredOverallSamps >= numKeptSamps)
 local lag = math.floor(numDesiredOverallSamps / numKeptSamps)
+local trace = terralib.require("prob.trace")
+local inf = terralib.require("prob.inference")
 local terra doInference()
 	-- return [mcmc(model, HMC({numSteps=numHmcSteps, relaxManifolds=true}), {numsamps=numKeptSamps, lag=lag, verbose=true})]
-	return [sampleByRepeatedBurnin(model, HMC({numSteps=10, relaxManifolds=true}), {numsamps=800, verbose=true}, 10)]
-	-- return [mcmc(model, HMC({numSteps=10, relaxManifolds=true}), {numsamps=8000, verbose=true})]
+	-- return [sampleByRepeatedBurnin(model, HMC({numSteps=10, relaxManifolds=true}), {numsamps=800, verbose=true}, 10)]
+
+	-- Burn in
+	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
+	var burnInKernel = [HMC({numSteps=10, relaxManifolds=true})()]
+	currTrace = [inf.mcmcSample(model, {numsamps=1000, verbose=true})](currTrace, burnInKernel, nil)
+	m.delete(burnInKernel)
+
+	-- Run very long HMC trajectories to (hopefully) generate distant samples
+	var samps = [inf.SampleVectorType(model)].stackAlloc()
+	var mixKernel = [HMC({numSteps=1000, relaxManifolds=true})()]
+	currTrace = [inf.mcmcSample(model, {numsamps=20, lag=5, verbose=true})](currTrace, burnInKernel, &samps)
+	m.delete(mixKernel)
+	m.delete(currTrace)
+	return samps
 end
 local samps = m.gc(doInference())
-visualizeSamples("renders/layerExtract/bird_freeColors", samps, spimg, blendMode)
+local outputName = arg[1] or "output"
+visualizeSamples(string.format("renders/layerExtract/%s", outputName), samps, spimg, blendMode)
 
 -- local terra imgTest()
 -- 	var img = RGBImaged.stackAlloc()
