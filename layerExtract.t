@@ -349,6 +349,7 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 
 		-- ERP shorthand
 		local boundedUniform = macro(function(lo, hi, opts)
+			local valquote = nil
 			if opts then
 				local OpsType = opts:gettype()
 				local struct NewOpsType {}
@@ -358,7 +359,7 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 				table.insert(NewOpsType.entries, {field="lowerBound", type=lo:gettype()})
 				table.insert(NewOpsType.entries, {field="upperBound", type=hi:gettype()})
 				table.insert(NewOpsType.entries, {field="structural", type=bool})
-				return quote
+				valquote = quote
 					var newopts = NewOpsType(opts)
 					newopts.structural = false
 					newopts.lowerBound = lo
@@ -367,25 +368,44 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 					uniform(lo, hi, newopts)
 				end
 			else
-				return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+				valquote = `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+			end
+			return valquote
+		end)
+		local softBoundedUniform = macro(function(lo, hi, softness, opts)
+			local valquote = nil
+			if opts then
+				local OpsType = opts:gettype()
+				local struct NewOpsType {}
+				for _,e in ipairs(OpsType.entries) do
+					table.insert(NewOpsType.entries, {field=e.field, type=e.type})
+				end
+				table.insert(NewOpsType.entries, {field="structural", type=bool})
+				table.insert(NewOpsType.entries, {field="hasPrior", type=bool})
+				valquote = quote
+					var newopts = NewOpsType(opts)
+					newopts.structural = false
+					newopts.hasPrior = false
+				in
+					uniform(lo, hi, newopts)
+				end
+			else
+				valquote = `uniform(lo, hi, {structural=false, hasPrior=false})
+			end
+			local function penalty(val)
+				return `factor((val*val)/(softness*softness))
+			end
+			return quote
+				var x = [valquote]
+				if x < lo then
+					[penalty(`lo-x)]
+				elseif x > hi then
+					[penalty(`x-hi)]
+				end
+			in
+				x
 			end
 		end)
-		-- local boundedUniform = macro(function(lo, hi, optInitVal)
-		-- 	if optInitVal then
-		-- 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi, initialVal=optInitVal})
-		-- 	else
-		-- 		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
-		-- 	end
-		-- end)
-
-		-- Utility
-		local terra softmin(vals: &Vector(real), strength: real)
-			var sum = real(0.0)
-			for i=0,vals.size do
-				sum = sum + ad.math.exp(-strength*vals(i))
-			end
-			return -ad.math.log(sum) / strength
-		end
 
 		-- This is the actual computation we do inference on
 		return terra()
@@ -412,7 +432,9 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 			for s=0,scratchImage:numSuperpixels() do
 				for l=0,numLayers do
 					-- layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0)
-					layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0, {initialVal=1.0/numLayers, mass=1.0})
+					-- layering.layerWeights(s)(l) = boundedUniform(0.0, 1.0, {initialVal=1.0/numLayers, mass=1.0})
+					layering.layerWeights(s)(l) = gaussian(0.0, 0.2, {structural=false, initialVal=1.0/numLayers})
+					-- layering.layerWeights(s)(l) = softBoundedUniform(0.0, 1.0, 1.0, {initialVal=1.0/numLayers})
 				end
 			end
 
@@ -432,27 +454,31 @@ local function modelGenerator(spImage, numLayers, blendMode, optLayerColors)
 				end
 			end end)]
 
-			-- Local linearity constraint
-			for s=0,scratchImage:numSuperpixels() do
-				var csum = Color3.stackAlloc(0.0, 0.0, 0.0)
-				for ni=0,scratchImage.superpixelNeighbors(s).size do
-					var n = scratchImage.superpixelNeighbors(s)(ni)
-					var w = scratchImage.superpixelNeighborWeights(s)(ni)
-					csum = csum + w*scratchImage.superpixelColors(n)
-				end
-				var err = csum - scratchImage.superpixelColors(s)
-				manifold(err(0), localLinearitySoftness)
-				manifold(err(1), localLinearitySoftness)
-				manifold(err(2), localLinearitySoftness)
-			end
+			-- -- Local linearity constraint
+			-- for s=0,scratchImage:numSuperpixels() do
+			-- 	var csum = Color3.stackAlloc(0.0, 0.0, 0.0)
+			-- 	for ni=0,scratchImage.superpixelNeighbors(s).size do
+			-- 		var n = scratchImage.superpixelNeighbors(s)(ni)
+			-- 		var w = scratchImage.superpixelNeighborWeights(s)(ni)
+			-- 		csum = csum + w*scratchImage.superpixelColors(n)
+			-- 	end
+			-- 	var err = csum - scratchImage.superpixelColors(s)
+			-- 	manifold(err(0), localLinearitySoftness)
+			-- 	manifold(err(1), localLinearitySoftness)
+			-- 	manifold(err(2), localLinearitySoftness)
+			-- end
 
 			-- Reconstruction constraint
+			-- var totalErr = real(0.0)
 			for s=0,scratchImage:numSuperpixels() do
+				-- totalErr = totalErr + scratchImage.superpixelColors(s):distSq(Color3(spImage.superpixelColors(s)))
 				var err = scratchImage.superpixelColors(s) - Color3(spImage.superpixelColors(s))
 				manifold(err(0), reconstructionSoftness)
 				manifold(err(1), reconstructionSoftness)
 				manifold(err(2), reconstructionSoftness)
 			end
+			-- totalErr = ad.math.sqrt(totalErr)
+			-- manifold(totalErr, reconstructionSoftness)
 
 			-- -- Layer color diversity
 			-- for l1=0,numLayers-1 do
@@ -619,7 +645,7 @@ local terra doInference()
 	-- Run very long HMC trajectories to (hopefully) generate distant samples
 	var samps = [inf.SampleVectorType(model)].stackAlloc()
 	var mixKernel = [HMC({numSteps=1000, relaxManifolds=true})()]
-	currTrace = [inf.mcmcSample(model, {numsamps=20, lag=5, verbose=true})](currTrace, burnInKernel, &samps)
+	currTrace = [inf.mcmcSample(model, {numsamps=20, lag=20, verbose=true})](currTrace, burnInKernel, &samps)
 	m.delete(mixKernel)
 	m.delete(currTrace)
 	return samps
