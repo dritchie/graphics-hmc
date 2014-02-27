@@ -31,7 +31,6 @@ local staticsModel = probcomp(function()
 	local ForceT = staticsUtils.Force(real)
 	local RigidObjectT = staticsUtils.RigidObject(real)
 	local BeamT = staticsUtils.Beam(real)
-	local CableT = staticsUtils.Cable(real)
 	local Ground = staticsUtils.Ground(real)
 	local RigidSceneT = staticsUtils.RigidScene(real)
 	local Connections = staticsUtils.Connections()
@@ -47,7 +46,7 @@ local staticsModel = probcomp(function()
 	----------------------------------
 
 	-- Enforce static equilibrium of a scene given some connections
-	local enforceStability = pfn(terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnectionT))
+	local enforceStability = pfn(terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection))
 		-- Apply internal forces
 		for i=0,connections.size do
 			connections(i):applyForces()
@@ -92,7 +91,7 @@ local staticsModel = probcomp(function()
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 
 		var hingeY = groundHeight
-		var hinge = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5, hingeY))
+		var hinge = Connections.Hinge.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5, hingeY))
 		
 		var beamBot = Vec2.stackAlloc(hinge.location(0), hingeY)
 		var beamLen = 20.0
@@ -103,22 +102,18 @@ local staticsModel = probcomp(function()
 		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
 		hinge:addBeam(beam)
 
-		var groundPin = Connections.CablePinT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.2, groundHeight), ground)
-		var beamPin = Connections.CablePinT.heapAlloc(beamTop, beam)
-		
+		var groundPinLoc = Vec2.stackAlloc(sceneWidth*0.2, groundHeight)
+		var beamPinLoc = beamTop
 		var cableWidth = 0.5
-		var cable = CableT.heapAlloc(groundPin.location, beamPin.location, cableWidth)
-		groundPin:addCable(cable, 0)
-		beamPin:addCable(cable, 1)
+		var cable = Connections.Cable.heapAlloc(groundPinLoc, beamPinLoc, ground, beam, cableWidth)
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		scene.objects:push(ground)
 		scene.objects:push(beam)
-		scene.objects:push(cable)
-		var connections = [Vector(&Connections.RigidConnectionT)].stackAlloc()
+		scene.objects:push(cable:createProxy())
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
 		connections:push(hinge)
-		connections:push(groundPin)
-		connections:push(beamPin)
+		connections:push(cable)
 
 		enforceStability(&scene, &connections)
 
@@ -134,8 +129,8 @@ local staticsModel = probcomp(function()
 		var sceneWidth = 50.0
 		var sceneHeight = 50.0
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
-		var hinge1 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth/3.0, groundHeight))
-		var hinge2 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
+		var hinge1 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(sceneWidth/3.0, groundHeight))
+		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
 		var beamLength = 20.0
 		var beamWidth = 3.0
 		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
@@ -146,22 +141,18 @@ local staticsModel = probcomp(function()
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
 		hinge1:addBeam(beam1)
 		hinge2:addBeam(beam2)
-		var cable = CableT.heapAlloc(beam1.endpoints[1], beam2.endpoints[1], 0.5)
-		var beam1Pin = Connections.CablePinT.heapAlloc(beam1.endpoints[1], beam1)
-		var beam2Pin = Connections.CablePinT.heapAlloc(beam2.endpoints[1], beam2)
-		beam1Pin:addCable(cable, 0)
-		beam2Pin:addCable(cable, 1)
+
+		var cable = Connections.Cable.heapAlloc(beam1.endpoints[1], beam2.endpoints[1], beam1, beam2, 0.5)
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		scene.objects:push(ground)
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
-		scene.objects:push(cable)
-		var connections = [Vector(&Connections.RigidConnectionT)].stackAlloc()
+		scene.objects:push(cable:createProxy())
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
 		connections:push(hinge1)
 		connections:push(hinge2)
-		connections:push(beam1Pin)
-		connections:push(beam2Pin)
+		connections:push(cable)
 
 		enforceStability(&scene, &connections)
 
@@ -176,8 +167,8 @@ local staticsModel = probcomp(function()
 		var sceneWidth = 50.0
 		var sceneHeight = 50.0
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
-		var hinge1 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(sceneWidth/3.0, groundHeight))
-		var hinge2 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
+		var hinge1 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(sceneWidth/3.0, groundHeight))
+		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
 		var beamLength = 20.0
 		var beamWidth = 3.0
 		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
@@ -196,31 +187,21 @@ local staticsModel = probcomp(function()
 									   Vec2.stackAlloc(sceneWidth*0.5 + platformLength*0.5, platformHeight + platformWidth*0.5),
 									   platformWidth)
 		var cableWidth = 0.5
-		var cable1 = CableT.heapAlloc(beam1.endpoints[1], platform.endpoints[0], cableWidth)
-		var cable2 = CableT.heapAlloc(beam2.endpoints[1], platform.endpoints[1], cableWidth)
-		var beam1Pin = Connections.CablePinT.heapAlloc(beam1.endpoints[1], beam1)
-		var beam2Pin = Connections.CablePinT.heapAlloc(beam2.endpoints[1], beam2)
-		var platformPin1 = Connections.CablePinT.heapAlloc(platform.endpoints[0], platform)
-		var platformPin2 = Connections.CablePinT.heapAlloc(platform.endpoints[1], platform)
-		beam1Pin:addCable(cable1, 0)
-		platformPin1:addCable(cable1, 1)
-		beam2Pin:addCable(cable2, 0)
-		platformPin2:addCable(cable2, 1)
+		var cable1 = Connections.Cable.heapAlloc(beam1.endpoints[1], platform.endpoints[0], beam1, platform, cableWidth)
+		var cable2 = Connections.Cable.heapAlloc(beam2.endpoints[1], platform.endpoints[1], beam2, platform, cableWidth)
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		scene.objects:push(ground)
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
 		scene.objects:push(platform)
-		scene.objects:push(cable1)
-		scene.objects:push(cable2)
-		var connections = [Vector(&Connections.RigidConnectionT)].stackAlloc()
+		scene.objects:push(cable1:createProxy())
+		scene.objects:push(cable2:createProxy())
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
 		connections:push(hinge1)
 		connections:push(hinge2)
-		connections:push(beam1Pin)
-		connections:push(beam2Pin)
-		connections:push(platformPin1)
-		connections:push(platformPin2)
+		connections:push(cable1)
+		connections:push(cable2)
 
 		enforceStability(&scene, &connections)
 
@@ -236,14 +217,14 @@ local staticsModel = probcomp(function()
 		var sceneHeight = 100.0
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
-		var connections = [Vector(&Connections.RigidConnectionT)].stackAlloc()
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
 
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 		scene.objects:push(ground)
 
 		-- Set up end support beams
-		var hinge1 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(0.2*sceneWidth, groundHeight))
-		var hinge2 = Connections.HingeT.heapAlloc(Vec2.stackAlloc(0.8*sceneWidth, groundHeight))
+		var hinge1 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(0.2*sceneWidth, groundHeight))
+		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(0.8*sceneWidth, groundHeight))
 		var beamLength = 40.0
 		var beamWidth = 4.0
 		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
@@ -270,8 +251,8 @@ local staticsModel = probcomp(function()
 			var centery = uniform(10.0, 40.0, {structural=false, lowerBound=10.0, upperBound=40.0})
 			var center = Vec2.stackAlloc(centerx, centery)
 			-- var rot = 0.0
-			-- var rot = gaussian(0.0, [math.pi/100], {structural=false})
-			var rot = uniform([-math.pi/6], [math.pi/6], {structural=false, lowerBound=[-math.pi/6], upperBound=[math.pi/6]})
+			var rot = gaussian(0.0, [math.pi/20], {structural=false})
+			-- var rot = uniform([-math.pi/6], [math.pi/6], {structural=false, lowerBound=[-math.pi/6], upperBound=[math.pi/6]})
 			var width = 1.5
 			var length = 4.0
 			var longAxis = polar2rect(length, rot)
@@ -298,16 +279,11 @@ local staticsModel = probcomp(function()
 		m.destruct(platforms)
 		for i=0,startBeams.size do
 			var width = 0.4
-			var cable = CableT.heapAlloc(startBeams(i).endpoints[startEndpoints(i)],
-										 endBeams(i).endpoints[endEndpoints(i)],
-										 width)
-			scene.objects:push(cable)
-			var startPin = Connections.CablePinT.heapAlloc(cable.endpoints[0], startBeams(i))
-			var endPin = Connections.CablePinT.heapAlloc(cable.endpoints[1], endBeams(i))
-			startPin:addCable(cable, 0)
-			endPin:addCable(cable, 1)
-			connections:push(startPin)
-			connections:push(endPin)
+			var cable = Connections.Cable.heapAlloc(startBeams(i).endpoints[startEndpoints(i)],
+										 			endBeams(i).endpoints[endEndpoints(i)],
+										 			startBeams(i), endBeams(i), width)
+			scene.objects:push(cable:createProxy())
+			connections:push(cable)
 		end
 		m.destruct(startBeams)
 		m.destruct(startEndpoints)
@@ -324,10 +300,10 @@ local staticsModel = probcomp(function()
 	----------------------------------
 
 	return terra()
-		return simpleBeamHingeCableScene()
+		-- return simpleBeamHingeCableScene()
 		-- return twoBeamsConnectedByCableScene()
 		-- return singleLinkWackyBridge()
-		-- return multiLinkWackyBridge(5)
+		return multiLinkWackyBridge(5)
 	end
 end)
 
@@ -361,7 +337,7 @@ local function renderDrawFn(sample, im)
 		scene:draw(forceScale) 
 		gl.glFlush()
 		gl.glReadPixels(0, 0, im.width, im.height,
-			gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
+			gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
 	end
 end
 
@@ -376,8 +352,7 @@ end)
 
 ----------------------------------
 
-local numsamps = 1000
--- local numsamps = 1000000
+local numsamps = 3000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,

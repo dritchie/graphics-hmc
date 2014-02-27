@@ -90,13 +90,36 @@ local forceLineWidth = 3.0
 local Force = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint }
+	-- Compute torque about a particular center of rotation
 	terra ForceT:torque(centerOfRotation: Vec2)
 		var d = self.pos - centerOfRotation
 		-- C.printf("f: (%g, %g), d: (%g, %g)\n", 
 		-- 	ad.val(self.vec(0)), ad.val(self.vec(1)), ad.val(d(0)), ad.val(d(1)))
 		return d(0)*self.vec(1) - d(1)*self.vec(0)
 	end
-	if real==double then
+	-- Check for collocation with another force
+	terra ForceT:isCollocatedWith(f: &ForceT)
+		return self.pos == f.pos
+	end
+	-- Add another force into this one (in place)
+	-- Assumes that f is collocated with this force
+	terra ForceT:combineWith(f: &ForceT)
+		if self.dof == 1 and
+			(f.dof == 2 or (not collinear(self.vec, f.vec))) then
+			self.dof = 2
+		end
+		self.vec = self.vec + f.vec
+	end
+	-- Attempt to add another force into this one (in place)
+	-- Return true if the add was successful (i.e. the two forces
+	--    are collocated and can be added), false otherwise.
+	terra ForceT:tryCombiningWith(f: &ForceT)
+		if self:isCollocatedWith(f) then
+			self:combineWith(f)
+			return true
+		else return false end
+	end
+	if real == double then
 		terra ForceT:draw(scale: double)
 			var endpoint = self.pos + scale*self.vec
 			drawLine(self.pos, endpoint, forceLineWidth, Color3d.stackAlloc([forceColor]))
@@ -104,6 +127,7 @@ local Force = templatize(function(real)
 	end
 	return ForceT
 end)
+
 
 -------------------------------------------------------------------------------
 ---                              Objects                                    ---
@@ -142,10 +166,15 @@ local RigidObject = templatize(function(real)
 	inheritance.virtual(RigidObjectT, "centerOfMass")
 	-- Create a heap-allocated dynamic copy
 	inheritance.purevirtual(RigidObjectT, "newcopy", {}->{&RigidObjectT})
-	-- IMPORTANT!: apply only one force at any given location,
-	--    i.e. do all the aggregation of forces and then pass the aggregated
-	--    force to this method.
+	-- This method checks to see if f is collocated with any other force, and if so,
+	--    it combines them.
+	-- This enforces the invariant that all forces are applied at unique locations.
+	-- (This is important for getCentersOfRotation to work properly)
 	terra RigidObjectT:applyForce(f: ForceT)
+		for i=0,self.forces.size do
+			var success = self.forces(i):tryCombiningWith(&f)
+			if success then return end
+		end
 		self.forces:push(f)
 	end
 	-- Retrieve some number of points on the object that are valid centers of
@@ -195,16 +224,11 @@ local RigidObject = templatize(function(real)
 			if not self:getCentersOfRotation(numTorqueEqns, &cor) then
 				util.fatalError("RigidObject - Was not given enough centers of rotation to enforce torque equilibrium\n")
 			end
-			------------------------------------------------------------------------------
-			-- TODO: Not sure if computing residuals this way is the best way to do it...
-			------------------------------------------------------------------------------
 			-- Compute force residual
 			var totalf = Vec2.stackAlloc(0.0)
 			for i=0,self.forces.size do
 				totalf = totalf + self.forces(i).vec
 			end
-			-- var fres = totalf:norm()
-			-- var fres = ad.math.fabs(totalf(0)) + ad.math.fabs(totalf(1))
 			@fresOut = totalf
 			-- Compute torque residual
 			var tsumsq = real(0.0)
@@ -214,14 +238,8 @@ local RigidObject = templatize(function(real)
 					var t = self.forces(j):torque(cor(i))
 					indvidualResidual = indvidualResidual + t
 				end
-				-- tsumsq = tsumsq + indvidualResidual*indvidualResidual
-				-- tsumsq = tsumsq + ad.math.fabs(indvidualResidual)
 				tresOut:push(indvidualResidual)
 			end
-			-- var tres = ad.math.sqrt(tsumsq/cor.size)
-			-- var tres = tsumsq/cor.size
-			-- Return
-			-- return fres, tres
 		end
 	end
 	terra RigidObjectT:mass() : real
@@ -323,67 +341,24 @@ local Beam = templatize(function(real)
 end)
 
 
--- A Cable is a rigid bar of zero area (and thus zero mass, so it is not affected by gravity)
--- The width member is only for rendering
--- Cables can only be under tension
+-- CableProxy is just an inactive Beam
+-- (This is a proxy for rendering)
 local cableColor = colors.Black
-local Cable = templatize(function(real)
+local CableProxy = templatize(function(real)
 	local Vec2 = Vec(real, 2)
-	local RigidObjectT = RigidObject(real)
-	local struct CableT
-	{
-		endpoints: Vec2[2],
-		width: real
-	}
-	inheritance.dynamicExtend(RigidObjectT, CableT)
-	terra CableT:__construct(bot: Vec2, top: Vec2, w: real, active: bool, visible: bool) : {}
-		-- Cables aren't affected by gravity
-		RigidObjectT.__construct(self, active, false, visible)
-		self.endpoints[0] = bot
-		self.endpoints[1] = top
-		self.width = w
+	local BeamT = Beam(real)
+	return terra(bot: Vec2, top: Vec2, w: real)
+		var beam = BeamT.heapAlloc(bot, top, w, false, true)
+		beam.affectedByGravity = false
+		[util.optionally(real==double, function() return quote
+			beam.color = Color3d.stackAlloc([cableColor])
+		end end)]
+		return beam
 	end
-	-- Cables are inactive and visible by default
-	terra CableT:__construct(bot: Vec2, top: Vec2, w: real) : {}
-		self:__construct(bot, top, w, false, true)
-	end
-	-- (Inherit parent destructor)
-	terra CableT:__copy(other: &CableT)
-		RigidObjectT.__copy(self, other)
-		self.endpoints[0] = other.endpoints[0]
-		self.endpoints[1] = other.endpoints[1]
-		self.width = other.width
-	end
-	terra CableT:newcopy() : &RigidObjectT
-		var newcable = m.new(CableT)
-		newcable:__copy(self)
-		return newcable
-	end
-	inheritance.virtual(CableT, "newcopy")
-	terra CableT:otherEndpoint(endpoint: uint)
-		return (endpoint + 1) % 2
-	end
-	terra CableT:directionTowards(endpoint: uint)
-		var vec = self.endpoints[endpoint] - self.endpoints[self:otherEndpoint(endpoint)]
-		vec:normalize()
-		return vec
-	end
-	terra CableT:directionAwayFrom(endpoint: uint)
-		return -self:directionTowards(endpoint)
-	end
-	-- OpenGL drawing code
-	if real == double then
-		terra CableT:drawImpl() : {}
-			drawBar(self.endpoints[0], self.endpoints[1], self.width, Color3d.stackAlloc([cableColor]))
-		end
-		inheritance.virtual(CableT, "drawImpl")
-	end
-	m.addConstructors(CableT)
-	return CableT
 end)
 
 
--- Ground is just an inactive, invisible Beam
+-- Ground is just an inactive Beam
 local groundTallness = `10000.0
 local groundColor = colors.Tableau10.Brown
 local Ground = templatize(function(real)
@@ -466,13 +441,11 @@ end)
 local function Connections()
 	local forcePriorMean = 0.0
 	local forcePriorVariance = 100000000000.0
-	-- local forcePriorMean = 100.0
-	-- local forcePriorVariance = 100.0
+	-- local forcePriorVariance = 1000.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
 	local BeamT = Beam(real)
-	local CableT = Cable(real)
 
 	-- Generate a 1-DOF force along a particular direction
 	local gen1DForce = macro(function(pos, dir)
@@ -493,177 +466,109 @@ local function Connections()
 		end
 	end)
 
-	-- Combine a bunch of forces together into one resultant force.
-	-- Forces must all be applied at the same point.
-	-- Keep track of DOF correctly.
-	local terra combineForces(forces: &Vector(ForceT))
-		util.assert(forces.size > 0, "Can't combine zero forces\n")
-		var totalForce = forces(0).vec
-		var pos = forces(0).pos
-		var totalDOF = forces(0).dof
-		for i=1,forces.size do
-			util.assert(forces(i).pos == pos, "Can't combine forces applied at different points\n")
-			var f = forces(i).vec
-			if totalDOF == 1 and (not collinear(f, totalForce)) then
-				totalDOF = 2
-			end
-			totalForce = totalForce + forces(i).vec
-		end
-		return ForceT{totalForce, pos, totalDOF}
-	end
-
 	----------------------------------
 
 	-- RigidConnections transmit forces between one or more RigidObjects
-	local struct RigidConnectionT {}
+	local struct RigidConnection {}
 	-- Have to separate interface and implementation for "applyForces" because
 	--    (as of now) pfn's can't be virtual.
-	inheritance.purevirtual(RigidConnectionT, "applyForcesImpl", {}->{})
-	terra RigidConnectionT:applyForces()
+	inheritance.purevirtual(RigidConnection, "applyForcesImpl", {}->{})
+	terra RigidConnection:applyForces()
 		self:applyForcesImpl()
 	end
-	RigidConnectionT.methods.applyForces = pmethod(RigidConnectionT.methods.applyForces)
+	RigidConnection.methods.applyForces = pmethod(RigidConnection.methods.applyForces)
 
 	-- A Hinge applies a 2-DOF force to a Beam
 	-- It can be connected to one or more Beams
-	local struct HingeT
+	local struct Hinge
 	{
 		beams: Vector(&BeamT),
 		location: Vec2
 	}
-	inheritance.dynamicExtend(RigidConnectionT, HingeT)
-	terra HingeT:__construct(loc: Vec2)
+	inheritance.dynamicExtend(RigidConnection, Hinge)
+	terra Hinge:__construct(loc: Vec2)
 		m.init(self.beams)
 		self.location = loc
 	end
-	terra HingeT:__destruct()
+	terra Hinge:__destruct()
 		m.destruct(self.beams)
 	end
-	terra HingeT:addBeam(beam: &BeamT) self.beams:push(beam) end
-	terra HingeT:applyForcesImpl() : {}
+	terra Hinge:addBeam(beam: &BeamT) self.beams:push(beam) end
+	terra Hinge:applyForcesImpl() : {}
 		for i=0,self.beams.size do
 			if self.beams(i).active then
 				self.beams(i):applyForce(genUnconstrained2DForce(self.location))
 			end
 		end
 	end
-	inheritance.virtual(HingeT, "applyForcesImpl")
-	m.addConstructors(HingeT)
+	inheritance.virtual(Hinge, "applyForcesImpl")
+	m.addConstructors(Hinge)
 
-	-- A CablePin connects Cables to a Beam
-	-- It applies 1-DOF (tensile) forces
-	local struct CablePinT
+	-- A Cable connects two Beams, applying symmetric 1-DOF tensile forces to each.
+	local struct Cable
 	{
-		beam: &BeamT,
-		cables: Vector(&CableT),
-		cableEndpoints: Vector(uint),
-		location: Vec2
+		endpoints: Vec2[2],
+		beams: (&BeamT)[2],
+		width: real
 	}
-	inheritance.dynamicExtend(RigidConnectionT, CablePinT)
-	terra CablePinT:__construct(loc: Vec2, beam: &BeamT)
-		m.init(self.cables)
-		m.init(self.cableEndpoints)
-		self.beam = beam
-		self.location = loc
+	inheritance.dynamicExtend(RigidConnection, Cable)
+	terra Cable:__construct(ep1: Vec2, ep2: Vec2, beam1: &BeamT, beam2: &BeamT, w: real) : {}
+		self.endpoints[0] = ep1
+		self.endpoints[1] = ep2
+		self.beams[0] = beam1
+		self.beams[1] = beam2
+		self.width = w
 	end
-	terra CablePinT:__destruct()
-		m.destruct(self.cables)
-		m.destruct(self.cableEndpoints)
+	terra Cable:createProxy()
+		return [CableProxy(real)](self.endpoints[0], self.endpoints[1], self.width)
 	end
-	-- Assumption is that the endpoint is colocated with the pin location
-	terra CablePinT:addCable(cable: &CableT, endpoint: uint)
-		self.cables:push(cable)
-		self.cableEndpoints:push(endpoint)
+	terra Cable:otherEndpoint(endpoint: uint)
+		return (endpoint + 1) % 2
 	end
-	terra CablePinT:applyForcesImpl() : {}
-		-- Apply force from cables to beam
-		-- Aggregate all independent forces into one total force
-		if self.beam.active then
-			var forces = [Vector(ForceT)].stackAlloc()
-			for i=0,self.cables.size do
-				var cable = self.cables(i)
-				var endpoint = self.cableEndpoints(i)
-				var dir = cable:directionAwayFrom(endpoint)
-				forces:push(gen1DForce(self.location, dir))
+	terra Cable:directionTowards(endpoint: uint)
+		var vec = self.endpoints[endpoint] - self.endpoints[self:otherEndpoint(endpoint)]
+		vec:normalize()
+		return vec
+	end
+	terra Cable:directionAwayFrom(endpoint: uint)
+		return -self:directionTowards(endpoint)
+	end
+	terra Cable:applyForcesImpl() : {}
+		-- Verify that at least one of the attached Beams is active
+		if self.beams[0].active or self.beams[1].active then
+			-- Generate a 1D tensile force pulling away from the first endpoint
+			var f = gen1DForce(self.endpoints[0], self:directionAwayFrom(0))
+			-- Apply, if this endpoint Beam is active
+			if self.beams[0].active then
+				self.beams[0]:applyForce(f)
 			end
-			self.beam:applyForce(combineForces(&forces))
-			m.destruct(forces)
-		end
-		-- Apply force from beam to cables
-		for i=0,self.cables.size do
-			var cable = self.cables(i)
-			if cable.active then
-				var endpoint = self.cableEndpoints(i)
-				var dir = cable:directionTowards(endpoint)
-				cable:applyForce(gen1DForce(self.location, dir))
-			end
-		end
-	end
-	inheritance.virtual(CablePinT, "applyForcesImpl")
-	m.addConstructors(CablePinT)
-
-	-- A CableKnot connects Cables together
-	-- It applies 1-DOF (tensile) forces
-	local struct CableKnotT
-	{
-		cables: Vector(&CableT),
-		cableEndpoints: Vector(uint),
-		location: Vec2
-	}
-	inheritance.dynamicExtend(RigidConnectionT, CableKnotT)
-	terra CableKnotT:__construct(loc: Vec2)
-		m.init(self.cables)
-		m.init(self.cableEndpoints)
-		self.location = loc
-	end
-	terra CableKnotT:__destruct()
-		m.destruct(self.cables)
-		m.destruct(self.cableEndpoints)
-	end
-	-- Assumption is that the endpoint is colocated with the knot location
-	terra CableKnotT:addCable(cable: &CableT, endpoint: uint)
-		self.cables:push(cable)
-		self.cableEndpoints:push(endpoint)
-	end
-	terra CableKnotT:applyForcesImpl() : {}
-		var forces = [Vector(ForceT)].stackAlloc()
-		-- Apply force to all cables
-		for i=0,self.cables.size do
-			var cable = self.cables(i)
-			if cable.active then
-				forces:clear()
-				-- Apply forces from all other cables
-				for j=0,self.cables.size do
-					if i ~= j then
-						var fcable = self.cables(j)
-						var endpoint = self.cableEndpoints(j)
-						var dir = fcable:directionAwayFrom(endpoint)
-						forces:push(gen1DForce(self.location, dir))
-					end
-				end
-				cable:applyForce(combineForces(&forces))
+			-- If the other endpoint beam is active, then flip the force
+			--    direction and apply it there
+			if self.beams[1].active then
+				f.vec = -f.vec
+				f.pos = self.endpoints[1]
+				self.beams[1]:applyForce(f)
 			end
 		end
-		m.destruct(forces)
 	end
-	inheritance.virtual(CableKnotT, "applyForcesImpl")
-	m.addConstructors(CableKnotT)
+	inheritance.virtual(Cable, "applyForcesImpl")
+	m.addConstructors(Cable)
 
 	-- A Stacking connects two Beams (one atop the other)
 	-- It applies normal forces at the contact vertices
 	-- Assumes the Beams are axis-aligned and that endpoints[0]
 	--    is below endpoints[1]
-	local struct StackingT
+	local struct Stacking
 	{
 		bottom: &BeamT,
 		top: &BeamT
 	}
-	inheritance.dynamicExtend(RigidConnectionT, StackingT)
-	terra StackingT:__construct(bot: &BeamT, top: &BeamT)
+	inheritance.dynamicExtend(RigidConnection, Stacking)
+	terra Stacking:__construct(bot: &BeamT, top: &BeamT)
 		self.bottom = bot
 		self.top = top
 	end
-	terra StackingT:applyForcesImpl() : {}
+	terra Stacking:applyForcesImpl() : {}
 		var contactY = self.bottom.endpoints[1](1)
 		var botMinX = self.bottom.endpoints[1](0) - self.bottom.width/2.0
 		var botMaxX = self.bottom.endpoints[1](0) + self.bottom.width/2.0
@@ -681,16 +586,15 @@ local function Connections()
 			self.top:applyForce(gen1DForce(Vec2.stackAlloc(contactX2, contactY), up))
 		end
 	end
-	inheritance.virtual(StackingT, "applyForcesImpl")
-	m.addConstructors(StackingT)
+	inheritance.virtual(Stacking, "applyForcesImpl")
+	m.addConstructors(Stacking)
 
 	return 
 	{
-		RigidConnectionT = RigidConnectionT,
-		HingeT = HingeT,
-		CablePinT = CablePinT,
-		CableKnotT = CableKnotT,
-		StackingT = StackingT
+		RigidConnection = RigidConnection,
+		Hinge = Hinge,
+		Cable = Cable,
+		Stacking = Stacking
 	}
 
 end
@@ -702,7 +606,6 @@ return
 	Force = Force,
 	RigidObject = RigidObject,
 	Beam = Beam,
-	Cable = Cable,
 	Ground = Ground,
 	RigidScene = RigidScene,
 	Connections = Connections
