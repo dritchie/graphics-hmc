@@ -310,8 +310,9 @@ local staticsModel = probcomp(function()
 		scene.objects:push(ground)
 
 		-- Set up end support beams
-		var beam1x = uniform(0.01*sceneWidth, 0.3*sceneWidth, {structural=false, lowerBound=0.01*sceneWidth, upperBound=0.3*sceneWidth})
-		var beam2x = uniform(0.7*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.7*sceneWidth, upperBound=0.99*sceneWidth})
+		var beamSepWidth = uniform(0.5*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.5*sceneWidth, upperBound=0.99*sceneWidth})
+		var beam1x = 0.5*sceneWidth - 0.5*beamSepWidth
+		var beam2x = 0.5*sceneWidth + 0.5*beamSepWidth
 		var beam1bot = Vec2.stackAlloc(beam1x, groundHeight)
 		var beam2bot = Vec2.stackAlloc(beam2x, groundHeight)
 		var beamLength = 40.0
@@ -377,6 +378,33 @@ local staticsModel = probcomp(function()
 		m.destruct(connections)
 		return scene
 	end)
+
+	-- -- Single-spar cable-stayed bridge
+	-- local cableStayedBridge = pfn(terra(numCablePairs: uint)
+	-- 	var groundHeight = 2.0
+	-- 	var sceneWidth = 100.0
+	-- 	var sceneHeight = 100.0
+	-- 	var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+	-- 	var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+	-- 	var ground = Ground(groundHeight, 0.0, sceneWidth)
+	-- 	scene.objects:push(ground)
+
+	-- 	-- Platform
+	-- 	var platformWidth = uniform(0.5*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.5*sceneWidth, upperBound=0.99*sceneWidth})
+	-- 	var platformHeight
+	-- 	var platformThickness = 4.0
+	-- 	var platform = BeamT.heapAlloc()
+
+	-- 	-- Support beams
+
+	-- 	-- Spar
+
+	-- 	-- Cables
+
+	-- 	connections:clearAndDelete()
+	-- 	m.destruct(connections)
+	-- 	return scene
+	-- end)
 
 	----------------------------------
 

@@ -37,6 +37,11 @@ local min = macro(function(a,b)
 	end
 end)
 
+local perp = macro(function(vec)
+	local VecT = vec:gettype()
+	return `VecT.stackAlloc(-vec(1), vec(0))
+end)
+
 -- Check whether two vectors are on the same line
 -- (Uses the z-component of the cross product)
 local collinear = macro(function(v1, v2)
@@ -329,6 +334,33 @@ local Beam = templatize(function(real)
 		return (self.endpoints[1] - self.endpoints[0]):norm() * self.width * self.density
 	end
 	inheritance.virtual(BeamT, "mass")
+	-- Selecting corners of the beam
+	BeamT.corner = templatize(function(self, index)
+		if index == 0 then
+			return `self.endpoints[0] - 0.5*self.width
+		elseif index == 1 then
+			return `self.endpoints[0] + 0.5*self.width
+		elseif index == 2 then
+			return `self.endpoints[1] + 0.5*self.width
+		elseif index == 3 then
+			return `self.endpoints[1] - 0.5*self.width
+		else
+			error("BeamT.corner: index must be 0, 1, 2, or 3")
+		end
+	end)
+	terra BeamT:corner(index: uint)
+		if index == 0 then
+			return [BeamT.corner(self, 0)]
+		elseif index == 1 then
+			return [BeamT.corner(self, 1)]
+		elseif index == 2 then
+			return [BeamT.corner(self, 2)]
+		elseif index == 3 then
+			return [BeamT.corner(self, 3)]
+		else
+			util.fatalError("BeamT:corner: index must be 0, 1, 2, or 3")
+		end
+	end
 	-- OpenGL drawing code
 	if real == double then
 		terra BeamT:drawImpl() : {}
@@ -451,6 +483,15 @@ local function Connections()
 	local gen1DForce = macro(function(pos, dir)
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0})
+		in
+			ForceT { mag*dir, pos, 1}
+		end
+	end)
+
+	-- Generate an unbounded 1-DOF force along a particular direction
+	local genUnbounded1DForce = macro(function(pos, dir)
+		return quote
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1}
 		end
@@ -589,14 +630,52 @@ local function Connections()
 	inheritance.virtual(Stacking, "applyForcesImpl")
 	m.addConstructors(Stacking)
 
-	-- TODO: Add 'Weld' connection
+
+	-- A Weld connects two Beams.
+	-- One Beam is 'attached' to the other one, which is the 'base'
+	-- The connection happens at one edge of the 'attached'
+	-- It applies a force (that can be either positive or negative) normal
+	--    to the contact surface at both of the edge contact vertices.
+	local struct Weld
+	{
+		base: &BeamT,
+		attached: &BeamT,
+		contactPoints: Vec2[2]
+	}
+	inheritance.dynamicExtend(RigidConnection, Weld)
+	terra Weld:__construct(base: &BeamT, attached: &BeamT, cp1: Vec2, cp2: Vec2)
+		self.base = base
+		self.attached = attached
+		self.contactPoints[0] = cp1
+		self.contactPoints[1] = cp2
+	end
+	terra Weld:applyForcesImpl() : {}
+		-- Compute the normal vector to the contact edge
+		var contactEdge = self.contactPoints[1] - self.contactPoints[0]
+		contactEdge:normalize()
+		var normal = perp(contactEdge)
+
+		-- Apply contact forces
+		if self.base.active then
+			self.base:applyForce(genUnbounded1DForce(self.contactPoints[0], normal))
+			self.base:applyForce(genUnbounded1DForce(self.contactPoints[1], normal))
+		end
+		if self.attached.active then
+			self.attached:applyForce(genUnbounded1DForce(self.contactPoints[0], normal))
+			self.attached:applyForce(genUnbounded1DForce(self.contactPoints[1], normal))
+		end
+	end
+	inheritance.virtual(Weld, "applyForcesImpl")
+	m.addConstructors(Weld)
+
 
 	return 
 	{
 		RigidConnection = RigidConnection,
 		Hinge = Hinge,
 		Cable = Cable,
-		Stacking = Stacking
+		Stacking = Stacking,
+		Weld = Weld
 	}
 
 end
