@@ -275,7 +275,8 @@ local Beam = templatize(function(real)
 	{
 		endpoints: Vec2[2],
 		width: real,
-		density: real
+		density: real,
+		perp: Vec2
 	}
 	if real == double then
 		BeamT.entries:insert({field="color", type=Color3d})
@@ -290,6 +291,9 @@ local Beam = templatize(function(real)
 		[util.optionally(real==double, function() return quote
 			self.color = Color3d.stackAlloc([beamColor])
 		end end)]
+		var axis = top - bot; axis:normalize()
+		self.perp = perp(axis)
+
 	end
 	-- Beams are active and visible by default
 	terra BeamT:__construct(bot: Vec2, top: Vec2, w: real) : {}
@@ -337,13 +341,13 @@ local Beam = templatize(function(real)
 	-- Selecting corners of the beam
 	BeamT.corner = templatize(function(self, index)
 		if index == 0 then
-			return `self.endpoints[0] - 0.5*self.width
+			return `self.endpoints[0] - 0.5*self.width*self.perp
 		elseif index == 1 then
-			return `self.endpoints[0] + 0.5*self.width
+			return `self.endpoints[0] + 0.5*self.width*self.perp
 		elseif index == 2 then
-			return `self.endpoints[1] + 0.5*self.width
+			return `self.endpoints[1] + 0.5*self.width*self.perp
 		elseif index == 3 then
-			return `self.endpoints[1] - 0.5*self.width
+			return `self.endpoints[1] - 0.5*self.width*self.perp
 		else
 			error("BeamT.corner: index must be 0, 1, 2, or 3")
 		end
@@ -643,11 +647,11 @@ local function Connections()
 		contactPoints: Vec2[2]
 	}
 	inheritance.dynamicExtend(RigidConnection, Weld)
-	terra Weld:__construct(base: &BeamT, attached: &BeamT, cp1: Vec2, cp2: Vec2)
+	terra Weld:__construct(base: &BeamT, attached: &BeamT, cp1: uint, cp2: uint)
 		self.base = base
 		self.attached = attached
-		self.contactPoints[0] = cp1
-		self.contactPoints[1] = cp2
+		self.contactPoints[0] = attached:corner(cp1)
+		self.contactPoints[1] = attached:corner(cp2)
 	end
 	terra Weld:applyForcesImpl() : {}
 		-- Compute the normal vector to the contact edge
@@ -689,7 +693,8 @@ return
 	Beam = Beam,
 	Ground = Ground,
 	RigidScene = RigidScene,
-	Connections = Connections
+	Connections = Connections,
+	perp = perp
 }
 
 

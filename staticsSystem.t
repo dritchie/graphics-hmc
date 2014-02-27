@@ -23,6 +23,14 @@ local Color3d = Vec(double, 3)
 
 ----------------------------------
 
+local lerp = macro(function(lo, hi, t)
+	return `(1.0-t)*lo + t*hi
+end)
+local expinterp = macro(function(lo, hi, t)
+	return `ad.math.exp( (1.0-t)*ad.math.log(lo) + t*ad.math.log(hi) )
+end)
+
+----------------------------------
 
 local staticsModel = probcomp(function()
 	local gravityConstant = `9.8
@@ -379,32 +387,107 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
-	-- -- Single-spar cable-stayed bridge
-	-- local cableStayedBridge = pfn(terra(numCablePairs: uint)
-	-- 	var groundHeight = 2.0
-	-- 	var sceneWidth = 100.0
-	-- 	var sceneHeight = 100.0
-	-- 	var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
-	-- 	var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
-	-- 	var ground = Ground(groundHeight, 0.0, sceneWidth)
-	-- 	scene.objects:push(ground)
+	-- Single-spar cable-stayed bridge
+	local cableStayedBridge = pfn(terra(numCablePairs: uint)
+		var groundHeight = 2.0
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
 
-	-- 	-- Platform
-	-- 	var platformWidth = uniform(0.5*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.5*sceneWidth, upperBound=0.99*sceneWidth})
-	-- 	var platformHeight
-	-- 	var platformThickness = 4.0
-	-- 	var platform = BeamT.heapAlloc()
+		-- Platform
+		var platformWidth = uniform(0.5*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.5*sceneWidth, upperBound=0.99*sceneWidth})
+		var platformHeight = uniform(0.1*sceneWidth, 0.3*sceneWidth, {structural=false, lowerBound=0.1*sceneWidth, upperBound=0.3*sceneWidth})
+		var platformLeft = Vec2.stackAlloc(0.5*sceneWidth - 0.5*platformWidth, platformHeight)
+		var platformRight = Vec2.stackAlloc(0.5*sceneWidth + 0.5*platformWidth, platformHeight)
+		var platformCenter = 0.5*(platformLeft + platformRight)
+		var platformThickness = 4.0
+		var platform = BeamT.heapAlloc(platformLeft, platformRight, platformThickness)
+		scene.objects:push(platform)
 
-	-- 	-- Support beams
+		-- Support beams
+		var beamWidth = 4.0
+		var beamBotY = groundHeight
+		var beamTopY = platformHeight - 0.5*platformThickness
+		var beam1xlo = platformLeft(0) + 0.5*beamWidth
+		var beam1xhi = platformCenter(0) - 0.5*beamWidth
+		-- var beam1x = uniform(beam1xlo, beam1xhi, {structural=false, lowerBound=beam1xlo, upperBound=beam1xhi})
+		var beam1x = beam1xlo
+		var beam2xlo = platformCenter(0) + 0.5*beamWidth
+		var beam2xhi = platformRight(0) - 0.5*beamWidth
+		-- var beam2x = uniform(beam2xlo, beam2xhi, {structural=false, lowerBound=beam2xlo, upperBound=beam2xhi})
+		var beam2x = beam2xhi
+		var beam1Bot = Vec2.stackAlloc(beam1x, beamBotY)
+		var beam1Top = Vec2.stackAlloc(beam1x, beamTopY)
+		var beam2Bot = Vec2.stackAlloc(beam2x, beamBotY)
+		var beam2Top = Vec2.stackAlloc(beam2x, beamTopY)
+		var beam1 = BeamT.heapAlloc(beam1Bot, beam1Top, beamWidth)
+		var beam2 = BeamT.heapAlloc(beam2Bot, beam2Top, beamWidth)
+		scene.objects:push(beam1)
+		scene.objects:push(beam2)
 
-	-- 	-- Spar
+		-- Spar
+		var sparWidth = 4.0
+		var sparLength = uniform(0.5*platformWidth, platformWidth, {structural=false, lowerBound=0.5*platformWidth, upperBound=platformWidth})
+		var sparBotParam = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+		var sparLowerBound = Vec2.stackAlloc(platformLeft(0) + 0.5*sparWidth, platformLeft(1))
+		var sparUpperBound = Vec2.stackAlloc(platformRight(0) - 0.5*sparWidth, platformLeft(1))
+		var sparBot = lerp(sparLowerBound, sparUpperBound, sparBotParam)
+		var sparBotLeft = Vec2.stackAlloc(sparBot(0)-0.5*sparWidth, sparBot(1))
+		var sparBotRight = Vec2.stackAlloc(sparBot(0)+0.5*sparWidth, sparBot(1))
+		var sparAngle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var sparTop = sparBot + polar2rect(sparLength, sparAngle)
+		var spar = BeamT.heapAlloc(sparBot, sparTop, sparWidth)
+		scene.objects:push(spar)
 
-	-- 	-- Cables
+		-- Support beams are stacked on the ground
+		connections:push(Connections.Stacking.heapAlloc(ground, beam1))
+		connections:push(Connections.Stacking.heapAlloc(ground, beam2))
 
-	-- 	connections:clearAndDelete()
-	-- 	m.destruct(connections)
-	-- 	return scene
-	-- end)
+		-- Support beams are welded to platform
+		connections:push(Connections.Weld.heapAlloc(platform, beam1, 2, 3))
+		connections:push(Connections.Weld.heapAlloc(platform, beam2, 2, 3))
+
+		-- Spar is connected to platform by a hinge
+		var hinge = Connections.Hinge.heapAlloc(sparBot)
+		hinge:addBeam(spar)
+		connections:push(hinge)
+
+		-- Spar is connected to platform by cables
+		var cableWidth = 0.4
+		var sparAxis = sparTop - sparBot; sparAxis:normalize()
+		var sparPerp = staticsUtils.perp(sparAxis)
+		var platformLeftVec = platformLeft - platformCenter; platformLeftVec:normalize()
+		var platformRightVec = platformRight - platformCenter; platformRightVec:normalize()
+		if sparPerp:dot(platformLeftVec) > sparPerp:dot(platformRightVec) then
+			sparPerp = -sparPerp    -- Guarantee perp points toward right edge of scene
+		end
+		for i=0,numCablePairs do
+			var sparLengthParam = uniform(0.1, 1.0, {structural=false, lowerBound=0.1, upperBound=1.0})
+			var sparPinCenter = lerp(sparBot, sparTop, sparLengthParam)
+			var sparPinLeft = sparPinCenter - 0.5*sparWidth*sparPerp
+			var sparPinRight = sparPinCenter + 0.5*sparWidth*sparPerp
+			var platPinLeftParam = uniform(0.05, 0.95, {structural=false, lowerBound=0.05, upperBound=0.95})
+			var platPinRightParam = uniform(0.05, 0.95, {structural=false, lowerBound=0.05, upperBound=0.95})
+			var platPinLeft = lerp(platformLeft, sparBotLeft, platPinLeftParam)
+			platPinLeft(1) = platPinLeft(1) + 0.5*platformThickness
+			var platPinRight = lerp(sparBot, platformRight, platPinRightParam)
+			platPinRight(1) = platPinRight(1) + 0.5*platformThickness
+			var cableLeft = Connections.Cable.heapAlloc(platPinLeft, sparPinLeft, platform, spar, cableWidth)
+			var cableRight = Connections.Cable.heapAlloc(platPinRight, sparPinRight, platform, spar, cableWidth)
+			scene.objects:push(cableLeft:createProxy())
+			scene.objects:push(cableRight:createProxy())
+			connections:push(cableLeft)
+			connections:push(cableRight)
+		end
+
+		enforceStability(&scene, &connections)
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
 
 	----------------------------------
 
@@ -413,7 +496,8 @@ local staticsModel = probcomp(function()
 		-- return twoBeamsConnectedByCableScene()
 		-- return singleLinkWackyBridge()
 		-- return multiLinkWackyBridge(5)
-		return multiLinkSlidingBridge(5)
+		-- return multiLinkSlidingBridge(5)
+		return cableStayedBridge(3)
 	end
 end)
 
@@ -453,16 +537,7 @@ end
 
 ----------------------------------
 
-local lerp = macro(function(lo, hi, t)
-	return `(1.0-t)*lo + t*hi
-end)
-local expinterp = macro(function(lo, hi, t)
-	return `ad.math.exp( (1.0-t)*ad.math.log(lo) + t*ad.math.log(hi) )
-end)
-
-----------------------------------
-
-local numsamps = 3000
+local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
