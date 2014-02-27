@@ -5,7 +5,6 @@ local m = terralib.require("mem")
 local templatize = terralib.require("templatize")
 local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
-local Grid2D = terralib.require("grid").Grid2D
 local image = terralib.require("image")
 local ad = terralib.require("ad")
 local SuperpixelImage = terralib.require("superpixelImage")
