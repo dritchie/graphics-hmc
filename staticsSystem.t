@@ -297,13 +297,95 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	-- Multi-link bridge with rotatable links and sliding support columns
+	local multiLinkSlidingBridge = pfn(terra(numLinks: uint)
+		var groundHeight = 2.0
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		-- Set up end support beams
+		var beam1x = uniform(0.01*sceneWidth, 0.3*sceneWidth, {structural=false, lowerBound=0.01*sceneWidth, upperBound=0.3*sceneWidth})
+		var beam2x = uniform(0.7*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.7*sceneWidth, upperBound=0.99*sceneWidth})
+		var beam1bot = Vec2.stackAlloc(beam1x, groundHeight)
+		var beam2bot = Vec2.stackAlloc(beam2x, groundHeight)
+		var beamLength = 40.0
+		var beamWidth = 4.0
+		var beam1 = BeamT.heapAlloc(beam1bot, beam1bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, false, true)
+		var beam2 = BeamT.heapAlloc(beam2bot, beam2bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, false, true)
+		scene.objects:push(beam1)
+		scene.objects:push(beam2)
+
+		-- Create platforms
+		var platforms = [Vector(&BeamT)].stackAlloc()
+		var platxmin = beam1.endpoints[0](0)
+		var platxmax = beam2.endpoints[0](0)
+		var platxrange = platxmax - platxmin
+		for i=0,numLinks do
+			var t = ((i+1)/double(numLinks+1))
+			var centerx = platxmin + t*platxrange
+			var centery = uniform(5.0, 40.0, {structural=false, lowerBound=5.0, upperBound=40.0})
+			var center = Vec2.stackAlloc(centerx, centery)
+			-- var rot = 0.0
+			-- var rot = gaussian(0.0, [math.pi/20], {structural=false})
+			var rot = uniform([-math.pi/4], [math.pi/4], {structural=false, lowerBound=[-math.pi/4], upperBound=[math.pi/4]})
+			var width = 1.5
+			var length = 4.0
+			var longAxis = polar2rect(length, rot)
+			var platform = BeamT.heapAlloc(center - longAxis, center+longAxis, width)
+			platforms:push(platform)
+			scene.objects:push(platform)
+		end
+
+		-- Link everything together with cables
+		var startBeams = [Vector(&BeamT)].stackAlloc()
+		var startEndpoints = [Vector(uint)].stackAlloc()
+		var endBeams = [Vector(&BeamT)].stackAlloc()
+		var endEndpoints = [Vector(uint)].stackAlloc()
+		startBeams:push(beam1)
+		startEndpoints:push(1)
+		for i=0,platforms.size do
+			endBeams:push(platforms(i))
+			endEndpoints:push(0)
+			startBeams:push(platforms(i))
+			startEndpoints:push(1)
+		end
+		endBeams:push(beam2)
+		endEndpoints:push(1)
+		m.destruct(platforms)
+		for i=0,startBeams.size do
+			var width = 0.4
+			var cable = Connections.Cable.heapAlloc(startBeams(i).endpoints[startEndpoints(i)],
+										 			endBeams(i).endpoints[endEndpoints(i)],
+										 			startBeams(i), endBeams(i), width)
+			scene.objects:push(cable:createProxy())
+			connections:push(cable)
+		end
+		m.destruct(startBeams)
+		m.destruct(startEndpoints)
+		m.destruct(endBeams)
+		m.destruct(endEndpoints)
+
+		enforceStability(&scene, &connections)
+
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
 	----------------------------------
 
 	return terra()
 		-- return simpleBeamHingeCableScene()
 		-- return twoBeamsConnectedByCableScene()
 		-- return singleLinkWackyBridge()
-		return multiLinkWackyBridge(5)
+		-- return multiLinkWackyBridge(5)
+		return multiLinkSlidingBridge(5)
 	end
 end)
 

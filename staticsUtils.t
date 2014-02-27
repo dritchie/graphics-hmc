@@ -589,6 +589,8 @@ local function Connections()
 	inheritance.virtual(Stacking, "applyForcesImpl")
 	m.addConstructors(Stacking)
 
+	-- TODO: Add 'Weld' connection
+
 	return 
 	{
 		RigidConnection = RigidConnection,
