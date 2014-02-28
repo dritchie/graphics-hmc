@@ -9,6 +9,7 @@ local Vec = terralib.require("linalg").Vec
 local rand = terralib.require("prob.random")
 local gl = terralib.require("gl")
 local colors = terralib.require("colors")
+local ad = terralib.require("ad")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
@@ -270,6 +271,9 @@ local beamColor = colors.Tableau10.Blue
 local beamDensity = 0.1
 local Beam = templatize(function(real)
 	local Vec2 = Vec(real, 2)
+	local polar2rect = macro(function(r, theta)
+		return `Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
+	end)
 	local RigidObjectT = RigidObject(real)
 	local struct BeamT
 	{
@@ -299,6 +303,15 @@ local Beam = templatize(function(real)
 	terra BeamT:__construct(bot: Vec2, top: Vec2, w: real) : {}
 		self:__construct(bot, top, w, true, true)
 	end
+	-- Constructor in terms of alternative parameters
+	BeamT.methods.fromCenterLengthAngle = terra(c: Vec2, len: real, ang: real, w: real, active: bool, visible: bool) : &BeamT
+		var halflen = 0.5*len
+		var axis = polar2rect(halflen, ang)
+		return BeamT.heapAlloc(c - axis, c + axis, w, active, visible)
+	end
+	BeamT.methods.fromCenterLengthAngle:adddefinition((terra(c: Vec2, len: real, ang: real, w: real) : &BeamT
+		return BeamT.fromCenterLengthAngle(c, len, ang, w, true, true)
+	end):getdefinitions()[1])
 	-- (Inherit parent destructor)
 	terra BeamT:__copy(other: &BeamT)
 		RigidObjectT.__copy(self, other)

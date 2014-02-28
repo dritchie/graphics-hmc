@@ -51,6 +51,10 @@ local staticsModel = probcomp(function()
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
 
+	local boundedUniform = macro(function(lo, hi)
+		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+	end)
+
 	----------------------------------
 
 	-- Enforce static equilibrium of a scene given some connections
@@ -104,7 +108,7 @@ local staticsModel = probcomp(function()
 		var beamBot = Vec2.stackAlloc(hinge.location(0), hingeY)
 		var beamLen = 20.0
 		-- var beamAngle = [math.pi/4]
-		var beamAngle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var beamAngle = boundedUniform(0.0, [math.pi])
 		var beamTop = beamBot + polar2rect(beamLen, beamAngle)
 		var beamWidth = 3.0
 		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
@@ -141,8 +145,8 @@ local staticsModel = probcomp(function()
 		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
 		var beamLength = 20.0
 		var beamWidth = 3.0
-		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
-		var beam2angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var beam1angle = boundedUniform(0.0, [math.pi])
+		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [3*math.pi/4]
 		-- var beam2angle = [math.pi/4]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
@@ -179,15 +183,15 @@ local staticsModel = probcomp(function()
 		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(2.0*sceneWidth/3.0, groundHeight))
 		var beamLength = 20.0
 		var beamWidth = 3.0
-		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
-		var beam2angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var beam1angle = boundedUniform(0.0, [math.pi])
+		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [0.6*math.pi]
 		-- var beam2angle = [0.1*math.pi]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
 		hinge1:addBeam(beam1)
 		hinge2:addBeam(beam2)
-		var platformHeight = uniform(10.0, 30.0, {structural=false, lowerBound=10.0, upperBound=30.0})
+		var platformHeight = boundedUniform(10.0, 30.0)
 		-- var platformHeight = 10.0
 		var platformWidth = 3.0
 		var platformLength = 10.0
@@ -235,8 +239,8 @@ local staticsModel = probcomp(function()
 		var hinge2 = Connections.Hinge.heapAlloc(Vec2.stackAlloc(0.8*sceneWidth, groundHeight))
 		var beamLength = 40.0
 		var beamWidth = 4.0
-		var beam1angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
-		var beam2angle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var beam1angle = boundedUniform(0.0, [math.pi])
+		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [math.pi/2]
 		-- var beam2angle = [math.pi/2]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
@@ -256,11 +260,11 @@ local staticsModel = probcomp(function()
 		for i=0,numLinks do
 			var t = ((i+1)/double(numLinks+1))
 			var centerx = platxmin + t*platxrange
-			var centery = uniform(10.0, 40.0, {structural=false, lowerBound=10.0, upperBound=40.0})
+			var centery = boundedUniform(10.0, 40.0)
 			var center = Vec2.stackAlloc(centerx, centery)
 			-- var rot = 0.0
-			var rot = gaussian(0.0, [math.pi/20], {structural=false})
-			-- var rot = uniform([-math.pi/6], [math.pi/6], {structural=false, lowerBound=[-math.pi/6], upperBound=[math.pi/6]})
+			-- var rot = gaussian(0.0, [math.pi/20], {structural=false})
+			var rot = boundedUniform([-math.pi/6], [math.pi/6])
 			var width = 1.5
 			var length = 4.0
 			var longAxis = polar2rect(length, rot)
@@ -338,11 +342,11 @@ local staticsModel = probcomp(function()
 		for i=0,numLinks do
 			var t = ((i+1)/double(numLinks+1))
 			var centerx = platxmin + t*platxrange
-			var centery = uniform(5.0, 40.0, {structural=false, lowerBound=5.0, upperBound=40.0})
+			var centery = boundedUniform(5.0, 40.0)
 			var center = Vec2.stackAlloc(centerx, centery)
 			-- var rot = 0.0
 			-- var rot = gaussian(0.0, [math.pi/20], {structural=false})
-			var rot = uniform([-math.pi/4], [math.pi/4], {structural=false, lowerBound=[-math.pi/4], upperBound=[math.pi/4]})
+			var rot = boundedUniform([-math.pi/4], [math.pi/4])
 			var width = 1.5
 			var length = 4.0
 			var longAxis = polar2rect(length, rot)
@@ -388,6 +392,14 @@ local staticsModel = probcomp(function()
 	end)
 
 	-- Single-spar cable-stayed bridge
+	local genCableSpan = macro(function()
+		return quote
+			var spanBegin = boundedUniform(0.1, 0.4)
+			var spanEnd = boundedUniform(0.6, 0.9)
+		in
+			spanBegin, spanEnd
+		end
+	end)
 	local cableStayedBridge = pfn(terra(numCablePairs: uint)
 		var groundHeight = 2.0
 		var sceneWidth = 100.0
@@ -398,8 +410,8 @@ local staticsModel = probcomp(function()
 		scene.objects:push(ground)
 
 		-- Platform
-		var platformWidth = uniform(0.5*sceneWidth, 0.99*sceneWidth, {structural=false, lowerBound=0.5*sceneWidth, upperBound=0.99*sceneWidth})
-		var platformHeight = uniform(0.1*sceneWidth, 0.3*sceneWidth, {structural=false, lowerBound=0.1*sceneWidth, upperBound=0.3*sceneWidth})
+		var platformWidth = boundedUniform(0.5*sceneWidth, 0.99*sceneWidth)
+		var platformHeight = boundedUniform(0.1*sceneWidth, 0.3*sceneWidth)
 		var platformLeft = Vec2.stackAlloc(0.5*sceneWidth - 0.5*platformWidth, platformHeight)
 		var platformRight = Vec2.stackAlloc(0.5*sceneWidth + 0.5*platformWidth, platformHeight)
 		var platformCenter = 0.5*(platformLeft + platformRight)
@@ -413,11 +425,11 @@ local staticsModel = probcomp(function()
 		var beamTopY = platformHeight - 0.5*platformThickness
 		var beam1xlo = platformLeft(0) + 0.5*beamWidth
 		var beam1xhi = platformCenter(0) - 0.5*beamWidth
-		-- var beam1x = uniform(beam1xlo, beam1xhi, {structural=false, lowerBound=beam1xlo, upperBound=beam1xhi})
+		-- var beam1x = boundedUniform(beam1xlo, beam1xhi)
 		var beam1x = beam1xlo
 		var beam2xlo = platformCenter(0) + 0.5*beamWidth
 		var beam2xhi = platformRight(0) - 0.5*beamWidth
-		-- var beam2x = uniform(beam2xlo, beam2xhi, {structural=false, lowerBound=beam2xlo, upperBound=beam2xhi})
+		-- var beam2x = boundedUniform(beam2xlo, beam2xhi)
 		var beam2x = beam2xhi
 		var beam1Bot = Vec2.stackAlloc(beam1x, beamBotY)
 		var beam1Top = Vec2.stackAlloc(beam1x, beamTopY)
@@ -430,14 +442,14 @@ local staticsModel = probcomp(function()
 
 		-- Spar
 		var sparWidth = 4.0
-		var sparLength = uniform(0.5*platformWidth, platformWidth, {structural=false, lowerBound=0.5*platformWidth, upperBound=platformWidth})
-		var sparBotParam = uniform(0.0, 1.0, {structural=false, lowerBound=0.0, upperBound=1.0})
+		var sparLength = boundedUniform(0.5*platformWidth, platformWidth)
+		var sparBotParam = boundedUniform(0.1, 0.9)
 		var sparLowerBound = Vec2.stackAlloc(platformLeft(0) + 0.5*sparWidth, platformLeft(1))
 		var sparUpperBound = Vec2.stackAlloc(platformRight(0) - 0.5*sparWidth, platformLeft(1))
 		var sparBot = lerp(sparLowerBound, sparUpperBound, sparBotParam)
 		var sparBotLeft = Vec2.stackAlloc(sparBot(0)-0.5*sparWidth, sparBot(1))
 		var sparBotRight = Vec2.stackAlloc(sparBot(0)+0.5*sparWidth, sparBot(1))
-		var sparAngle = uniform(0.0, [math.pi], {structural=false, lowerBound=0.0, upperBound=[math.pi]})
+		var sparAngle = boundedUniform(0.0, [math.pi])
 		var sparTop = sparBot + polar2rect(sparLength, sparAngle)
 		var spar = BeamT.heapAlloc(sparBot, sparTop, sparWidth)
 		scene.objects:push(spar)
@@ -464,24 +476,149 @@ local staticsModel = probcomp(function()
 		if sparPerp:dot(platformLeftVec) > sparPerp:dot(platformRightVec) then
 			sparPerp = -sparPerp    -- Guarantee perp points toward right edge of scene
 		end
+		var sparSpanBegin, sparSpanEnd = genCableSpan()
+		var platLeftSpanBegin, platLeftSpanEnd = genCableSpan()
+		var platRightSpanBegin, platRightSpanEnd = genCableSpan()
 		for i=0,numCablePairs do
-			var sparLengthParam = uniform(0.1, 1.0, {structural=false, lowerBound=0.1, upperBound=1.0})
-			var sparPinCenter = lerp(sparBot, sparTop, sparLengthParam)
-			var sparPinLeft = sparPinCenter - 0.5*sparWidth*sparPerp
-			var sparPinRight = sparPinCenter + 0.5*sparWidth*sparPerp
-			var platPinLeftParam = uniform(0.05, 0.95, {structural=false, lowerBound=0.05, upperBound=0.95})
-			var platPinRightParam = uniform(0.05, 0.95, {structural=false, lowerBound=0.05, upperBound=0.95})
-			var platPinLeft = lerp(platformLeft, sparBotLeft, platPinLeftParam)
-			platPinLeft(1) = platPinLeft(1) + 0.5*platformThickness
-			var platPinRight = lerp(sparBot, platformRight, platPinRightParam)
-			platPinRight(1) = platPinRight(1) + 0.5*platformThickness
-			var cableLeft = Connections.Cable.heapAlloc(platPinLeft, sparPinLeft, platform, spar, cableWidth)
-			var cableRight = Connections.Cable.heapAlloc(platPinRight, sparPinRight, platform, spar, cableWidth)
+			var t = (i + 0.5)/numCablePairs
+			var sparT = lerp(sparSpanBegin, sparSpanEnd, t)
+			var platLeftT = lerp(platLeftSpanBegin, platLeftSpanEnd, t)
+			var platRightT = lerp(platRightSpanBegin, platRightSpanEnd, t)
+			var sparCenterPoint = lerp(sparBot, sparTop, sparT)
+			var sparLeftPoint = sparCenterPoint - 0.5*sparWidth*sparPerp
+			var sparRightPoint = sparCenterPoint + 0.5*sparWidth*sparPerp
+			var platLeftPoint = lerp(sparBotLeft, platformLeft, platLeftT)
+			platLeftPoint(1) = platLeftPoint(1) + 0.5*platformThickness
+			var platRightPoint = lerp(sparBotRight, platformRight, platRightT)
+			platRightPoint(1) = platRightPoint(1) + 0.5*platformThickness
+			var cableLeft = Connections.Cable.heapAlloc(platLeftPoint, sparLeftPoint, platform, spar, cableWidth)
+			var cableRight = Connections.Cable.heapAlloc(platRightPoint, sparRightPoint, platform, spar, cableWidth)
 			scene.objects:push(cableLeft:createProxy())
 			scene.objects:push(cableRight:createProxy())
 			connections:push(cableLeft)
 			connections:push(cableRight)
 		end
+
+		enforceStability(&scene, &connections)
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
+	-- A (simple?) hanging structure
+	-- It looks kind of like this:
+	--             [=]
+	--              |
+	--          [=======]
+	--          /       \
+	--      [=====]   [=====]
+	--      |     \   /     |
+	--      |    [=====]    |
+	--      |     /   \     |
+	--      [=====]   [=====]
+	--         \         /
+	--          [=======]
+	local hangingStructure = pfn(terra()
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+
+		var beamThickness = 4.0
+
+		-- Anchor for everything to hang from
+		var anchorCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.95*sceneHeight)
+		var anchorSize = beamThickness
+		var anchor = BeamT.fromCenterLengthAngle(anchorCenter, anchorSize, 0.0, anchorSize, false, true)
+		scene.objects:push(anchor)
+
+		-- Generate top and bottom beams
+		var topBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.8*sceneHeight)
+		var topBeamLen = boundedUniform(0.1*sceneWidth, 0.5*sceneWidth)
+		var topBeam = BeamT.fromCenterLengthAngle(topBeamCenter, topBeamLen, 0.0, beamThickness)
+		scene.objects:push(topBeam)
+		var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - boundedUniform(0.4*sceneHeight, 0.8*sceneHeight))
+		var botBeam = BeamT.fromCenterLengthAngle(botBeamCenter, topBeamLen, 0.0, beamThickness)
+		scene.objects:push(botBeam)
+
+		-- The middle beam should be somewhere between the top and bottom beams
+		var midBeamCenterT = boundedUniform(0.2, 0.8)
+		var midBeamCenter = lerp(botBeamCenter, topBeamCenter, midBeamCenterT)
+		var midBeamLen = boundedUniform(0.5*topBeamLen, topBeamLen)
+		var midBeam = BeamT.fromCenterLengthAngle(midBeamCenter, midBeamLen, 0.0, beamThickness)
+		scene.objects:push(midBeam)
+
+		-- The side beams are sandwiched between the top/mid/bottom beams.
+		-- They can move side to side a bit (though they must stay horizontally symmetric).
+		-- They can also rotate a bit.
+
+		-- Side beams between the mid and top beam
+		var sideBeams1HeightT = boundedUniform(0.2, 0.8)
+		var sideBeams1Height = lerp(midBeamCenter(1), topBeamCenter(1), sideBeams1HeightT)
+		var sideBeams1Len = boundedUniform(0.5*topBeamLen, topBeamLen)
+		var sideBeams1LeftCenterX = boundedUniform(0.5*sideBeams1Len, midBeamCenter(0)-0.5*sideBeams1Len)
+		var sideBeams1LeftCenter = Vec2.stackAlloc(sideBeams1LeftCenterX, sideBeams1Height)
+		var sideBeams1RightCenterX = (midBeamCenter(0) - sideBeams1LeftCenterX) + midBeamCenter(0)
+		var sideBeams1RightCenter = Vec2.stackAlloc(sideBeams1RightCenterX, sideBeams1Height)
+		var sideBeams1LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
+		-- var sideBeams1LeftAngle = 0.0
+		var sideBeams1RightAngle = -sideBeams1LeftAngle
+		var sideBeams1Left = BeamT.fromCenterLengthAngle(sideBeams1LeftCenter, sideBeams1Len, sideBeams1LeftAngle, beamThickness)
+		var sideBeams1Right = BeamT.fromCenterLengthAngle(sideBeams1RightCenter, sideBeams1Len, sideBeams1RightAngle, beamThickness)
+		scene.objects:push(sideBeams1Left)
+		scene.objects:push(sideBeams1Right)
+
+		-- Side beams between the bottom and mid beam
+		var sideBeams2HeightT = boundedUniform(0.2, 0.8)
+		var sideBeams2Height = lerp(botBeamCenter(1), midBeamCenter(1), sideBeams2HeightT)
+		var sideBeams2Len = boundedUniform(0.5*topBeamLen, topBeamLen)
+		var sideBeams2LeftCenterX = boundedUniform(0.5*sideBeams2Len, midBeamCenter(0)-0.5*sideBeams2Len)
+		var sideBeams2LeftCenter = Vec2.stackAlloc(sideBeams2LeftCenterX, sideBeams2Height)
+		var sideBeams2RightCenterX = (midBeamCenter(0) - sideBeams2LeftCenterX) + midBeamCenter(0)
+		var sideBeams2RightCenter = Vec2.stackAlloc(sideBeams2RightCenterX, sideBeams2Height)
+		var sideBeams2LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
+		-- var sideBeams2LeftAngle = 0.0
+		var sideBeams2RightAngle = -sideBeams2LeftAngle
+		var sideBeams2Left = BeamT.fromCenterLengthAngle(sideBeams2LeftCenter, sideBeams2Len, sideBeams2LeftAngle, beamThickness)
+		var sideBeams2Right = BeamT.fromCenterLengthAngle(sideBeams2RightCenter, sideBeams2Len, sideBeams2RightAngle, beamThickness)
+		scene.objects:push(sideBeams2Left)
+		scene.objects:push(sideBeams2Right)
+
+		-- Wire things up with cables
+		var cableWidth = 0.4
+		var anchorTopCable = Connections.Cable.heapAlloc(anchorCenter, topBeamCenter, anchor, topBeam, cableWidth)
+		var topSideLeftCable = Connections.Cable.heapAlloc(topBeam.endpoints[0], sideBeams1LeftCenter, topBeam, sideBeams1Left, cableWidth)
+		var topSideRightCable = Connections.Cable.heapAlloc(topBeam.endpoints[1], sideBeams1RightCenter, topBeam, sideBeams1Right, cableWidth)
+		var sideLeftsCable = Connections.Cable.heapAlloc(sideBeams1Left.endpoints[0], sideBeams2Left.endpoints[0], sideBeams1Left, sideBeams2Left, cableWidth)
+		var sideRightsCable = Connections.Cable.heapAlloc(sideBeams1Right.endpoints[1], sideBeams2Right.endpoints[1], sideBeams1Right, sideBeams2Right, cableWidth)
+		var sideLeftMidCable = Connections.Cable.heapAlloc(sideBeams1Left.endpoints[1], midBeam.endpoints[0], sideBeams1Left, midBeam, cableWidth)
+		var sideRightMidCable = Connections.Cable.heapAlloc(sideBeams1Right.endpoints[0], midBeam.endpoints[1], sideBeams1Right, midBeam, cableWidth)
+		var midSideLeftCable = Connections.Cable.heapAlloc(midBeam.endpoints[0], sideBeams2Left.endpoints[1], midBeam, sideBeams2Left, cableWidth)
+		var midSideRightCable = Connections.Cable.heapAlloc(midBeam.endpoints[1], sideBeams2Right.endpoints[0], midBeam, sideBeams2Right, cableWidth)
+		var sideLeftBotCable = Connections.Cable.heapAlloc(sideBeams2LeftCenter, botBeam.endpoints[0], sideBeams2Left, botBeam, cableWidth)
+		var sideRightBotCable = Connections.Cable.heapAlloc(sideBeams2RightCenter, botBeam.endpoints[1], sideBeams2Right, botBeam, cableWidth)
+		scene.objects:push(anchorTopCable:createProxy())
+		scene.objects:push(topSideLeftCable:createProxy())
+		scene.objects:push(topSideRightCable:createProxy())
+		scene.objects:push(sideLeftsCable:createProxy())
+		scene.objects:push(sideRightsCable:createProxy())
+		scene.objects:push(sideLeftMidCable:createProxy())
+		scene.objects:push(sideRightMidCable:createProxy())
+		scene.objects:push(midSideLeftCable:createProxy())
+		scene.objects:push(midSideRightCable:createProxy())
+		scene.objects:push(sideLeftBotCable:createProxy())
+		scene.objects:push(sideRightBotCable:createProxy())
+		connections:push(anchorTopCable)
+		connections:push(topSideLeftCable)
+		connections:push(topSideRightCable)
+		connections:push(sideLeftsCable)
+		connections:push(sideRightsCable)
+		connections:push(sideLeftMidCable)
+		connections:push(sideRightMidCable)
+		connections:push(midSideLeftCable)
+		connections:push(midSideRightCable)
+		connections:push(sideLeftBotCable)
+		connections:push(sideRightBotCable)
 
 		enforceStability(&scene, &connections)
 		connections:clearAndDelete()
@@ -497,7 +634,8 @@ local staticsModel = probcomp(function()
 		-- return singleLinkWackyBridge()
 		-- return multiLinkWackyBridge(5)
 		-- return multiLinkSlidingBridge(5)
-		return cableStayedBridge(3)
+		-- return cableStayedBridge(3)
+		return hangingStructure()
 	end
 end)
 
@@ -522,6 +660,7 @@ local function renderInitFn(samples, im)
 end
 
 local forceScale = 0.1
+-- local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
 	return quote
