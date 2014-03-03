@@ -51,8 +51,29 @@ local staticsModel = probcomp(function()
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
 
-	local boundedUniform = macro(function(lo, hi)
-		return `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+	local boundedUniform = macro(function(lo, hi, opts)
+		local valquote = nil
+		if opts then
+			local OpsType = opts:gettype()
+			local struct NewOpsType {}
+			for _,e in ipairs(OpsType.entries) do
+				table.insert(NewOpsType.entries, {field=e.field, type=e.type})
+			end
+			table.insert(NewOpsType.entries, {field="lowerBound", type=lo:gettype()})
+			table.insert(NewOpsType.entries, {field="upperBound", type=hi:gettype()})
+			table.insert(NewOpsType.entries, {field="structural", type=bool})
+			valquote = quote
+				var newopts = NewOpsType(opts)
+				newopts.structural = false
+				newopts.lowerBound = lo
+				newopts.upperBound = hi
+			in
+				uniform(lo, hi, newopts)
+			end
+		else
+			valquote = `uniform(lo, hi, {structural=false, lowerBound=lo, upperBound=hi})
+		end
+		return valquote
 	end)
 
 	----------------------------------
