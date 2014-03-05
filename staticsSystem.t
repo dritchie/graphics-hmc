@@ -13,6 +13,10 @@ local GradientAscent = terralib.require("gradientAscent")
 
 local staticsUtils = terralib.require("staticsUtils")
 
+local newton = terralib.require("prob.newtonProj")
+local inf = terralib.require("prob.inference")
+local trace = terralib.require("prob.trace")
+
 local C = terralib.includecstring [[
 #include <stdio.h>
 ]]
@@ -88,7 +92,7 @@ local staticsModel = probcomp(function()
 		var down = Vec2.stackAlloc(0.0, -1.0)
 		for i=0,scene.objects.size do
 			var obj = scene.objects(i)
-			if obj.affectedByGravity then
+			if obj.active and obj.affectedByGravity then
 				var gforce = gravityConstant * obj:mass() * down
 				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0})
 			end
@@ -96,6 +100,7 @@ local staticsModel = probcomp(function()
 		-- Calculate residuals and apply factors
 		var fres = Vec2.stackAlloc(0.0, 0.0)
 		var tres = [Vector(real)].stackAlloc()
+		-- C.printf("=============================\n")
 		for i=0,scene.objects.size do
 			if scene.objects(i).active then
 				tres:clear()
@@ -104,10 +109,13 @@ local staticsModel = probcomp(function()
 				manifold(fres(0), 1.0)
 				-- factor(softEq(fres(1), 0.0, 1.0))
 				manifold(fres(1), 1.0)
+				-- C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
 				for j=0,tres.size do
 					-- factor(softEq(tres(j), 0.0, 1.0))
 					manifold(tres(j), 1.0)
+					-- C.printf("tres: %g\n", ad.val(tres(j)))
 				end
+				-- C.printf("------------------------\n")
 			end
 		end
 		m.destruct(tres)
@@ -556,16 +564,20 @@ local staticsModel = probcomp(function()
 		-- Generate top and bottom beams
 		var topBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.8*sceneHeight)
 		var topBeamLen = boundedUniform(0.1*sceneWidth, 0.5*sceneWidth)
+		-- var topBeamLen = 0.5*sceneWidth
 		var topBeam = BeamT.fromCenterLengthAngle(topBeamCenter, topBeamLen, 0.0, beamThickness)
 		scene.objects:push(topBeam)
 		var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - boundedUniform(0.4*sceneHeight, 0.8*sceneHeight))
+		-- var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - 0.6*sceneHeight)
 		var botBeam = BeamT.fromCenterLengthAngle(botBeamCenter, topBeamLen, 0.0, beamThickness)
 		scene.objects:push(botBeam)
 
 		-- The middle beam should be somewhere between the top and bottom beams
 		var midBeamCenterT = boundedUniform(0.2, 0.8)
+		-- var midBeamCenterT = 0.5
 		var midBeamCenter = lerp(botBeamCenter, topBeamCenter, midBeamCenterT)
 		var midBeamLen = boundedUniform(0.5*topBeamLen, topBeamLen)
+		-- var midBeamLen = 0.5*topBeamLen
 		var midBeam = BeamT.fromCenterLengthAngle(midBeamCenter, midBeamLen, 0.0, beamThickness)
 		scene.objects:push(midBeam)
 
@@ -575,9 +587,13 @@ local staticsModel = probcomp(function()
 
 		-- Side beams between the mid and top beam
 		var sideBeams1HeightT = boundedUniform(0.2, 0.8)
+		-- var sideBeams1HeightT = 0.5
 		var sideBeams1Height = lerp(midBeamCenter(1), topBeamCenter(1), sideBeams1HeightT)
 		var sideBeams1Len = boundedUniform(0.5*topBeamLen, topBeamLen)
+		-- var sideBeams1Len = 0.5*topBeamLen
+		-- var sideBeams1LeftCenterX = boundedUniform(0.5*sideBeams1Len, midBeam.endpoints[0](0)-0.5*sideBeams1Len)
 		var sideBeams1LeftCenterX = boundedUniform(0.5*sideBeams1Len, midBeamCenter(0)-0.5*sideBeams1Len)
+		-- var sideBeams1LeftCenterX = 0.5*(0.5*sideBeams1Len + (midBeam.endpoints[0](0) - 0.5*sideBeams1Len))
 		var sideBeams1LeftCenter = Vec2.stackAlloc(sideBeams1LeftCenterX, sideBeams1Height)
 		var sideBeams1RightCenterX = (midBeamCenter(0) - sideBeams1LeftCenterX) + midBeamCenter(0)
 		var sideBeams1RightCenter = Vec2.stackAlloc(sideBeams1RightCenterX, sideBeams1Height)
@@ -591,9 +607,13 @@ local staticsModel = probcomp(function()
 
 		-- Side beams between the bottom and mid beam
 		var sideBeams2HeightT = boundedUniform(0.2, 0.8)
+		-- var sideBeams2HeightT = 0.5
 		var sideBeams2Height = lerp(botBeamCenter(1), midBeamCenter(1), sideBeams2HeightT)
 		var sideBeams2Len = boundedUniform(0.5*topBeamLen, topBeamLen)
+		-- var sideBeams2Len = 0.5*topBeamLen
+		-- var sideBeams2LeftCenterX = boundedUniform(0.5*sideBeams2Len, midBeam.endpoints[0](0)-0.5*sideBeams2Len)
 		var sideBeams2LeftCenterX = boundedUniform(0.5*sideBeams2Len, midBeamCenter(0)-0.5*sideBeams2Len)
+		-- var sideBeams2LeftCenterX = 0.5*(0.5*sideBeams2Len + (midBeam.endpoints[0](0)-0.5*sideBeams2Len))
 		var sideBeams2LeftCenter = Vec2.stackAlloc(sideBeams2LeftCenterX, sideBeams2Height)
 		var sideBeams2RightCenterX = (midBeamCenter(0) - sideBeams2LeftCenterX) + midBeamCenter(0)
 		var sideBeams2RightCenter = Vec2.stackAlloc(sideBeams2RightCenterX, sideBeams2Height)
@@ -647,6 +667,57 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	local simpleHangingStructure = pfn(terra()
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+
+		var beamThickness = 4.0
+		var cableThickness = 0.4
+
+		-- Anchors
+		var anchor1center = Vec2.stackAlloc(0.25*sceneWidth, 0.95*sceneHeight)
+		var anchor1 = BeamT.fromCenterLengthAngle(anchor1center, beamThickness, 0.0, beamThickness, false, true)
+		var anchor2center = Vec2.stackAlloc(0.75*sceneWidth, 0.95*sceneHeight)
+		var anchor2 = BeamT.fromCenterLengthAngle(anchor2center, beamThickness, 0.0, beamThickness, false, true)
+		scene.objects:push(anchor1)
+		scene.objects:push(anchor2)
+
+		-- Bar
+		var barLength = anchor2center(0) - anchor1center(0)
+		var barRot = boundedUniform([-math.pi/4.0], [math.pi/4.0])
+		-- var barRot = gaussian(0.0, [math.pi/4.0], {structural=false, initialVal=0.0})
+		-- var barDisplace = boundedUniform(0.2*sceneHeight, 0.6*sceneHeight)
+		var barDisplace = 0.5*sceneHeight
+		var barCenter = 0.5*(anchor1center + anchor2center)
+		barCenter(1) = barCenter(1) - barDisplace
+		var bar = BeamT.fromCenterLengthAngle(barCenter, barLength, barRot, beamThickness)
+		scene.objects:push(bar)
+
+		-- var barLeftDisplace = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
+		-- -- var barLeftDisplace = 0.2*sceneHeight
+		-- var barLeft = anchor1center - Vec2.stackAlloc(0.0, barLeftDisplace)
+		-- var barRightDisplace = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
+		-- -- var barRightDisplace = 0.5*sceneHeight
+		-- var barRight = anchor2center - Vec2.stackAlloc(0.0, barRightDisplace)
+		-- var bar = BeamT.heapAlloc(barLeft, barRight, beamThickness)
+		-- scene.objects:push(bar)
+
+		-- Cables
+		var cable1 = Connections.Cable.heapAlloc(anchor1center, bar.endpoints[0], anchor1, bar, cableThickness)
+		var cable2 = Connections.Cable.heapAlloc(anchor2center, bar.endpoints[1], anchor2, bar, cableThickness)
+		scene.objects:push(cable1:createProxy())
+		scene.objects:push(cable2:createProxy())
+		connections:push(cable1)
+		connections:push(cable2)
+
+		enforceStability(&scene, &connections)
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
 	----------------------------------
 
 	return terra()
@@ -657,6 +728,7 @@ local staticsModel = probcomp(function()
 		-- return multiLinkSlidingBridge(5)
 		-- return cableStayedBridge(3)
 		return hangingStructure()
+		-- return simpleHangingStructure()
 	end
 end)
 
@@ -697,7 +769,84 @@ end
 
 ----------------------------------
 
-local numsamps = 1000
+-- Compute a discretization of the state space for the simplified hanging structure
+-- We assume that the model is set to evaluate simplifiedHangingStructure
+-- We assume that the bar displacement is set to 0, leaving three free vars:
+--  * bar rotation
+--  * left cable force
+--  * right cable force
+-- Inputs to this function are the min, max, and num steps for the discretization of each
+--    of these three variables.
+-- This function computes the unnormalized density at the Cartesian product of these
+--    discrete step ranges, and then writes them to a CSV file for visualization.
+-- Hopefully this gives a better picture of the shape of the distribution.
+local function vizSimplifiedHangingStructure(rotRange, forceRange, outfilename)
+	local model = staticsModel
+	local getptr = macro(function(data, rnsteps, fnsteps, r, f1, f2)
+		return `data:getPointer(r*fnsteps*fnsteps + f1*fnsteps + f2)
+	end)
+	local terra go()
+		-- Compute range stuff
+		var rmin = double([rotRange[1]])
+		var rmax = double([rotRange[2]])
+		var rnsteps = [rotRange[3]] + 1
+		var rstep = (rmax - rmin) / rnsteps
+		var fmin = double([forceRange[1]])
+		var fmax = double([forceRange[2]])
+		var fnsteps = [forceRange[3]] + 1
+		var fstep = (fmax - fmin) / fnsteps
+		-- Calculate logprobs for every bin
+		var tr : &trace.BaseTrace(double) = [trace.newTrace(model)]
+		var data = [Vector(double)].stackAlloc(rnsteps*fnsteps*fnsteps, 0.0)
+		var lpmin = [math.huge]
+		var lpmax = [-math.huge]
+		var vals = [Vector(double)].stackAlloc(3, 0.0)
+		for ri=0,rnsteps do
+			var r = rmin + ri*rstep
+			vals(0) = r
+			for f1i=0,fnsteps do
+				var f1 = fmin + f1i*fstep
+				vals(1) = f1
+				for f2i=0,fnsteps do
+					var f2 = fmin + f2i*fstep
+					vals(2) = f2
+					tr:setNonStructuralReals(&vals)
+					[trace.traceUpdate({structureChange=false, relaxManifolds=true})](tr)
+					var logprob = tr.logprob
+					lpmin = ad.math.fmin(logprob, lpmin)
+					lpmax = ad.math.fmax(logprob, lpmax)
+					var dataptr = getptr(data, rnsteps, fnsteps, ri, f1i, f2i)
+					@dataptr = logprob
+				end
+			end
+		end
+		m.destruct(vals)
+		m.delete(tr)
+		-- Write to file
+		var file = C.fopen(outfilename, "w")
+		C.fprintf(file, "rotation,force1,force2,logprob,relProb\n")
+		for ri=0,rnsteps do
+			var r = rmin + ri*rstep
+			for f1i=0,fnsteps do
+				var f1 = fmin + f1i*fstep
+				for f2i=0,fnsteps do
+					var f2 = fmin + f2i*fstep
+					var dataptr = getptr(data, rnsteps, fnsteps, ri, f1i, f2i)
+					var logprob = @dataptr
+					var relProb = ad.math.exp(logprob - lpmax)
+					C.fprintf(file, "%g,%g,%g,%g,%g\n", r, f1, f2, logprob, relProb)
+				end
+			end
+		end
+		m.destruct(data)
+		C.fclose(file)
+	end
+	go()
+end
+
+----------------------------------
+
+local numsamps = 5000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
@@ -717,9 +866,6 @@ local scheduleFn = macro(function(iter, currTrace)
 	end
 end)
 kernel = Schedule(kernel, scheduleFn)
-local newton = terralib.require("prob.newtonProj")
-local inf = terralib.require("prob.inference")
-local trace = terralib.require("prob.trace")
 local model = staticsModel
 local terra doInference()
 	return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
@@ -742,9 +888,17 @@ local terra doInference()
 	-- m.delete(currTrace)
 	-- return samples
 end
+
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
 rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, imageWidth)
+
+-- vizSimplifiedHangingStructure({-math.pi/4, math.pi/4, 50}, {0.0, 200.0, 100}, "stateSpaceViz/stateSpaceViz.csv")
+
+
+
+
+
 
 
 

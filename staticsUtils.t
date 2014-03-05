@@ -193,6 +193,7 @@ local RigidObject = templatize(function(real)
 		for i=0,min(num,self.forces.size) do
 			output:push(self.forces(i).pos)
 		end
+		-- output:push(self.forces:back().pos)
 		return num == output.size
 	end
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
@@ -489,8 +490,10 @@ end)
 
 local function Connections()
 	local forcePriorMean = 0.0
+	-- local forcePriorMean = 100.0
 	local forcePriorVariance = 100000000000.0
-	-- local forcePriorVariance = 1000.0
+	-- local forcePriorVariance = 200.0
+	-- local forcePriorVariance = 100.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
