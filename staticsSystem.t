@@ -141,7 +141,7 @@ local staticsModel = probcomp(function()
 		var beamTop = beamBot + polar2rect(beamLen, beamAngle)
 		var beamWidth = 3.0
 		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
-		hinge:addBeam(beam)
+		hinge:addObj(beam)
 
 		var groundPinLoc = Vec2.stackAlloc(sceneWidth*0.2, groundHeight)
 		var beamPinLoc = beamTop
@@ -180,10 +180,10 @@ local staticsModel = probcomp(function()
 		-- var beam2angle = [math.pi/4]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
-		hinge1:addBeam(beam1)
-		hinge2:addBeam(beam2)
+		hinge1:addObj(beam1)
+		hinge2:addObj(beam2)
 
-		var cable = Connections.Cable.heapAlloc(beam1.endpoints[1], beam2.endpoints[1], beam1, beam2, 0.5)
+		var cable = Connections.Cable.heapAlloc(beam1:endpoint(1), beam2:endpoint(1), beam1, beam2, 0.5)
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		scene.objects:push(ground)
@@ -218,8 +218,8 @@ local staticsModel = probcomp(function()
 		-- var beam2angle = [0.1*math.pi]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
-		hinge1:addBeam(beam1)
-		hinge2:addBeam(beam2)
+		hinge1:addObj(beam1)
+		hinge2:addObj(beam2)
 		var platformHeight = boundedUniform(10.0, 30.0)
 		-- var platformHeight = 10.0
 		var platformWidth = 3.0
@@ -228,8 +228,8 @@ local staticsModel = probcomp(function()
 									   Vec2.stackAlloc(sceneWidth*0.5 + platformLength*0.5, platformHeight + platformWidth*0.5),
 									   platformWidth)
 		var cableWidth = 0.5
-		var cable1 = Connections.Cable.heapAlloc(beam1.endpoints[1], platform.endpoints[0], beam1, platform, cableWidth)
-		var cable2 = Connections.Cable.heapAlloc(beam2.endpoints[1], platform.endpoints[1], beam2, platform, cableWidth)
+		var cable1 = Connections.Cable.heapAlloc(beam1:endpoint(1), platform:endpoint(0), beam1, platform, cableWidth)
+		var cable2 = Connections.Cable.heapAlloc(beam2:endpoint(1), platform:endpoint(1), beam2, platform, cableWidth)
 
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		scene.objects:push(ground)
@@ -274,8 +274,8 @@ local staticsModel = probcomp(function()
 		-- var beam2angle = [math.pi/2]
 		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
 		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
-		hinge1:addBeam(beam1)
-		hinge2:addBeam(beam2)
+		hinge1:addObj(beam1)
+		hinge2:addObj(beam2)
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
 		connections:push(hinge1)
@@ -283,8 +283,8 @@ local staticsModel = probcomp(function()
 
 		-- Create platforms
 		var platforms = [Vector(&BeamT)].stackAlloc()
-		var platxmin = beam1.endpoints[0](0)
-		var platxmax = beam2.endpoints[0](0)
+		var platxmin = beam1:endpoint(0)(0)
+		var platxmax = beam2:endpoint(0)(0)
 		var platxrange = platxmax - platxmin
 		for i=0,numLinks do
 			var t = ((i+1)/double(numLinks+1))
@@ -320,8 +320,8 @@ local staticsModel = probcomp(function()
 		m.destruct(platforms)
 		for i=0,startBeams.size do
 			var width = 0.4
-			var cable = Connections.Cable.heapAlloc(startBeams(i).endpoints[startEndpoints(i)],
-										 			endBeams(i).endpoints[endEndpoints(i)],
+			var cable = Connections.Cable.heapAlloc(startBeams(i):endpoint(startEndpoints(i)),
+										 			endBeams(i):endpoint(endEndpoints(i)),
 										 			startBeams(i), endBeams(i), width)
 			scene.objects:push(cable:createProxy())
 			connections:push(cable)
@@ -358,15 +358,17 @@ local staticsModel = probcomp(function()
 		var beam2bot = Vec2.stackAlloc(beam2x, groundHeight)
 		var beamLength = 40.0
 		var beamWidth = 4.0
-		var beam1 = BeamT.heapAlloc(beam1bot, beam1bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, false, true)
-		var beam2 = BeamT.heapAlloc(beam2bot, beam2bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, false, true)
+		var beam1 = BeamT.heapAlloc(beam1bot, beam1bot + Vec2.stackAlloc(0.0, beamLength), beamWidth)
+		beam1:disable()
+		var beam2 = BeamT.heapAlloc(beam2bot, beam2bot + Vec2.stackAlloc(0.0, beamLength), beamWidth)
+		beam2:disable()
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
 
 		-- Create platforms
 		var platforms = [Vector(&BeamT)].stackAlloc()
-		var platxmin = beam1.endpoints[0](0)
-		var platxmax = beam2.endpoints[0](0)
+		var platxmin = beam1:endpoint(0)(0)
+		var platxmax = beam2:endpoint(0)(0)
 		var platxrange = platxmax - platxmin
 		for i=0,numLinks do
 			var t = ((i+1)/double(numLinks+1))
@@ -402,8 +404,8 @@ local staticsModel = probcomp(function()
 		m.destruct(platforms)
 		for i=0,startBeams.size do
 			var width = 0.4
-			var cable = Connections.Cable.heapAlloc(startBeams(i).endpoints[startEndpoints(i)],
-										 			endBeams(i).endpoints[endEndpoints(i)],
+			var cable = Connections.Cable.heapAlloc(startBeams(i):endpoint(startEndpoints(i)),
+										 			endBeams(i):endpoint(endEndpoints(i)),
 										 			startBeams(i), endBeams(i), width)
 			scene.objects:push(cable:createProxy())
 			connections:push(cable)
@@ -493,7 +495,7 @@ local staticsModel = probcomp(function()
 
 		-- Spar is connected to platform by a hinge
 		var hinge = Connections.Hinge.heapAlloc(sparBot)
-		hinge:addBeam(spar)
+		hinge:addObj(spar)
 		connections:push(hinge)
 
 		-- Spar is connected to platform by cables
@@ -558,18 +560,19 @@ local staticsModel = probcomp(function()
 		-- Anchor for everything to hang from
 		var anchorCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.95*sceneHeight)
 		var anchorSize = beamThickness
-		var anchor = BeamT.fromCenterLengthAngle(anchorCenter, anchorSize, 0.0, anchorSize, false, true)
+		var anchor = BeamT.heapAlloc(anchorCenter, anchorSize, anchorSize, 0.0)
+		anchor:disable()
 		scene.objects:push(anchor)
 
 		-- Generate top and bottom beams
 		var topBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.8*sceneHeight)
 		var topBeamLen = boundedUniform(0.1*sceneWidth, 0.5*sceneWidth)
 		-- var topBeamLen = 0.5*sceneWidth
-		var topBeam = BeamT.fromCenterLengthAngle(topBeamCenter, topBeamLen, 0.0, beamThickness)
+		var topBeam = BeamT.heapAlloc(topBeamCenter, topBeamLen, beamThickness, 0.0)
 		scene.objects:push(topBeam)
 		var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - boundedUniform(0.4*sceneHeight, 0.8*sceneHeight))
 		-- var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - 0.6*sceneHeight)
-		var botBeam = BeamT.fromCenterLengthAngle(botBeamCenter, topBeamLen, 0.0, beamThickness)
+		var botBeam = BeamT.heapAlloc(botBeamCenter, topBeamLen, beamThickness, 0.0)
 		scene.objects:push(botBeam)
 
 		-- The middle beam should be somewhere between the top and bottom beams
@@ -578,7 +581,7 @@ local staticsModel = probcomp(function()
 		var midBeamCenter = lerp(botBeamCenter, topBeamCenter, midBeamCenterT)
 		var midBeamLen = boundedUniform(0.5*topBeamLen, topBeamLen)
 		-- var midBeamLen = 0.5*topBeamLen
-		var midBeam = BeamT.fromCenterLengthAngle(midBeamCenter, midBeamLen, 0.0, beamThickness)
+		var midBeam = BeamT.heapAlloc(midBeamCenter, midBeamLen, beamThickness, 0.0)
 		scene.objects:push(midBeam)
 
 		-- The side beams are sandwiched between the top/mid/bottom beams.
@@ -600,8 +603,8 @@ local staticsModel = probcomp(function()
 		var sideBeams1LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
 		-- var sideBeams1LeftAngle = 0.0
 		var sideBeams1RightAngle = -sideBeams1LeftAngle
-		var sideBeams1Left = BeamT.fromCenterLengthAngle(sideBeams1LeftCenter, sideBeams1Len, sideBeams1LeftAngle, beamThickness)
-		var sideBeams1Right = BeamT.fromCenterLengthAngle(sideBeams1RightCenter, sideBeams1Len, sideBeams1RightAngle, beamThickness)
+		var sideBeams1Left = BeamT.heapAlloc(sideBeams1LeftCenter, sideBeams1Len, beamThickness, sideBeams1LeftAngle)
+		var sideBeams1Right = BeamT.heapAlloc(sideBeams1RightCenter, sideBeams1Len, beamThickness, sideBeams1RightAngle)
 		scene.objects:push(sideBeams1Left)
 		scene.objects:push(sideBeams1Right)
 
@@ -620,24 +623,24 @@ local staticsModel = probcomp(function()
 		var sideBeams2LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
 		-- var sideBeams2LeftAngle = 0.0
 		var sideBeams2RightAngle = -sideBeams2LeftAngle
-		var sideBeams2Left = BeamT.fromCenterLengthAngle(sideBeams2LeftCenter, sideBeams2Len, sideBeams2LeftAngle, beamThickness)
-		var sideBeams2Right = BeamT.fromCenterLengthAngle(sideBeams2RightCenter, sideBeams2Len, sideBeams2RightAngle, beamThickness)
+		var sideBeams2Left = BeamT.heapAlloc(sideBeams2LeftCenter, sideBeams2Len, beamThickness, sideBeams2LeftAngle)
+		var sideBeams2Right = BeamT.heapAlloc(sideBeams2RightCenter, sideBeams2Len, beamThickness, sideBeams2RightAngle)
 		scene.objects:push(sideBeams2Left)
 		scene.objects:push(sideBeams2Right)
 
 		-- Wire things up with cables
 		var cableWidth = 0.4
 		var anchorTopCable = Connections.Cable.heapAlloc(anchorCenter, topBeamCenter, anchor, topBeam, cableWidth)
-		var topSideLeftCable = Connections.Cable.heapAlloc(topBeam.endpoints[0], sideBeams1LeftCenter, topBeam, sideBeams1Left, cableWidth)
-		var topSideRightCable = Connections.Cable.heapAlloc(topBeam.endpoints[1], sideBeams1RightCenter, topBeam, sideBeams1Right, cableWidth)
-		var sideLeftsCable = Connections.Cable.heapAlloc(sideBeams1Left.endpoints[0], sideBeams2Left.endpoints[0], sideBeams1Left, sideBeams2Left, cableWidth)
-		var sideRightsCable = Connections.Cable.heapAlloc(sideBeams1Right.endpoints[1], sideBeams2Right.endpoints[1], sideBeams1Right, sideBeams2Right, cableWidth)
-		var sideLeftMidCable = Connections.Cable.heapAlloc(sideBeams1Left.endpoints[1], midBeam.endpoints[0], sideBeams1Left, midBeam, cableWidth)
-		var sideRightMidCable = Connections.Cable.heapAlloc(sideBeams1Right.endpoints[0], midBeam.endpoints[1], sideBeams1Right, midBeam, cableWidth)
-		var midSideLeftCable = Connections.Cable.heapAlloc(midBeam.endpoints[0], sideBeams2Left.endpoints[1], midBeam, sideBeams2Left, cableWidth)
-		var midSideRightCable = Connections.Cable.heapAlloc(midBeam.endpoints[1], sideBeams2Right.endpoints[0], midBeam, sideBeams2Right, cableWidth)
-		var sideLeftBotCable = Connections.Cable.heapAlloc(sideBeams2LeftCenter, botBeam.endpoints[0], sideBeams2Left, botBeam, cableWidth)
-		var sideRightBotCable = Connections.Cable.heapAlloc(sideBeams2RightCenter, botBeam.endpoints[1], sideBeams2Right, botBeam, cableWidth)
+		var topSideLeftCable = Connections.Cable.heapAlloc(topBeam:endpoint(0), sideBeams1LeftCenter, topBeam, sideBeams1Left, cableWidth)
+		var topSideRightCable = Connections.Cable.heapAlloc(topBeam:endpoint(1), sideBeams1RightCenter, topBeam, sideBeams1Right, cableWidth)
+		var sideLeftsCable = Connections.Cable.heapAlloc(sideBeams1Left:endpoint(0), sideBeams2Left:endpoint(0), sideBeams1Left, sideBeams2Left, cableWidth)
+		var sideRightsCable = Connections.Cable.heapAlloc(sideBeams1Right:endpoint(1), sideBeams2Right:endpoint(1), sideBeams1Right, sideBeams2Right, cableWidth)
+		var sideLeftMidCable = Connections.Cable.heapAlloc(sideBeams1Left:endpoint(1), midBeam:endpoint(0), sideBeams1Left, midBeam, cableWidth)
+		var sideRightMidCable = Connections.Cable.heapAlloc(sideBeams1Right:endpoint(0), midBeam:endpoint(1), sideBeams1Right, midBeam, cableWidth)
+		var midSideLeftCable = Connections.Cable.heapAlloc(midBeam:endpoint(0), sideBeams2Left:endpoint(1), midBeam, sideBeams2Left, cableWidth)
+		var midSideRightCable = Connections.Cable.heapAlloc(midBeam:endpoint(1), sideBeams2Right:endpoint(0), midBeam, sideBeams2Right, cableWidth)
+		var sideLeftBotCable = Connections.Cable.heapAlloc(sideBeams2LeftCenter, botBeam:endpoint(0), sideBeams2Left, botBeam, cableWidth)
+		var sideRightBotCable = Connections.Cable.heapAlloc(sideBeams2RightCenter, botBeam:endpoint(1), sideBeams2Right, botBeam, cableWidth)
 		scene.objects:push(anchorTopCable:createProxy())
 		scene.objects:push(topSideLeftCable:createProxy())
 		scene.objects:push(topSideRightCable:createProxy())
@@ -678,9 +681,11 @@ local staticsModel = probcomp(function()
 
 		-- Anchors
 		var anchor1center = Vec2.stackAlloc(0.25*sceneWidth, 0.95*sceneHeight)
-		var anchor1 = BeamT.fromCenterLengthAngle(anchor1center, beamThickness, 0.0, beamThickness, false, true)
+		var anchor1 = BeamT.heapAlloc(anchor1center, beamThickness, beamThickness, 0.0)
+		anchor1:disable()
 		var anchor2center = Vec2.stackAlloc(0.75*sceneWidth, 0.95*sceneHeight)
-		var anchor2 = BeamT.fromCenterLengthAngle(anchor2center, beamThickness, 0.0, beamThickness, false, true)
+		var anchor2 = BeamT.heapAlloc(anchor2center, beamThickness, beamThickness, 0.0)
+		anchor2:disable()
 		scene.objects:push(anchor1)
 		scene.objects:push(anchor2)
 
@@ -692,21 +697,12 @@ local staticsModel = probcomp(function()
 		var barDisplace = 0.5*sceneHeight
 		var barCenter = 0.5*(anchor1center + anchor2center)
 		barCenter(1) = barCenter(1) - barDisplace
-		var bar = BeamT.fromCenterLengthAngle(barCenter, barLength, barRot, beamThickness)
+		var bar = BeamT.heapAlloc(barCenter, barLength, beamThickness, barRot)
 		scene.objects:push(bar)
 
-		-- var barLeftDisplace = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
-		-- -- var barLeftDisplace = 0.2*sceneHeight
-		-- var barLeft = anchor1center - Vec2.stackAlloc(0.0, barLeftDisplace)
-		-- var barRightDisplace = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
-		-- -- var barRightDisplace = 0.5*sceneHeight
-		-- var barRight = anchor2center - Vec2.stackAlloc(0.0, barRightDisplace)
-		-- var bar = BeamT.heapAlloc(barLeft, barRight, beamThickness)
-		-- scene.objects:push(bar)
-
 		-- Cables
-		var cable1 = Connections.Cable.heapAlloc(anchor1center, bar.endpoints[0], anchor1, bar, cableThickness)
-		var cable2 = Connections.Cable.heapAlloc(anchor2center, bar.endpoints[1], anchor2, bar, cableThickness)
+		var cable1 = Connections.Cable.heapAlloc(anchor1center, bar:endpoint(0), anchor1, bar, cableThickness)
+		var cable2 = Connections.Cable.heapAlloc(anchor2center, bar:endpoint(1), anchor2, bar, cableThickness)
 		scene.objects:push(cable1:createProxy())
 		scene.objects:push(cable2:createProxy())
 		connections:push(cable1)
@@ -846,7 +842,7 @@ end
 
 ----------------------------------
 
-local numsamps = 5000
+local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,

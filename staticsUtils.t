@@ -58,15 +58,7 @@ local terra drawLine(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
 	gl.glEnd()
 end
 
-local terra drawBar(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
-	var dir = top - bot
-	dir:normalize()
-	var w = width / 2.0
-	var perp = Vec2d.stackAlloc(-dir(1), dir(0))
-	var p0 = bot - w*perp
-	var p1 = bot + w*perp
-	var p2 = top + w*perp
-	var p3 = top - w*perp
+local terra drawQuad(p0: Vec2d, p1: Vec2d, p2: Vec2d, p3: Vec2d, color: Color3d)
 	-- Draw filled quad
 	gl.glColor3d(color(0), color(1), color(2))
 	gl.glBegin(gl.mGL_QUADS())
@@ -94,8 +86,11 @@ end
 local forceColor = colors.Tableau10.Red
 local forceLineWidth = 3.0
 local Force = templatize(function(real)
+
 	local Vec2 = Vec(real, 2)
+
 	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint }
+
 	-- Compute torque about a particular center of rotation
 	terra ForceT:torque(centerOfRotation: Vec2)
 		var d = self.pos - centerOfRotation
@@ -103,10 +98,12 @@ local Force = templatize(function(real)
 		-- 	ad.val(self.vec(0)), ad.val(self.vec(1)), ad.val(d(0)), ad.val(d(1)))
 		return d(0)*self.vec(1) - d(1)*self.vec(0)
 	end
+
 	-- Check for collocation with another force
 	terra ForceT:isCollocatedWith(f: &ForceT)
 		return self.pos == f.pos
 	end
+
 	-- Add another force into this one (in place)
 	-- Assumes that f is collocated with this force
 	terra ForceT:combineWith(f: &ForceT)
@@ -116,6 +113,7 @@ local Force = templatize(function(real)
 		end
 		self.vec = self.vec + f.vec
 	end
+
 	-- Attempt to add another force into this one (in place)
 	-- Return true if the add was successful (i.e. the two forces
 	--    are collocated and can be added), false otherwise.
@@ -125,12 +123,14 @@ local Force = templatize(function(real)
 			return true
 		else return false end
 	end
+
 	if real == double then
 		terra ForceT:draw(scale: double)
 			var endpoint = self.pos + scale*self.vec
 			drawLine(self.pos, endpoint, forceLineWidth, Color3d.stackAlloc([forceColor]))
 		end
 	end
+
 	return ForceT
 end)
 
@@ -142,8 +142,10 @@ end)
 -- RigidObjects can have forces applied to them and know how to calculate
 --    their force and torque residuals
 local RigidObject = templatize(function(real)
+
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
+
 	local struct RigidObjectT
 	{
 		forces: Vector(ForceT),
@@ -151,25 +153,35 @@ local RigidObject = templatize(function(real)
 		affectedByGravity: bool,
 		visible: bool
 	}
+
 	terra RigidObjectT:__construct(isActive: bool, affectedByGravity: bool, visible: bool) : {}
 		self.active = isActive
 		self.affectedByGravity = affectedByGravity
 		self.visible = visible
 		m.init(self.forces)
 	end
+
 	terra RigidObjectT:__destruct()
 		m.destruct(self.forces)
 	end
+
 	terra RigidObjectT:__copy(other: &RigidObjectT)
 		self.active = other.active
 		self.affectedByGravity = other.affectedByGravity
 		self.visible = other.visible
 		self.forces = m.copy(other.forces)
 	end
+
+	terra RigidObjectT:disable()
+		self.active = false
+		self.affectedByGravity = false
+	end
+
 	terra RigidObjectT:centerOfMass() : Vec2
 		util.fatalError("centerOfMass left unimplemented in RigidObject subclass\n")
 	end
 	inheritance.virtual(RigidObjectT, "centerOfMass")
+
 	-- Create a heap-allocated dynamic copy
 	inheritance.purevirtual(RigidObjectT, "newcopy", {}->{&RigidObjectT})
 	-- This method checks to see if f is collocated with any other force, and if so,
@@ -183,6 +195,7 @@ local RigidObject = templatize(function(real)
 		end
 		self.forces:push(f)
 	end
+
 	-- Retrieve some number of points on the object that are valid centers of
 	--    rotation for torque calculations
 	-- Default is to return all the points of force application, but subclasses
@@ -197,6 +210,7 @@ local RigidObject = templatize(function(real)
 		return num == output.size
 	end
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
+
 	-- Calculate force and torque residuals
 	terra RigidObjectT:calculateResiduals(fresOut: &Vec2, tresOut: &Vector(real))
 		-- Inactive objects have zero residual
@@ -249,10 +263,12 @@ local RigidObject = templatize(function(real)
 			end
 		end
 	end
+
 	terra RigidObjectT:mass() : real
 		return 0.0
 	end
 	inheritance.virtual(RigidObjectT, "mass")
+
 	-- OpenGL drawing
 	if real == double then
 		inheritance.purevirtual(RigidObjectT, "drawImpl", {}->{})
@@ -262,106 +278,130 @@ local RigidObject = templatize(function(real)
 			end
 		end
 	end
+
 	m.addConstructors(RigidObjectT)
 	return RigidObjectT
 end)
 
 
 -- A Beam is a rigid bar of finite area
-local beamColor = colors.Tableau10.Blue
-local beamDensity = 0.1
+local beamDefaultColor = colors.Tableau10.Blue
+local beamDefaultDensity = 0.1
 local Beam = templatize(function(real)
+
 	local Vec2 = Vec(real, 2)
 	local polar2rect = macro(function(r, theta)
 		return `Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
 	end)
 	local RigidObjectT = RigidObject(real)
+
 	local struct BeamT
 	{
-		endpoints: Vec2[2],
-		width: real,
-		density: real,
-		perp: Vec2
+		bot1: Vec2,
+		bot2: Vec2,
+		top1: Vec2,
+		top2: Vec2,
+		density: real
 	}
 	if real == double then
 		BeamT.entries:insert({field="color", type=Color3d})
 	end
 	inheritance.dynamicExtend(RigidObjectT, BeamT)
-	terra BeamT:__construct(bot: Vec2, top: Vec2, w: real, active: bool, visible: bool) : {}
-		RigidObjectT.__construct(self, active, true, visible)
-		self.endpoints[0] = bot
-		self.endpoints[1] = top
-		self.width = w
-		self.density = beamDensity
-		[util.optionally(real==double, function() return quote
-			self.color = Color3d.stackAlloc([beamColor])
-		end end)]
-		var axis = top - bot; axis:normalize()
-		self.perp = perp(axis)
 
+	-- Construct from four points
+	terra BeamT:__construct(b1: Vec2, b2: Vec2, t1: Vec2, t2: Vec2) : {}
+		-- Default to active, affected by gravity, and visible
+		RigidObjectT.__construct(self, true, true, true)
+		self.bot1 = b1
+		self.bot2 = b2
+		self.top1 = t1
+		self.top2 = t2
+		self.density = beamDefaultDensity
+		[util.optionally(real == double, function() return quote
+			self.color = Color3d.stackAlloc([beamDefaultColor])
+		end end)]
 	end
-	-- Beams are active and visible by default
-	terra BeamT:__construct(bot: Vec2, top: Vec2, w: real) : {}
-		self:__construct(bot, top, w, true, true)
+
+	-- Construct from two endpoints and a width (rectangular only)
+	terra BeamT:__construct(b: Vec2, t: Vec2, w: real) : {}
+		var axis = t - b; axis:normalize()
+		var whalf = 0.5*w
+		var perpvec = whalf*perp(axis)
+		self:__construct(b - perpvec, b + perpvec, t - perpvec, t + perpvec)
 	end
-	-- Constructor in terms of alternative parameters
-	BeamT.methods.fromCenterLengthAngle = terra(c: Vec2, len: real, ang: real, w: real, active: bool, visible: bool) : &BeamT
-		var halflen = 0.5*len
-		var axis = polar2rect(halflen, ang)
-		return BeamT.heapAlloc(c - axis, c + axis, w, active, visible)
+
+	-- Construct from a center, length, width, and angle (rectangular only)
+	terra BeamT:__construct(c: Vec2, l: real, w: real, a: real) : {}
+		var lenhalf = 0.5*l
+		var axis = polar2rect(lenhalf, a)
+		self:__construct(c - axis, c + axis, w)
 	end
-	BeamT.methods.fromCenterLengthAngle:adddefinition((terra(c: Vec2, len: real, ang: real, w: real) : &BeamT
-		return BeamT.fromCenterLengthAngle(c, len, ang, w, true, true)
-	end):getdefinitions()[1])
+
 	-- (Inherit parent destructor)
+
 	terra BeamT:__copy(other: &BeamT)
 		RigidObjectT.__copy(self, other)
-		self.endpoints[0] = other.endpoints[0]
-		self.endpoints[1] = other.endpoints[1]
-		self.width = other.width
+		self.bot1 = other.bot1
+		self.bot2 = other.bot2
+		self.top1 = other.top1
+		self.top2 = other.top2
 		self.density = other.density
 		[util.optionally(real==double, function() return quote
 			self.color = other.color
 		end end)]
 	end
+
 	terra BeamT:newcopy() : &RigidObjectT
 		var newbeam = m.new(BeamT)
 		newbeam:__copy(self)
 		return newbeam
 	end
 	inheritance.virtual(BeamT, "newcopy")
+
 	terra BeamT:centerOfMass() : Vec2
-		return 0.5 * (self.endpoints[0] + self.endpoints[1])
+		return 0.25 * (self.bot1 + self.bot2 + self.top1 + self.top2)
 	end
 	inheritance.virtual(BeamT, "centerOfMass")
-	-- TODO: Uncomment and finish this if it seems like we actually need it.
-	-- -- Beams can generate arbitrarily many centers of rotation by randomly
-	-- --    sampling inside their bounds
-	-- terra BeamT:getCentersOfRotation(num: uint, output: &Vector(Vec2)) : {}
-	-- 	RigidObjectT.methods.getCentersOfRotation(self, num, output)
-	-- 	for i=output.size,num do
-	-- 		var dir = top - bot
-	-- 		dir:normalize()
-	-- 		var w = width / 2.0
-	-- 		var perp = Vec2d.stackAlloc(dir(1), dir(0))
-	-- 	end
-	-- 	return true
-	-- end
-	-- inheritance.virtual(BeamT, "getCentersOfRotation")
+
 	terra BeamT:mass() : real
-		return (self.endpoints[1] - self.endpoints[0]):norm() * self.width * self.density
+		-- 1/2 * || AC x BD ||
+		var ac = self.top2 - self.bot1
+		var bd = self.top1 - self.bot2
+		var cross = ac(0)*bd(1) - ac(1)*bd(0)
+		return 0.5 * ad.math.sqrt(cross*cross) * self.density
 	end
 	inheritance.virtual(BeamT, "mass")
+
+	-- Selecting endpoints of the beam
+	BeamT.endpoint = templatize(function(self, index)
+		if index == 0 then
+			return `0.5*(self.bot1 + self.bot2)
+		elseif index == 1 then
+			return `0.5*(self.top1 + self.top2)
+		else
+			error("BeamT.endpoint: index must be 0, 1, 2, or 3")
+		end
+	end)
+	terra BeamT:endpoint(index: uint)
+		if index == 0 then
+			return [BeamT.endpoint(self, 0)]
+		elseif index == 1 then
+			return [BeamT.endpoint(self, 1)]
+		else
+			util.fatalError("BeamT.endpoint: index must be 0, 1, 2, or 3")
+		end
+	end
+
 	-- Selecting corners of the beam
 	BeamT.corner = templatize(function(self, index)
 		if index == 0 then
-			return `self.endpoints[0] - 0.5*self.width*self.perp
+			return `self.bot1
 		elseif index == 1 then
-			return `self.endpoints[0] + 0.5*self.width*self.perp
+			return `self.bot2
 		elseif index == 2 then
-			return `self.endpoints[1] + 0.5*self.width*self.perp
+			return `self.top2
 		elseif index == 3 then
-			return `self.endpoints[1] - 0.5*self.width*self.perp
+			return `self.top1
 		else
 			error("BeamT.corner: index must be 0, 1, 2, or 3")
 		end
@@ -379,13 +419,15 @@ local Beam = templatize(function(real)
 			util.fatalError("BeamT:corner: index must be 0, 1, 2, or 3")
 		end
 	end
+
 	-- OpenGL drawing code
 	if real == double then
 		terra BeamT:drawImpl() : {}
-			drawBar(self.endpoints[0], self.endpoints[1], self.width, self.color)
+			drawQuad(self.bot1, self.bot2, self.top2, self.top1, self.color)
 		end
 		inheritance.virtual(BeamT, "drawImpl")
 	end
+
 	m.addConstructors(BeamT)
 	return BeamT
 end)
@@ -398,8 +440,8 @@ local CableProxy = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local BeamT = Beam(real)
 	return terra(bot: Vec2, top: Vec2, w: real)
-		var beam = BeamT.heapAlloc(bot, top, w, false, true)
-		beam.affectedByGravity = false
+		var beam = BeamT.heapAlloc(bot, top, w)
+		beam:disable()
 		[util.optionally(real==double, function() return quote
 			beam.color = Color3d.stackAlloc([cableColor])
 		end end)]
@@ -419,8 +461,8 @@ local Ground = templatize(function(real)
 		var top = Vec2.stackAlloc(midx, groundHeight)
 		var bot = Vec2.stackAlloc(midx, groundHeight - groundTallness)
 		var w = right - left
-		var beam = BeamT.heapAlloc(bot, top, w, false, true)
-		beam.affectedByGravity = false
+		var beam = BeamT.heapAlloc(bot, top, w)
+		beam:disable()
 		[util.optionally(real==double, function() return quote
 			beam.color = Color3d.stackAlloc([groundColor])
 		end end)]
@@ -431,31 +473,38 @@ end)
 
 -- A RigidScene is a collection of RigidObjects
 local RigidScene = templatize(function(real)
+
 	local RigidObjectT = RigidObject(real)
+
 	local struct RigidSceneT
 	{
 		width: real,
 		height: real,
 		objects: Vector(&RigidObjectT)
 	}
+
 	terra RigidSceneT:__construct(w: real, h: real) : {}
 		self.width = w
 		self.height = h
 		m.init(self.objects)
 	end
+
 	terra RigidSceneT:__construct() : {}
 		self:__construct(0.0, 0.0)
 	end
+
 	terra RigidSceneT:__copy(other: &RigidSceneT)
 		self:__construct(other.width, other.height)
 		for i=0,other.objects.size do
 			self.objects:push(other.objects(i):newcopy())
 		end
 	end
+
 	terra RigidSceneT:__destruct()
 		self.objects:clearAndDelete()
 		m.destruct(self.objects)
 	end
+
 	-- OpenGL drawing code
 	if real == double then
 		terra RigidSceneT:draw(forceScale: double)
@@ -479,6 +528,7 @@ local RigidScene = templatize(function(real)
 			end
 		end
 	end
+
 	m.addConstructors(RigidSceneT)
 	return RigidSceneT
 end)
@@ -497,6 +547,7 @@ local function Connections()
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
+	local RigidObjectT = RigidObject(real)
 	local BeamT = Beam(real)
 
 	-- Generate a 1-DOF force along a particular direction
@@ -539,102 +590,121 @@ local function Connections()
 	end
 	RigidConnection.methods.applyForces = pmethod(RigidConnection.methods.applyForces)
 
-	-- A Hinge applies a 2-DOF force to a Beam
-	-- It can be connected to one or more Beams
+
+	-- A Hinge applies a 2-DOF force to an object
+	-- It can be connected to one or more objects
+	-- NOTE: Deprecated, not sure if this is even physically meaningful...
 	local struct Hinge
 	{
-		beams: Vector(&BeamT),
+		objs: Vector(&RigidObjectT),
 		location: Vec2
 	}
 	inheritance.dynamicExtend(RigidConnection, Hinge)
+
 	terra Hinge:__construct(loc: Vec2)
-		m.init(self.beams)
+		m.init(self.objs)
 		self.location = loc
 	end
+
 	terra Hinge:__destruct()
-		m.destruct(self.beams)
+		m.destruct(self.objs)
 	end
-	terra Hinge:addBeam(beam: &BeamT) self.beams:push(beam) end
+
+	terra Hinge:addObj(obj: &RigidObjectT) self.objs:push(obj) end
+
 	terra Hinge:applyForcesImpl() : {}
-		for i=0,self.beams.size do
-			if self.beams(i).active then
-				self.beams(i):applyForce(genUnconstrained2DForce(self.location))
+		for i=0,self.objs.size do
+			if self.objs(i).active then
+				self.objs(i):applyForce(genUnconstrained2DForce(self.location))
 			end
 		end
 	end
+
 	inheritance.virtual(Hinge, "applyForcesImpl")
 	m.addConstructors(Hinge)
 
-	-- A Cable connects two Beams, applying symmetric 1-DOF tensile forces to each.
+
+	-- A Cable connects two objects, applying symmetric 1-DOF tensile forces to each.
 	local struct Cable
 	{
 		endpoints: Vec2[2],
-		beams: (&BeamT)[2],
+		objs: (&RigidObjectT)[2],
 		width: real
 	}
 	inheritance.dynamicExtend(RigidConnection, Cable)
-	terra Cable:__construct(ep1: Vec2, ep2: Vec2, beam1: &BeamT, beam2: &BeamT, w: real) : {}
+
+	terra Cable:__construct(ep1: Vec2, ep2: Vec2, obj1: &RigidObjectT, obj2: &RigidObjectT, w: real) : {}
 		self.endpoints[0] = ep1
 		self.endpoints[1] = ep2
-		self.beams[0] = beam1
-		self.beams[1] = beam2
+		self.objs[0] = obj1
+		self.objs[1] = obj2
 		self.width = w
 	end
+
 	terra Cable:createProxy()
 		return [CableProxy(real)](self.endpoints[0], self.endpoints[1], self.width)
 	end
+
 	terra Cable:otherEndpoint(endpoint: uint)
 		return (endpoint + 1) % 2
 	end
+
 	terra Cable:directionTowards(endpoint: uint)
 		var vec = self.endpoints[endpoint] - self.endpoints[self:otherEndpoint(endpoint)]
 		vec:normalize()
 		return vec
 	end
+
 	terra Cable:directionAwayFrom(endpoint: uint)
 		return -self:directionTowards(endpoint)
 	end
+
 	terra Cable:applyForcesImpl() : {}
-		-- Verify that at least one of the attached Beams is active
-		if self.beams[0].active or self.beams[1].active then
+		-- Verify that at least one of the attached objects is active
+		if self.objs[0].active or self.objs[1].active then
 			-- Generate a 1D tensile force pulling away from the first endpoint
 			var f = gen1DForce(self.endpoints[0], self:directionAwayFrom(0))
-			-- Apply, if this endpoint Beam is active
-			if self.beams[0].active then
-				self.beams[0]:applyForce(f)
+			-- Apply, if this endpoint object is active
+			if self.objs[0].active then
+				self.objs[0]:applyForce(f)
 			end
-			-- If the other endpoint beam is active, then flip the force
+			-- If the other endpoint object is active, then flip the force
 			--    direction and apply it there
-			if self.beams[1].active then
+			if self.objs[1].active then
 				f.vec = -f.vec
 				f.pos = self.endpoints[1]
-				self.beams[1]:applyForce(f)
+				self.objs[1]:applyForce(f)
 			end
 		end
 	end
+
 	inheritance.virtual(Cable, "applyForcesImpl")
 	m.addConstructors(Cable)
+
 
 	-- A Stacking connects two Beams (one atop the other)
 	-- It applies normal forces at the contact vertices
 	-- Assumes the Beams are axis-aligned and that endpoints[0]
 	--    is below endpoints[1]
+	-- NOTE: Deprecated, use FrictionalContact instead
 	local struct Stacking
 	{
 		bottom: &BeamT,
 		top: &BeamT
 	}
 	inheritance.dynamicExtend(RigidConnection, Stacking)
+
 	terra Stacking:__construct(bot: &BeamT, top: &BeamT)
 		self.bottom = bot
 		self.top = top
 	end
+
 	terra Stacking:applyForcesImpl() : {}
-		var contactY = self.bottom.endpoints[1](1)
-		var botMinX = self.bottom.endpoints[1](0) - self.bottom.width/2.0
-		var botMaxX = self.bottom.endpoints[1](0) + self.bottom.width/2.0
-		var topMinX = self.top.endpoints[0](0) - self.top.width/2.0
-		var topMaxX = self.top.endpoints[0](0) + self.top.width/2.0
+		var contactY = [BeamT.endpoint(`self.bottom, 1)](1)
+		var botMinX = ad.math.fmin([BeamT.corner(`self.bottom, 0)](0), [BeamT.corner(`self.bottom, 1)](0))
+		var botMaxX = ad.math.fmax([BeamT.corner(`self.bottom, 0)](0), [BeamT.corner(`self.bottom, 1)](0))
+		var topMinX = ad.math.fmin([BeamT.corner(`self.top, 0)](0), [BeamT.corner(`self.top, 1)](0))
+		var topMaxX = ad.math.fmax([BeamT.corner(`self.top, 0)](0), [BeamT.corner(`self.top, 1)](0))
 		var contactX1 = ad.math.fmax(botMinX, topMinX)
 		var contactX2 = ad.math.fmin(botMaxX, topMaxX)
 		var up = Vec2.stackAlloc(0.0, 1.0)
@@ -647,6 +717,7 @@ local function Connections()
 			self.top:applyForce(gen1DForce(Vec2.stackAlloc(contactX2, contactY), up))
 		end
 	end
+
 	inheritance.virtual(Stacking, "applyForcesImpl")
 	m.addConstructors(Stacking)
 
@@ -656,6 +727,7 @@ local function Connections()
 	-- The connection happens at one edge of the 'attached'
 	-- It applies a force (that can be either positive or negative) normal
 	--    to the contact surface at both of the edge contact vertices.
+	-- NOTE: Deprecated, use NailJoint instead
 	local struct Weld
 	{
 		base: &BeamT,
@@ -663,12 +735,14 @@ local function Connections()
 		contactPoints: Vec2[2]
 	}
 	inheritance.dynamicExtend(RigidConnection, Weld)
+
 	terra Weld:__construct(base: &BeamT, attached: &BeamT, cp1: uint, cp2: uint)
 		self.base = base
 		self.attached = attached
 		self.contactPoints[0] = attached:corner(cp1)
 		self.contactPoints[1] = attached:corner(cp2)
 	end
+
 	terra Weld:applyForcesImpl() : {}
 		-- Compute the normal vector to the contact edge
 		var contactEdge = self.contactPoints[1] - self.contactPoints[0]
@@ -685,6 +759,7 @@ local function Connections()
 			self.attached:applyForce(genUnbounded1DForce(self.contactPoints[1], normal))
 		end
 	end
+
 	inheritance.virtual(Weld, "applyForcesImpl")
 	m.addConstructors(Weld)
 
