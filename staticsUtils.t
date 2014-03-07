@@ -252,6 +252,7 @@ local RigidObject = templatize(function(real)
 			end
 			@fresOut = totalf
 			-- Compute torque residual
+			var normconst = 1.0/cor.size
 			var tsumsq = real(0.0)
 			for i=0,cor.size do
 				var indvidualResidual = real(0.0)
@@ -259,7 +260,7 @@ local RigidObject = templatize(function(real)
 					var t = self.forces(j):torque(cor(i))
 					indvidualResidual = indvidualResidual + t
 				end
-				tresOut:push(indvidualResidual)
+				tresOut:push(normconst*indvidualResidual)
 			end
 		end
 	end
@@ -553,9 +554,7 @@ end)
 
 local function Connections()
 	local forcePriorMean = 0.0
-	-- local forcePriorMean = 100.0
 	local forcePriorVariance = 100000000000.0
-	-- local forcePriorVariance = 200.0
 	-- local forcePriorVariance = 100.0
 
 	local Vec2 = Vec(real, 2)
@@ -799,7 +798,7 @@ local function Connections()
 	-- It applies an unbounded compressive force along the normal direction
 	-- It applies a friction-bounded force along the tangent direction
 	-- The normal is assumed to be the normal for object 1; the negative will be used for object 2
-	local defaultFrictionCoeff = 0.7
+	local defaultFrictionCoeff = 0.5
 	local struct FrictionalContact
 	{
 		objs: (&RigidObjectT)[2],
@@ -839,15 +838,19 @@ local function Connections()
 	end
 
 	terra FrictionalContact:applyForcesImpl() : {}
+		var normalForce : ForceT
+		var tangentForce : ForceT
+		if self.objs[0].active or self.objs[1].active then
+			normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
+		end
 		if self.objs[0].active then
-			var normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
-			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
 			self.objs[0]:applyForce(normalForce)
 			self.objs[0]:applyForce(tangentForce)
 		end
 		if self.objs[1].active then
-			var normalForce = genNonNegative1DForce(self.contactPoint, -self.contactNormal)
-			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
+			normalForce.vec = -normalForce.vec
+			tangentForce.vec = -tangentForce.vec
 			self.objs[1]:applyForce(normalForce)
 			self.objs[1]:applyForce(tangentForce)
 		end
@@ -863,7 +866,7 @@ local function Connections()
 	-- Can simulate the effect of using multiple nails to make the joint stronger.
 	local defaultMaxPullForce = `100.0
 	local defaultMaxShearForce = `100.0
-	-- TODO: Actually put in reasonable values for the pull and shear forces
+	-- TODO: Actually put in reasonable values for the maximum pull and shear forces
 	local struct NailJoint
 	{
 		objs: (&RigidObjectT)[2],

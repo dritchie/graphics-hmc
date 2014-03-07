@@ -51,10 +51,6 @@ local staticsModel = probcomp(function()
 		return `Vec2.stackAlloc(r*ad.math.cos(theta), r*ad.math.sin(theta))
 	end)
 
-	local softEq = macro(function(x, target, softness)
-		return `[rand.gaussian_logprob(real)](x, target, softness)
-	end)
-
 	local boundedUniform = macro(function(lo, hi, opts)
 		local valquote = nil
 		if opts then
@@ -88,6 +84,7 @@ local staticsModel = probcomp(function()
 		for i=0,connections.size do
 			connections(i):applyForces()
 		end
+
 		-- Apply gravity to everything affected by it
 		var down = Vec2.stackAlloc(0.0, -1.0)
 		for i=0,scene.objects.size do
@@ -97,7 +94,9 @@ local staticsModel = probcomp(function()
 				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0})
 			end
 		end
+
 		-- Calculate residuals and apply factors
+		-- (Individual residual style)
 		var fres = Vec2.stackAlloc(0.0, 0.0)
 		var tres = [Vector(real)].stackAlloc()
 		-- C.printf("=============================\n")
@@ -105,13 +104,10 @@ local staticsModel = probcomp(function()
 			if scene.objects(i).active then
 				tres:clear()
 				scene.objects(i):calculateResiduals(&fres, &tres)
-				-- factor(softEq(fres(0), 0.0, 1.0))
 				manifold(fres(0), 1.0)
-				-- factor(softEq(fres(1), 0.0, 1.0))
 				manifold(fres(1), 1.0)
 				-- C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
 				for j=0,tres.size do
-					-- factor(softEq(tres(j), 0.0, 1.0))
 					manifold(tres(j), 1.0)
 					-- C.printf("tres: %g\n", ad.val(tres(j)))
 				end
@@ -119,6 +115,28 @@ local staticsModel = probcomp(function()
 			end
 		end
 		m.destruct(tres)
+
+		-- -- Calculate residuals and apply factors
+		-- -- (Massed residual style)
+		-- var fres = Vec2.stackAlloc(0.0, 0.0)
+		-- var totalfres = real(0.0)
+		-- var tres = [Vector(real)].stackAlloc()
+		-- var totaltres = real(0.0)
+		-- for i=0,scene.objects.size do
+		-- 	if scene.objects(i).active then
+		-- 		tres:clear()
+		-- 		scene.objects(i):calculateResiduals(&fres, &tres)
+		-- 		totalfres = totalfres + fres:normSq()
+		-- 		for j=0,tres.size do
+		-- 			totaltres = totaltres + tres(j)*tres(j)
+		-- 		end
+		-- 	end
+		-- end
+		-- m.destruct(tres)
+		-- -- factor(-totalfres)
+		-- -- factor(-totaltres)
+		-- manifold(ad.math.sqrt(totalfres), 1.0)
+		-- manifold(ad.math.sqrt(totaltres), 1.0)
 	end)
 
 	-- Define a simple scene with a beam rotating on a hinge
@@ -731,6 +749,9 @@ local staticsModel = probcomp(function()
 		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0) + 0.5*beamThickness, groundHeight),
 									   platform:endpoint(0) + 0.5*Vec2.stackAlloc(beamThickness, -beamThickness),
 									   beamThickness)
+		-- var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:centerOfMass()(0), groundHeight),
+		-- 							   platform:centerOfMass() - 0.5*Vec2.stackAlloc(0.0, beamThickness),
+		-- 							   beamThickness)
 		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0) - 0.5*beamThickness, groundHeight),
 									   platform:endpoint(1) - 0.5*Vec2.stackAlloc(beamThickness, beamThickness),
 									   beamThickness)
