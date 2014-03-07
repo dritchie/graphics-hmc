@@ -358,6 +358,19 @@ local Beam = templatize(function(real)
 	end
 	inheritance.virtual(BeamT, "newcopy")
 
+	-- Generate a bunch of points uniformly space along the length of this beam
+	terra BeamT:getCentersOfRotation(num: uint, output: &Vector(Vec2)) : bool
+		var e1 = self:endpoint(0)
+		var e2 = self:endpoint(1)
+		for i=0,num do
+			var t = (i+0.5)/num
+			var cor = (1.0-t)*e1 + t*e2
+			output:push(cor)
+		end
+		return true
+	end
+	inheritance.virtual(BeamT, "getCentersOfRotation")
+
 	terra BeamT:centerOfMass() : Vec2
 		return 0.25 * (self.bot1 + self.bot2 + self.top1 + self.top2)
 	end
@@ -553,23 +566,41 @@ local function Connections()
 	-- Generate a 1-DOF force along a particular direction
 	local gen1DForce = macro(function(pos, dir)
 		return quote
-			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0})
-		in
-			ForceT { mag*dir, pos, 1}
-		end
-	end)
-
-	-- Generate an unbounded 1-DOF force along a particular direction
-	local genUnbounded1DForce = macro(function(pos, dir)
-		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1}
 		end
 	end)
 
-	-- Generate a completely unconstrained 2-DOF force
-	local genUnconstrained2DForce = macro(function(pos)
+	-- Generate a nonnegative 1-DOF force along a particular direction
+	local genNonNegative1DForce = macro(function(pos, dir)
+		return quote
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0})
+		in
+			ForceT { mag*dir, pos, 1}
+		end
+	end)
+
+	-- Generate a bounded 1-DOF force along a particular direction
+	local genBounded1DForce = macro(function(pos, dir, boundMag)
+		return quote
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, initialVal=0.0})
+		in
+			ForceT { mag*dir, pos, 1}
+		end
+	end)
+
+	-- Generate a bounded, nonnegative 1-DOF force along a particular direction
+	local genBoundedNonNegative1DForce = macro(function(pos, dir, boundMag)
+		return quote
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
+		in
+			ForceT { mag*dir, pos, 1}
+		end
+	end)
+
+	-- Generate a 2-DOF force
+	local gen2DForce = macro(function(pos)
 		return quote
 			var x = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0}) 
 			var y = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
@@ -615,12 +646,12 @@ local function Connections()
 	terra Hinge:applyForcesImpl() : {}
 		for i=0,self.objs.size do
 			if self.objs(i).active then
-				self.objs(i):applyForce(genUnconstrained2DForce(self.location))
+				self.objs(i):applyForce(gen2DForce(self.location))
 			end
 		end
 	end
-
 	inheritance.virtual(Hinge, "applyForcesImpl")
+
 	m.addConstructors(Hinge)
 
 
@@ -663,7 +694,7 @@ local function Connections()
 		-- Verify that at least one of the attached objects is active
 		if self.objs[0].active or self.objs[1].active then
 			-- Generate a 1D tensile force pulling away from the first endpoint
-			var f = gen1DForce(self.endpoints[0], self:directionAwayFrom(0))
+			var f = genNonNegative1DForce(self.endpoints[0], self:directionAwayFrom(0))
 			-- Apply, if this endpoint object is active
 			if self.objs[0].active then
 				self.objs[0]:applyForce(f)
@@ -677,8 +708,8 @@ local function Connections()
 			end
 		end
 	end
-
 	inheritance.virtual(Cable, "applyForcesImpl")
+
 	m.addConstructors(Cable)
 
 
@@ -709,16 +740,16 @@ local function Connections()
 		var contactX2 = ad.math.fmin(botMaxX, topMaxX)
 		var up = Vec2.stackAlloc(0.0, 1.0)
 		if self.bottom.active then
-			self.bottom:applyForce(gen1DForce(Vec2.stackAlloc(contactX1, contactY), -up))
-			self.bottom:applyForce(gen1DForce(Vec2.stackAlloc(contactX2, contactY), -up))
+			self.bottom:applyForce(genNonNegative1DForce(Vec2.stackAlloc(contactX1, contactY), -up))
+			self.bottom:applyForce(genNonNegative1DForce(Vec2.stackAlloc(contactX2, contactY), -up))
 		end
 		if self.top.active then
-			self.top:applyForce(gen1DForce(Vec2.stackAlloc(contactX1, contactY), up))
-			self.top:applyForce(gen1DForce(Vec2.stackAlloc(contactX2, contactY), up))
+			self.top:applyForce(genNonNegative1DForce(Vec2.stackAlloc(contactX1, contactY), up))
+			self.top:applyForce(genNonNegative1DForce(Vec2.stackAlloc(contactX2, contactY), up))
 		end
 	end
-
 	inheritance.virtual(Stacking, "applyForcesImpl")
+
 	m.addConstructors(Stacking)
 
 
@@ -751,17 +782,143 @@ local function Connections()
 
 		-- Apply contact forces
 		if self.base.active then
-			self.base:applyForce(genUnbounded1DForce(self.contactPoints[0], normal))
-			self.base:applyForce(genUnbounded1DForce(self.contactPoints[1], normal))
+			self.base:applyForce(gen1DForce(self.contactPoints[0], normal))
+			self.base:applyForce(gen1DForce(self.contactPoints[1], normal))
 		end
 		if self.attached.active then
-			self.attached:applyForce(genUnbounded1DForce(self.contactPoints[0], normal))
-			self.attached:applyForce(genUnbounded1DForce(self.contactPoints[1], normal))
+			self.attached:applyForce(gen1DForce(self.contactPoints[0], normal))
+			self.attached:applyForce(gen1DForce(self.contactPoints[1], normal))
 		end
 	end
-
 	inheritance.virtual(Weld, "applyForcesImpl")
+
 	m.addConstructors(Weld)
+
+
+	-- A FrictionalContact connects two objects at some point with some contact normal
+	-- It applies an unbounded compressive force along the normal direction
+	-- It applies a friction-bounded force along the tangent direction
+	-- The normal is assumed to be the normal for object 1; the negative will be used for object 2
+	local defaultFrictionCoeff = 0.7
+	local struct FrictionalContact
+	{
+		objs: (&RigidObjectT)[2],
+		contactPoint: Vec2,
+		contactNormal: Vec2,
+		contactTangent: Vec2,
+		frictionCoeff: real
+	}
+	inheritance.dynamicExtend(RigidConnection, FrictionalContact)
+
+	terra FrictionalContact:__construct(o1: &RigidObjectT, o2: &RigidObjectT, cp: Vec2, cn: Vec2) : {}
+		self.objs[0] = o1
+		self.objs[1] = o2
+		self.contactPoint = cp
+		self.contactNormal = cn
+		self.contactTangent = perp(cn)
+		self.frictionCoeff = defaultFrictionCoeff
+	end
+
+	-- (Convenience method)
+	-- Connect two Beams under frictional contact
+	-- Connect beam1 to beam2 along the edge between corners ci1 anc ci2 of beam1
+	-- This will generate two FrictionalContact objects
+	FrictionalContact.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint)
+		var cp1 = beam1:corner(ci1)
+		var cp2 = beam1:corner(ci2)
+		var edge = cp2 - cp1; edge:normalize()
+		var normal = perp(edge)
+		-- Ensure that the normal points in the right direction
+		-- (away from the center of mass of beam2)
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+			normal = -normal
+		end
+		var fc1 = FrictionalContact.heapAlloc(beam1, beam2, cp1, normal)
+		var fc2 = FrictionalContact.heapAlloc(beam1, beam2, cp2, normal)
+		return fc1, fc2
+	end
+
+	terra FrictionalContact:applyForcesImpl() : {}
+		if self.objs[0].active then
+			var normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
+			self.objs[0]:applyForce(normalForce)
+			self.objs[0]:applyForce(tangentForce)
+		end
+		if self.objs[1].active then
+			var normalForce = genNonNegative1DForce(self.contactPoint, -self.contactNormal)
+			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
+			self.objs[1]:applyForce(normalForce)
+			self.objs[1]:applyForce(tangentForce)
+		end
+	end
+	inheritance.virtual(FrictionalContact, "applyForcesImpl")
+
+	m.addConstructors(FrictionalContact)
+
+
+	-- A NailJoint connects two objects with a (virtual) nail.
+	-- Works a lot like frictional contact, in that it has forces acting in a normal and tangent direction.
+	-- Normal force is also bounded by maximum pulling force threshold.
+	-- Can simulate the effect of using multiple nails to make the joint stronger.
+	local defaultMaxPullForce = `100.0
+	local defaultMaxShearForce = `100.0
+	-- TODO: Actually put in reasonable values for the pull and shear forces
+	local struct NailJoint
+	{
+		objs: (&RigidObjectT)[2],
+		contactPoint: Vec2,
+		contactNormal: Vec2,
+		contactTangent: Vec2,
+		maxPullForce: real,
+		maxShearForce: real,
+		numNails: uint
+	}
+	inheritance.dynamicExtend(RigidConnection, NailJoint)
+
+	terra NailJoint:__construct(o1: &RigidObjectT, o2: &RigidObjectT, cp: Vec2, cn: Vec2, nn: uint) : {}
+		self.objs[0] = o1
+		self.objs[1] = o2
+		self.contactPoint = cp
+		self.contactNormal = cn
+		self.contactTangent = perp(cn)
+		self.maxPullForce = defaultMaxPullForce
+		self.maxShearForce = defaultMaxShearForce
+		self.numNails = nn
+	end
+
+	-- Nail beam1 to beam2 at the center of the edge between corners ci1 and ci2 of beam1
+	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nn: uint) : {}
+		var p1 = beam1:corner(ci1)
+		var p2 = beam1:corner(ci2)
+		var cp = 0.5*(p1+p2)
+		var edge = p2 - p1; edge:normalize()
+		var normal = perp(edge)
+		-- Ensure that the normal points in the right direction
+		-- (toward the center of mass of beam2)
+		if (beam2:centerOfMass() - p1):dot(normal) < 0 then
+			normal = -normal
+		end
+		self:__construct(beam1, beam2, cp, normal, nn)
+	end
+
+	terra NailJoint:applyForcesImpl() : {}
+		if self.objs[0].active then
+			var normalForce = genBoundedNonNegative1DForce(self.contactPoint, self.contactNormal, self.maxPullForce)
+			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			self.objs[0]:applyForce(normalForce)
+			self.objs[0]:applyForce(tangentForce)
+		end
+		if self.objs[1].active then
+			var normalForce = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
+			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			self.objs[1]:applyForce(normalForce)
+			self.objs[1]:applyForce(tangentForce)
+		end
+	end
+	inheritance.virtual(NailJoint, "applyForcesImpl")
+
+	m.addConstructors(NailJoint)
 
 
 	return 
@@ -770,7 +927,9 @@ local function Connections()
 		Hinge = Hinge,
 		Cable = Cable,
 		Stacking = Stacking,
-		Weld = Weld
+		Weld = Weld,
+		FrictionalContact = FrictionalContact,
+		NailJoint = NailJoint
 	}
 
 end

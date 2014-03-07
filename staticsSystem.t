@@ -714,6 +714,46 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	local simpleContactTest = pfn(terra()
+		var groundHeight = 2.0
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		var beamThickness = 4.0
+
+		-- Objects
+		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + 0.5*sceneHeight),
+									   0.75*sceneWidth, beamThickness, 0.0)
+		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0) + 0.5*beamThickness, groundHeight),
+									   platform:endpoint(0) + 0.5*Vec2.stackAlloc(beamThickness, -beamThickness),
+									   beamThickness)
+		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0) - 0.5*beamThickness, groundHeight),
+									   platform:endpoint(1) - 0.5*Vec2.stackAlloc(beamThickness, beamThickness),
+									   beamThickness)
+		scene.objects:push(platform)
+		scene.objects:push(support1)
+		scene.objects:push(support2)
+
+		-- Connections
+		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
+		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
+		var ps1a, ps1b = Connections.FrictionalContact.makeBeamContacts(support1, platform, 2, 3)
+		var ps2a, ps2b = Connections.FrictionalContact.makeBeamContacts(support2, platform, 2, 3)
+		connections:push(gs1a); connections:push(gs1b)
+		connections:push(gs2a); connections:push(gs2b)
+		connections:push(ps1a); connections:push(ps1b)
+		connections:push(ps2a); connections:push(ps2b)
+
+		enforceStability(&scene, &connections)
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
 	----------------------------------
 
 	return terra()
@@ -723,8 +763,9 @@ local staticsModel = probcomp(function()
 		-- return multiLinkWackyBridge(5)
 		-- return multiLinkSlidingBridge(5)
 		-- return cableStayedBridge(3)
-		return hangingStructure()
+		-- return hangingStructure()
 		-- return simpleHangingStructure()
+		return simpleContactTest()
 	end
 end)
 
