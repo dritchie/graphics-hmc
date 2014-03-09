@@ -589,6 +589,15 @@ local function Connections()
 		end
 	end)
 
+	-- Generate an lower-bounded 1-DOF force along a particular direction
+	local genLowerBounded1DForce = macro(function(pos, dir, boundMag)
+		return quote
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=boundMag, initialVal=0.0})
+		in
+			ForceT { mag*dir, pos, 1}
+		end
+	end)
+
 	-- Generate a bounded, nonnegative 1-DOF force along a particular direction
 	local genBoundedNonNegative1DForce = macro(function(pos, dir, boundMag)
 		return quote
@@ -841,8 +850,12 @@ local function Connections()
 		var normalForce : ForceT
 		var tangentForce : ForceT
 		if self.objs[0].active or self.objs[1].active then
-			normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			-- normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			normalForce = genLowerBounded1DForce(self.contactPoint, self.contactNormal, 1e-14)
+			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
+			-- C.printf("tangForceBound: %g\n", ad.val(self.frictionCoeff*normalForce.vec:norm()))
 			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
+			-- tangentForce = gen1DForce(self.contactPoint, self.contactNormal)
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)
@@ -861,11 +874,13 @@ local function Connections()
 
 
 	-- A NailJoint connects two objects with a (virtual) nail.
-	-- Works a lot like frictional contact, in that it has forces acting in a normal and tangent direction.
-	-- Normal force is also bounded by maximum pulling force threshold.
-	-- Can simulate the effect of using multiple nails to make the joint stronger.
-	local defaultMaxPullForce = `100.0
-	local defaultMaxShearForce = `100.0
+	-- It exerts a normal force that is bounded by a maximum pulling force threshold on the negative side.
+	-- The normal force can also go infinitely positive, indicating compression. In this way, the NailJoint
+	--    also doubles as a FrictionalContact.
+	-- It also exerts a tangent force that is bounded by a maximum shear force threshold.
+	-- This is like friction, but typically much stronger.
+	local defaultMaxPullForce = `1000.0
+	local defaultMaxShearForce = `1000.0
 	-- TODO: Actually put in reasonable values for the maximum pull and shear forces
 	local struct NailJoint
 	{
@@ -874,12 +889,11 @@ local function Connections()
 		contactNormal: Vec2,
 		contactTangent: Vec2,
 		maxPullForce: real,
-		maxShearForce: real,
-		numNails: uint
+		maxShearForce: real
 	}
 	inheritance.dynamicExtend(RigidConnection, NailJoint)
 
-	terra NailJoint:__construct(o1: &RigidObjectT, o2: &RigidObjectT, cp: Vec2, cn: Vec2, nn: uint) : {}
+	terra NailJoint:__construct(o1: &RigidObjectT, o2: &RigidObjectT, cp: Vec2, cn: Vec2) : {}
 		self.objs[0] = o1
 		self.objs[1] = o2
 		self.contactPoint = cp
@@ -887,34 +901,43 @@ local function Connections()
 		self.contactTangent = perp(cn)
 		self.maxPullForce = defaultMaxPullForce
 		self.maxShearForce = defaultMaxShearForce
-		self.numNails = nn
 	end
 
-	-- Nail beam1 to beam2 at the center of the edge between corners ci1 and ci2 of beam1
-	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nn: uint) : {}
-		var p1 = beam1:corner(ci1)
-		var p2 = beam1:corner(ci2)
-		var cp = 0.5*(p1+p2)
-		var edge = p2 - p1; edge:normalize()
+	-- (Convenience method)
+	-- Nail two beams together.
+	-- Connect beam1 to beam2 along the edge between corners ci1 anc ci2 of beam1
+	-- This will generate two NailJoint objects
+	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint)
+		var cp1 = beam1:corner(ci1)
+		var cp2 = beam1:corner(ci2)
+		var edge = cp2 - cp1; edge:normalize()
 		var normal = perp(edge)
 		-- Ensure that the normal points in the right direction
-		-- (toward the center of mass of beam2)
-		if (beam2:centerOfMass() - p1):dot(normal) < 0 then
+		-- (away from the center of mass of beam2)
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
 			normal = -normal
 		end
-		self:__construct(beam1, beam2, cp, normal, nn)
+		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal)
+		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal)
+		return nj1, nj2
 	end
 
 	terra NailJoint:applyForcesImpl() : {}
+		var normalForce : ForceT
+		var tangentForce : ForceT
+		if self.objs[0].active or self.objs[1].active then
+			normalForce = genLowerBounded1DForce(self.contactPoint, self.contactNormal, -self.maxPullForce)
+			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
+			-- tangentForce = gen1DForce(self.contactPoint, self.contactTangent)
+		end
 		if self.objs[0].active then
-			var normalForce = genBoundedNonNegative1DForce(self.contactPoint, self.contactNormal, self.maxPullForce)
-			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
 			self.objs[0]:applyForce(normalForce)
 			self.objs[0]:applyForce(tangentForce)
 		end
 		if self.objs[1].active then
-			var normalForce = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
-			var tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			normalForce.vec = -normalForce.vec
+			tangentForce.vec = -tangentForce.vec
 			self.objs[1]:applyForce(normalForce)
 			self.objs[1]:applyForce(tangentForce)
 		end

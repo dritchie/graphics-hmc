@@ -104,12 +104,20 @@ local staticsModel = probcomp(function()
 			if scene.objects(i).active then
 				tres:clear()
 				scene.objects(i):calculateResiduals(&fres, &tres)
+				-- C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
+				-- -- TEST: normalize by mass
+				-- var m = scene.objects(i):mass()
+				-- fres = fres / m
+				-- -- end TEST
 				manifold(fres(0), 1.0)
 				manifold(fres(1), 1.0)
-				-- C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
 				for j=0,tres.size do
-					manifold(tres(j), 1.0)
-					-- C.printf("tres: %g\n", ad.val(tres(j)))
+					var trj = tres(j)
+					-- C.printf("tres: %g\n", ad.val(trj))
+					-- -- TEST: normalize by mass
+					-- trj = trj / m
+					-- -- end TEST
+					manifold(trj, 1.0)
 				end
 				-- C.printf("------------------------\n")
 			end
@@ -744,14 +752,15 @@ local staticsModel = probcomp(function()
 		var beamThickness = 4.0
 
 		-- Objects
-		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + 0.5*sceneHeight),
-									   0.75*sceneWidth, beamThickness, 0.0)
+		-- var platformHeight = 0.5*sceneHeight
+		-- var platformLength = 0.75*sceneWidth
+		var platformHeight = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
+		var platformLength = boundedUniform(0.4*sceneWidth, 0.75*sceneWidth)
+		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + platformHeight),
+									   platformLength, beamThickness, 0.0)
 		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0) + 0.5*beamThickness, groundHeight),
 									   platform:endpoint(0) + 0.5*Vec2.stackAlloc(beamThickness, -beamThickness),
 									   beamThickness)
-		-- var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:centerOfMass()(0), groundHeight),
-		-- 							   platform:centerOfMass() - 0.5*Vec2.stackAlloc(0.0, beamThickness),
-		-- 							   beamThickness)
 		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0) - 0.5*beamThickness, groundHeight),
 									   platform:endpoint(1) - 0.5*Vec2.stackAlloc(beamThickness, beamThickness),
 									   beamThickness)
@@ -775,6 +784,66 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	local simpleNailTest = pfn(terra()
+		var groundHeight = 2.0
+		var sceneWidth = 100.0
+		var sceneHeight = 100.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		var beamThickness = 4.0
+		var halfThickness = 0.5*beamThickness
+
+		-- Objects
+		var platformHeight = 0.3*sceneHeight
+		var platformLength = 0.75*sceneWidth
+		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + platformHeight),
+									   platformLength, beamThickness, 0.0)
+		platform.density = 0.01
+		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0)-halfThickness, groundHeight),
+									   Vec2.stackAlloc(platform:endpoint(0)(0)-halfThickness, 0.5*sceneHeight),
+									   beamThickness)
+		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0)+halfThickness, groundHeight),
+							   		   Vec2.stackAlloc(platform:endpoint(1)(0)+halfThickness, 0.5*sceneHeight),
+							   		   beamThickness)
+		scene.objects:push(platform)
+		scene.objects:push(support1)
+		scene.objects:push(support2)
+
+		-- Connections
+		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
+		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
+		var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1)
+		var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3)
+		connections:push(ps1a); connections:push(ps1b)
+		connections:push(ps2a); connections:push(ps2b)
+		connections:push(gs1a); connections:push(gs1b)
+		connections:push(gs2a); connections:push(gs2b)
+
+		enforceStability(&scene, &connections)
+
+		-- C.printf("----------------------\n")
+		-- C.printf("=== Platform forces ====\n")
+		-- for i=0,platform.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(platform.forces(i).vec(0)), ad.val(platform.forces(i).vec(1)))
+		-- end
+		-- C.printf("=== Support 1 forces ====\n")
+		-- for i=0,support1.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(support1.forces(i).vec(0)), ad.val(support1.forces(i).vec(1)))
+		-- end
+		-- C.printf("=== Support 2 forces ====\n")
+		-- for i=0,support2.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(support2.forces(i).vec(0)), ad.val(support2.forces(i).vec(1)))
+		-- end
+		-- C.printf("----------------------\n")
+
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
 	----------------------------------
 
 	return terra()
@@ -786,7 +855,8 @@ local staticsModel = probcomp(function()
 		-- return cableStayedBridge(3)
 		-- return hangingStructure()
 		-- return simpleHangingStructure()
-		return simpleContactTest()
+		-- return simpleContactTest()
+		return simpleNailTest()
 	end
 end)
 
