@@ -91,7 +91,7 @@ local staticsModel = probcomp(function()
 			var obj = scene.objects(i)
 			if obj.active and obj.affectedByGravity then
 				var gforce = gravityConstant * obj:mass() * down
-				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0})
+				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0, down})
 			end
 		end
 
@@ -815,10 +815,14 @@ local staticsModel = probcomp(function()
 		-- Connections
 		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
 		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
-		var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1)
-		var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3)
-		connections:push(ps1a); connections:push(ps1b)
-		connections:push(ps2a); connections:push(ps2b)
+		-- var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1)
+		-- var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3)
+		-- connections:push(ps1a); connections:push(ps1b)
+		-- connections:push(ps2a); connections:push(ps2b)
+		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1)
+		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3)
+		connections:push(ps1)
+		connections:push(ps2)
 		connections:push(gs1a); connections:push(gs1b)
 		connections:push(gs2a); connections:push(gs2b)
 

@@ -83,13 +83,14 @@ end
 --    * A position indicating where the force is applied
 --    * A number indicating the number of degrees of freedom in the force
 --      (i.e. is it constrained to point in a particular direction, or is it free?)
+--    * (Optionally) a vector indicating the direction of the force, if it is 1 DOF
 local forceColor = colors.Tableau10.Red
 local forceLineWidth = 3.0
 local Force = templatize(function(real)
 
 	local Vec2 = Vec(real, 2)
 
-	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint }
+	local struct ForceT { vec: Vec2, pos: Vec2, dof: uint, dir: Vec2 }
 
 	-- Compute torque about a particular center of rotation
 	terra ForceT:torque(centerOfRotation: Vec2)
@@ -107,11 +108,10 @@ local Force = templatize(function(real)
 	-- Add another force into this one (in place)
 	-- Assumes that f is collocated with this force
 	terra ForceT:combineWith(f: &ForceT)
-		if self.dof == 1 and
-			(f.dof == 2 or (not collinear(self.vec, f.vec))) then
+		self.vec = self.vec + f.vec
+		if self.dof == 1 and (f.dof == 2 or (not collinear(self.dir, f.dir))) then
 			self.dof = 2
 		end
-		self.vec = self.vec + f.vec
 	end
 
 	-- Attempt to add another force into this one (in place)
@@ -187,11 +187,10 @@ local RigidObject = templatize(function(real)
 	-- This method checks to see if f is collocated with any other force, and if so,
 	--    it combines them.
 	-- This enforces the invariant that all forces are applied at unique locations.
-	-- (This is important for getCentersOfRotation to work properly)
+	-- (This is important for the default getCentersOfRotation to work properly)
 	terra RigidObjectT:applyForce(f: ForceT)
 		for i=0,self.forces.size do
-			var success = self.forces(i):tryCombiningWith(&f)
-			if success then return end
+			if self.forces(i):tryCombiningWith(&f) then return end
 		end
 		self.forces:push(f)
 	end
@@ -206,7 +205,6 @@ local RigidObject = templatize(function(real)
 		for i=0,min(num,self.forces.size) do
 			output:push(self.forces(i).pos)
 		end
-		-- output:push(self.forces:back().pos)
 		return num == output.size
 	end
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
@@ -229,7 +227,7 @@ local RigidObject = templatize(function(real)
 			if numForceEqns == 1 then
 				for i=1,self.forces.size do
 					var f = self.forces:getPointer(i)
-					if f.dof > 1 or not collinear(f.vec, self.forces(0).vec) then
+					if f.dof > 1 or not collinear(f.dir, self.forces(0).dir) then
 						numForceEqns = 2
 						break
 					end
@@ -567,7 +565,7 @@ local function Connections()
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
 		in
-			ForceT { mag*dir, pos, 1}
+			ForceT { mag*dir, pos, 1, dir}
 		end
 	end)
 
@@ -576,7 +574,7 @@ local function Connections()
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, initialVal=0.0})
 		in
-			ForceT { mag*dir, pos, 1}
+			ForceT { mag*dir, pos, 1, dir}
 		end
 	end)
 
@@ -585,7 +583,7 @@ local function Connections()
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, initialVal=0.0})
 		in
-			ForceT { mag*dir, pos, 1}
+			ForceT { mag*dir, pos, 1, dir}
 		end
 	end)
 
@@ -594,7 +592,7 @@ local function Connections()
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=boundMag, initialVal=0.0})
 		in
-			ForceT { mag*dir, pos, 1}
+			ForceT { mag*dir, pos, 1, dir}
 		end
 	end)
 
@@ -603,7 +601,7 @@ local function Connections()
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
 		in
-			ForceT { mag*dir, pos, 1}
+			ForceT { mag*dir, pos, 1, dir}
 		end
 	end)
 
@@ -612,8 +610,12 @@ local function Connections()
 		return quote
 			var x = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0}) 
 			var y = gaussian(forcePriorMean, forcePriorVariance, {structural=false, initialVal=0.0})
+			var f : ForceT
+			f.vec = Vec2.stackAlloc(x, y)
+			f.pos = pos
+			f.dof = 2
 		in
-			ForceT { Vec2.stackAlloc(x, y), pos, 2}
+			f
 		end
 	end)
 
@@ -850,12 +852,10 @@ local function Connections()
 		var normalForce : ForceT
 		var tangentForce : ForceT
 		if self.objs[0].active or self.objs[1].active then
-			-- normalForce = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			-- Normal force needs to have nonzero magnitude so that tangentForce can have an interval of
+			--    nonzero size. We use 1e-14 b/c erp uses 1e-15 as the fudge factor for bounds.
 			normalForce = genLowerBounded1DForce(self.contactPoint, self.contactNormal, 1e-14)
-			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
-			-- C.printf("tangForceBound: %g\n", ad.val(self.frictionCoeff*normalForce.vec:norm()))
 			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.frictionCoeff*normalForce.vec:norm())
-			-- tangentForce = gen1DForce(self.contactPoint, self.contactNormal)
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)
@@ -903,9 +903,24 @@ local function Connections()
 		self.maxShearForce = defaultMaxShearForce
 	end
 
+	-- Nail two beams together using one nail at the center of the edge between corner ci1 and ci2 of beam1
+	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint) : {}
+		var cp1 = beam1:corner(ci1)
+		var cp2 = beam1:corner(ci2)
+		var edge = cp2 - cp1; edge:normalize()
+		var normal = perp(edge)
+		-- Ensure that the normal points in the right direction
+		-- (away from the center of mass of beam2)
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+			normal = -normal
+		end
+		var cp = 0.5*(cp1 + cp2)
+		self:__construct(beam1, beam2, cp, normal)
+	end
+
 	-- (Convenience method)
 	-- Nail two beams together.
-	-- Connect beam1 to beam2 along the edge between corners ci1 anc ci2 of beam1
+	-- Connect beam1 to beam2 along the edge between corners ci1 and ci2 of beam1
 	-- This will generate two NailJoint objects
 	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint)
 		var cp1 = beam1:corner(ci1)
