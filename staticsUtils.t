@@ -582,6 +582,7 @@ local function Connections()
 	local genBounded1DForce = macro(function(pos, dir, boundMag)
 		return quote
 			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, initialVal=0.0})
+			-- var mag = boundMag*gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-1.0, upperBound=1.0, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -879,8 +880,8 @@ local function Connections()
 	--    also doubles as a FrictionalContact.
 	-- It also exerts a tangent force that is bounded by a maximum shear force threshold.
 	-- This is like friction, but typically much stronger.
-	local defaultMaxPullForce = `1000.0
-	local defaultMaxShearForce = `1000.0
+	local defaultMaxPullForce = `100.0
+	local defaultMaxShearForce = `100.0
 	-- TODO: Actually put in reasonable values for the maximum pull and shear forces
 	local struct NailJoint
 	{
@@ -941,10 +942,20 @@ local function Connections()
 		var normalForce : ForceT
 		var tangentForce : ForceT
 		if self.objs[0].active or self.objs[1].active then
-			normalForce = genLowerBounded1DForce(self.contactPoint, self.contactNormal, -self.maxPullForce)
+			var nCompress = genNonNegative1DForce(self.contactPoint, self.contactNormal)
+			var nTension = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
+			normalForce = nCompress; normalForce:combineWith(&nTension)
 			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
-			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
+			-- var tLeft = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			-- var tRight = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, self.maxShearForce)
+			-- tangentForce = tLeft; tangentForce:combineWith(&tRight)
+			-- var tLeft1 = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, 0.5*self.maxShearForce)
+			-- var tLeft2 = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, 0.5*self.maxShearForce)
+			-- var tRight1 = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, 0.5*self.maxShearForce)
+			-- var tRight2 = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, 0.5*self.maxShearForce)
+			-- tangentForce = tLeft1; tangentForce:combineWith(&tLeft2); tangentForce:combineWith(&tRight1); tangentForce:combineWith(&tRight2)
 			-- tangentForce = gen1DForce(self.contactPoint, self.contactTangent)
+			-- C.printf("tangentForce: (%g, %g)\n", ad.val(tangentForce.vec(0)), ad.val(tangentForce.vec(1)))
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)
