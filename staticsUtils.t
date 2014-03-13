@@ -634,10 +634,10 @@ local function Connections()
 	end)
 
 	-- Generate a bounded 1-DOF force along a particular direction
-	local genBounded1DForce = macro(function(pos, dir, boundMag)
+	local genBounded1DForce = macro(function(pos, dir, boundMag, optBoundShape)
+		optBoundShape = optBoundShape or `1.0
 		return quote
-			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, initialVal=0.0})
-			-- var mag = boundMag*gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-1.0, upperBound=1.0, initialVal=0.0})
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -1075,20 +1075,7 @@ local function Connections()
 			var nCompress = genNonNegative1DForce(self.contactPoint, self.contactNormal)
 			var nTension = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
 			normalForce = nCompress; normalForce:combineWith(&nTension)
-			-- tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
-			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
-			-- tangentForce = gen1DForce(self.contactPoint, self.contactTangent)
-			-- C.printf("tangentForceMag: %g, maxShearForce: %g\n", ad.val(tangentForce.vec):norm(), ad.val(self.maxShearForce))
-			-- var logisticShapeParam = ad.math.exp(gaussian([math.log(0.1)], 1000.0, {structural=false, initialVal=[math.log(0.1)], upperBound=0.0}))
-			-- C.printf("logisticShapeParam: %g\n", ad.val(logisticShapeParam))
-			-- var logisticShapeParam = 0.1
-			var logisticShapeParam = 0.01
-			-- var logisticShapeParam = 1.0
-			var forceMag = lerp(-self.maxShearForce, self.maxShearForce, logistic(gaussian(0.0, 10000000.0, {structural=false, initialVal=0.0}), logisticShapeParam))
-			tangentForce.vec =  forceMag * self.contactTangent
-			tangentForce.pos = self.contactPoint
-			tangentForce.dir = self.contactTangent
-			tangentForce.dof = 1
+			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce, 0.01)
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)

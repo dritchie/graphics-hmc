@@ -898,7 +898,7 @@ local staticsModel = probcomp(function()
 		connections:push(gs2a); connections:push(gs2b)
 
 		-- Extra load
-		applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+		-- applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
 
 		enforceStability(&scene, &connections)
 		-- enforceStability(&scene, &connections, 0.01, 0.001)
