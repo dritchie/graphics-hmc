@@ -840,7 +840,6 @@ local staticsModel = probcomp(function()
 		return `0.001*x
 	end)
 
-	-- TODO: Fix up everything for physically-correct units
 	local simpleNailTest = pfn(terra()
 		var groundHeight = mm(5.0)
 		var sceneWidth = mm(250.0)
@@ -886,10 +885,6 @@ local staticsModel = probcomp(function()
 		-- Connections
 		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
 		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
-		-- var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1, nailDiameter, nailLength)
-		-- var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3, nailDiameter, nailLength)
-		-- connections:push(ps1a); connections:push(ps1b)
-		-- connections:push(ps2a); connections:push(ps2b)
 		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength)
 		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength)
 		connections:push(ps1)
@@ -898,11 +893,9 @@ local staticsModel = probcomp(function()
 		connections:push(gs2a); connections:push(gs2b)
 
 		-- Extra load
-		-- applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+		applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
 
 		enforceStability(&scene, &connections)
-		-- enforceStability(&scene, &connections, 0.01, 0.001)
-		-- enforceStability(&scene, &connections, 0.5, 0.5)
 
 		-- C.printf("----------------------\n")
 		-- C.printf("=== Platform forces ====\n")
@@ -924,6 +917,83 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	local simpleNailTest2 = pfn(terra()
+		var groundHeight = mm(5.0)
+		var sceneWidth = mm(250.0)
+		var sceneHeight = mm(250.0)
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		-- Approx. measurements for a gauge 14-1/2 box nail
+		var nailDiameter = mm(2.0)
+		var nailLength = mm(32.0)
+
+		-- We'd like to have:
+		--  * penetrationDepth > 10*nailDiameter
+		--  * penetrationDepth ~= 2*sideMemberThickness --> sideMemberThickness ~= 1/3 * nailLength
+		-- So
+		--  * penetrationDepth > 20mm
+		--  * sideMemberThickness ~= 10mm
+
+		-- We'll use beams with square cross sections; that is, width == depth
+		var beamThickness = mm(10.0)
+		var halfThickness = 0.5*beamThickness
+
+		-- Objects
+		var platformHeight = 0.4*sceneHeight
+		var platformLength = 0.75*sceneWidth
+		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + platformHeight),
+									   platformLength, beamThickness, 0.0, beamThickness)
+		-- platform:disable()
+		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0)+halfThickness, groundHeight),
+									   Vec2.stackAlloc(platform:endpoint(0)(0)+halfThickness, platform:endpoint(0)(1)-halfThickness),
+									   beamThickness, beamThickness)
+		-- support1:disable()
+		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0)-halfThickness, groundHeight),
+							   		   Vec2.stackAlloc(platform:endpoint(1)(0)-halfThickness, platform:endpoint(1)(1)-halfThickness),
+							   		   beamThickness, beamThickness)
+		-- support2:disable()
+		scene.objects:push(platform)
+		scene.objects:push(support1)
+		scene.objects:push(support2)
+
+		-- Connections
+		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
+		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
+		var ps1 = Connections.NailJoint.heapAlloc(support1, platform, 2, 3, nailDiameter, nailLength)
+		var ps2 = Connections.NailJoint.heapAlloc(support2, platform, 2, 3, nailDiameter, nailLength)
+		connections:push(ps1)
+		connections:push(ps2)
+		connections:push(gs1a); connections:push(gs1b)
+		connections:push(gs2a); connections:push(gs2b)
+
+		-- Extra load
+		applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+
+		enforceStability(&scene, &connections)
+
+		-- C.printf("----------------------\n")
+		-- C.printf("=== Platform forces ====\n")
+		-- for i=0,platform.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(platform.forces(i).vec(0)), ad.val(platform.forces(i).vec(1)))
+		-- end
+		-- C.printf("=== Support 1 forces ====\n")
+		-- for i=0,support1.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(support1.forces(i).vec(0)), ad.val(support1.forces(i).vec(1)))
+		-- end
+		-- C.printf("=== Support 2 forces ====\n")
+		-- for i=0,support2.forces.size do
+		-- 	C.printf("(%g, %g)\n", ad.val(support2.forces(i).vec(0)), ad.val(support2.forces(i).vec(1)))
+		-- end
+		-- C.printf("----------------------\n")
+
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end) 
+
 	----------------------------------
 
 	return terra()
@@ -936,7 +1006,8 @@ local staticsModel = probcomp(function()
 		-- return hangingStructure()
 		-- return simpleHangingStructure()
 		-- return simpleContactTest()
-		return simpleNailTest()
+		-- return simpleNailTest()
+		return simpleNailTest2()
 	end
 end)
 

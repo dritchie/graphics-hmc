@@ -959,6 +959,7 @@ local function Connections()
 
 	-- A NailJoint connects two beams with a (virtual) nail.
 	-- Assumption is that the nail is through beam 2 into beam 1
+	-- The connection does not have to be perpendicular, but the assumption is that the nail is driven parallel into beam1
 	-- It exerts a normal force that is bounded by a maximum pulling force threshold on the negative side.
 	-- The normal force can also go infinitely positive, indicating compression. In this way, the NailJoint
 	--    also doubles as a FrictionalContact.
@@ -996,30 +997,22 @@ local function Connections()
 	local terra determinePenetrationDepth(beam2: &BeamT, cp: Vec2, normal: Vec2, nailLength: real)
 		-- Determine the penetration depth by 'raycasting' along the contact normal direction
 		var corner1, corner2 = beam2:closestEdge(cp)
-		-- C.printf("corner1: %d, corner2: %d\n", corner1, corner2)
+		var oppEdge_i1, oppEdge_i2 = beam2:opposingEdge(corner1, corner2)
 		var norm_start = cp
 		var norm_dir = -normal
-		norm_start = norm_start - 0.001*norm_dir
-		var b2edge1_start = beam2:corner(corner1)
-		var b2edge1_dir = beam2:corner(corner2) - b2edge1_start
-		var oppEdge_i1, oppEdge_i2 = beam2:opposingEdge(corner1, corner2)
-		-- C.printf("oppcorner1: %d, oppcorner2: %d\n", oppEdge_i1, oppEdge_i2)
-		var b2edge2_start = beam2:corner(oppEdge_i1)
-		var b2edge2_dir = beam2:corner(oppEdge_i2) - b2edge2_start
-		var t11, t21 = rayIntersect(norm_start, norm_dir, b2edge1_start, b2edge1_dir)
-		var t12, t22 = rayIntersect(norm_start, norm_dir, b2edge2_start, b2edge2_dir)
-		-- C.printf("t21: %g, t22: %g\n", ad.val(t21), ad.val(t22))
-		var isect1 = b2edge1_start + t21*b2edge1_dir
-		var isect2 = b2edge2_start + t22*b2edge2_dir
-		var thickness = (isect2 - isect1):norm()
+		norm_start = norm_start - 1e-15*norm_dir
+		var b2edge_start = beam2:corner(oppEdge_i1)
+		var b2edge_dir = beam2:corner(oppEdge_i2) - b2edge_start
+		var t1, t2 = rayIntersect(norm_start, norm_dir, b2edge_start, b2edge_dir)
+		-- If beam2 is not perpendicular to beam1, then some of this thickness will include open air.
+		-- var thickness = ad.math.fmax(t11, t12)
+		var thickness = t1
 		var penetrationDepth = nailLength - thickness
 		-- Thickness should be about half the penetration depth
 		util.assert(thickness < 0.7*penetrationDepth,
-			"Nail is too short. Penetration depth should be about 2x thickness of side member for our model to be accurate.\nthickness: %g\n", ad.val(thickness))
-		util.assert(thickness > 0.3*penetrationDepth,
-			"Nail is too long. Penetration depth should be about 2x thickness of side member for our model to be accurate.\nthickness: %g\n", ad.val(thickness))
-
-		-- C.printf("penetrationDepth: %g\n", ad.val(penetrationDepth))
+			"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g\n", ad.val(thickness))
+		-- util.assert(thickness > 0.3*penetrationDepth,
+		-- 	"Nail is too long. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g\n", ad.val(thickness))
 		return penetrationDepth
 	end
 
