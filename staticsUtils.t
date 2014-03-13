@@ -252,10 +252,12 @@ local RigidObject = templatize(function(real)
 			-- Compute torque residual
 			var normconst = 1.0/cor.size
 			var tsumsq = real(0.0)
+			-- C.printf("--------------\n")
 			for i=0,cor.size do
 				var indvidualResidual = real(0.0)
 				for j=0,self.forces.size do
 					var t = self.forces(j):torque(cor(i))
+					-- C.printf("%g\n", ad.val(t))
 					indvidualResidual = indvidualResidual + t
 				end
 				tresOut:push(normconst*indvidualResidual)
@@ -285,7 +287,9 @@ end)
 
 -- A Beam is a rigid bar of finite area
 local beamDefaultColor = colors.Tableau10.Blue
-local beamDefaultDensity = 0.1
+local beamDefaultDensity = `700.0 	-- kg/m^3
+local beamDefaultSpecificGravity = `0.6
+local beamDefaultLateralLoadCoefficient = `94.52	-- See http://www.fpl.fs.fed.us/documnts/fplgtr/fpl_gtr190.pdf, Chapter 8
 local Beam = templatize(function(real)
 
 	local Vec2 = Vec(real, 2)
@@ -300,7 +304,10 @@ local Beam = templatize(function(real)
 		bot2: Vec2,
 		top1: Vec2,
 		top2: Vec2,
-		density: real
+		depth: real,	-- for volume (and mass) calculation
+		density: real,
+		specificGravity: real,
+		lateralLoadCoefficient: real
 	}
 	if real == double then
 		BeamT.entries:insert({field="color", type=Color3d})
@@ -308,32 +315,35 @@ local Beam = templatize(function(real)
 	inheritance.dynamicExtend(RigidObjectT, BeamT)
 
 	-- Construct from four points
-	terra BeamT:__construct(b1: Vec2, b2: Vec2, t1: Vec2, t2: Vec2) : {}
+	terra BeamT:__construct(b1: Vec2, b2: Vec2, t1: Vec2, t2: Vec2, depth: real) : {}
 		-- Default to active, affected by gravity, and visible
 		RigidObjectT.__construct(self, true, true, true)
 		self.bot1 = b1
 		self.bot2 = b2
 		self.top1 = t1
 		self.top2 = t2
+		self.depth = depth
 		self.density = beamDefaultDensity
+		self.specificGravity = beamDefaultSpecificGravity
+		self.lateralLoadCoefficient = beamDefaultLateralLoadCoefficient
 		[util.optionally(real == double, function() return quote
 			self.color = Color3d.stackAlloc([beamDefaultColor])
 		end end)]
 	end
 
 	-- Construct from two endpoints and a width (rectangular only)
-	terra BeamT:__construct(b: Vec2, t: Vec2, w: real) : {}
+	terra BeamT:__construct(b: Vec2, t: Vec2, w: real, depth: real) : {}
 		var axis = t - b; axis:normalize()
 		var whalf = 0.5*w
 		var perpvec = whalf*perp(axis)
-		self:__construct(b - perpvec, b + perpvec, t - perpvec, t + perpvec)
+		self:__construct(b - perpvec, b + perpvec, t - perpvec, t + perpvec, depth)
 	end
 
 	-- Construct from a center, length, width, and angle (rectangular only)
-	terra BeamT:__construct(c: Vec2, l: real, w: real, a: real) : {}
+	terra BeamT:__construct(c: Vec2, l: real, w: real, a: real, depth: real) : {}
 		var lenhalf = 0.5*l
 		var axis = polar2rect(lenhalf, a)
-		self:__construct(c - axis, c + axis, w)
+		self:__construct(c - axis, c + axis, w, depth)
 	end
 
 	-- (Inherit parent destructor)
@@ -344,7 +354,10 @@ local Beam = templatize(function(real)
 		self.bot2 = other.bot2
 		self.top1 = other.top1
 		self.top2 = other.top2
+		self.depth = other.depth
 		self.density = other.density
+		self.specificGravity = other.specificGravity
+		self.lateralLoadCoefficient = other.lateralLoadCoefficient
 		[util.optionally(real==double, function() return quote
 			self.color = other.color
 		end end)]
@@ -376,11 +389,11 @@ local Beam = templatize(function(real)
 	inheritance.virtual(BeamT, "centerOfMass")
 
 	terra BeamT:mass() : real
-		-- 1/2 * || AC x BD ||
+		-- Area is: 1/2 * || AC x BD ||
 		var ac = self.top2 - self.bot1
 		var bd = self.top1 - self.bot2
 		var cross = ac(0)*bd(1) - ac(1)*bd(0)
-		return 0.5 * ad.math.sqrt(cross*cross) * self.density
+		return 0.5 * ad.math.sqrt(cross*cross) * self.depth * self.density
 	end
 	inheritance.virtual(BeamT, "mass")
 
@@ -400,7 +413,7 @@ local Beam = templatize(function(real)
 		elseif index == 1 then
 			return [BeamT.endpoint(self, 1)]
 		else
-			util.fatalError("BeamT.endpoint: index must be 0, 1, 2, or 3")
+			util.fatalError("BeamT.endpoint: index must be 0, 1, 2, or 3\n")
 		end
 	end
 
@@ -428,8 +441,50 @@ local Beam = templatize(function(real)
 		elseif index == 3 then
 			return [BeamT.corner(self, 3)]
 		else
-			util.fatalError("BeamT:corner: index must be 0, 1, 2, or 3")
+			util.fatalError("BeamT:corner: index must be 0, 1, 2, or 3\n")
 		end
+	end
+
+	-- Selecting opposing edges
+	terra BeamT:opposingEdge(i1: uint, i2: uint)
+		if (i1 == 0 and i2 == 1) or (i1 ==1 and i2 == 0) then
+			return 2,3
+		elseif (i1 == 1 and i2 == 2) or (i1 == 2 and i2 == 1) then
+			return 0,3
+		elseif (i1 == 2 and i2 == 3) or (i1 == 3 and i2 == 2) then
+			return 0,1
+		elseif (i1 == 0 and i2 == 3) or (i1 == 3 and i2 == 0) then
+			return 1,2
+		else
+			util.fatalError("BeamT:opposingEdge: no such edge\n")
+		end
+	end
+
+	-- Find closest edge to a point
+	local function genEdgeCheck(self, p, i1, i2, besti1, besti2, bestdot)
+		return quote
+			var a = self:corner(i1)
+			var b = self:corner(i2)
+			var ab = b - a; ab:normalize()
+			var ap = p - a; ap:normalize()
+			var dot = ab:dot(ap)
+			if dot > bestdot then
+				besti1 = i1
+				besti2 = i2
+				bestdot = dot
+			end
+		end
+	end
+	terra BeamT:closestEdge(p: Vec2)
+		-- Look for edge with largest dot product
+		var besti1 = 0
+		var besti2 = 1
+		var bestdot = real(-1.0)
+		[genEdgeCheck(self, p, 0, 1, besti1, besti2, bestdot)]
+		[genEdgeCheck(self, p, 1, 2, besti1, besti2, bestdot)]
+		[genEdgeCheck(self, p, 2, 3, besti1, besti2, bestdot)]
+		[genEdgeCheck(self, p, 3, 0, besti1, besti2, bestdot)]
+		return besti1, besti2
 	end
 
 	-- OpenGL drawing code
@@ -452,7 +507,7 @@ local CableProxy = templatize(function(real)
 	local Vec2 = Vec(real, 2)
 	local BeamT = Beam(real)
 	return terra(bot: Vec2, top: Vec2, w: real)
-		var beam = BeamT.heapAlloc(bot, top, w)
+		var beam = BeamT.heapAlloc(bot, top, w, 1.0)
 		beam:disable()
 		[util.optionally(real==double, function() return quote
 			beam.color = Color3d.stackAlloc([cableColor])
@@ -473,7 +528,7 @@ local Ground = templatize(function(real)
 		var top = Vec2.stackAlloc(midx, groundHeight)
 		var bot = Vec2.stackAlloc(midx, groundHeight - groundTallness)
 		var w = right - left
-		var beam = BeamT.heapAlloc(bot, top, w)
+		var beam = BeamT.heapAlloc(bot, top, w, 1.0)
 		beam:disable()
 		[util.optionally(real==double, function() return quote
 			beam.color = Color3d.stackAlloc([groundColor])
@@ -619,6 +674,34 @@ local function Connections()
 			f
 		end
 	end)
+
+	----------------------------------
+
+	-- Returns t1, t2
+	local terra rayIntersect(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2)
+		-- dx = bs.x - as.x
+		-- dy = bs.y - as.y
+		-- det = bd.x * ad.y - bd.y * ad.x
+		-- u = (dy * bd.x - dx * bd.y) / det
+		-- v = (dy * ad.x - dx * ad.y) / det
+		var dx = p2(0) - p1(0)
+		var dy = p2(1) - p1(1)
+		var det = d2(0)*d1(1) - d2(1)*d1(0)
+		var t1 = (dy*d2(0) - dx*d2(1)) / det
+		var t2 = (dy*d1(0) - dx*d1(1)) / det
+
+		return t1, t2
+	end
+
+	-- local terra testRayIntersect()
+	-- 	var p1 = Vec2.stackAlloc(0.0, 1.0)
+	-- 	var d1 = Vec2.stackAlloc(1.0, 0.0)
+	-- 	var p2 = Vec2.stackAlloc(1.0, 0.0)
+	-- 	var d2 = Vec2.stackAlloc(0.0, 1.0)
+	-- 	var t1, t2 = rayIntersect(p1, d1, p2, d2)
+	-- 	util.assert(t1 == 1.0 and t2 == 1.0, "t1: %g, t2: %g\n", ad.val(t1), ad.val(t2))
+	-- end
+	-- testRayIntersect()
 
 	----------------------------------
 
@@ -874,18 +957,16 @@ local function Connections()
 	m.addConstructors(FrictionalContact)
 
 
-	-- A NailJoint connects two objects with a (virtual) nail.
+	-- A NailJoint connects two beams with a (virtual) nail.
+	-- Assumption is that the nail is through beam 2 into beam 1
 	-- It exerts a normal force that is bounded by a maximum pulling force threshold on the negative side.
 	-- The normal force can also go infinitely positive, indicating compression. In this way, the NailJoint
 	--    also doubles as a FrictionalContact.
 	-- It also exerts a tangent force that is bounded by a maximum shear force threshold.
-	-- This is like friction, but typically much stronger.
-	local defaultMaxPullForce = `100.0
-	local defaultMaxShearForce = `100.0
-	-- TODO: Actually put in reasonable values for the maximum pull and shear forces
+	-- This is like friction, but much stronger.
 	local struct NailJoint
 	{
-		objs: (&RigidObjectT)[2],
+		objs: (&BeamT)[2],
 		contactPoint: Vec2,
 		contactNormal: Vec2,
 		contactTangent: Vec2,
@@ -894,18 +975,56 @@ local function Connections()
 	}
 	inheritance.dynamicExtend(RigidConnection, NailJoint)
 
-	terra NailJoint:__construct(o1: &RigidObjectT, o2: &RigidObjectT, cp: Vec2, cn: Vec2) : {}
+	-- meters to millimeters
+	local toMM = macro(function(x) return `1000.0*x end)
+
+	terra NailJoint:__construct(o1: &BeamT, o2: &BeamT, cp: Vec2, cn: Vec2, nailDiameter: real, penetrationDepth: real) : {}
 		self.objs[0] = o1
 		self.objs[1] = o2
 		self.contactPoint = cp
 		self.contactNormal = cn
 		self.contactTangent = perp(cn)
-		self.maxPullForce = defaultMaxPullForce
-		self.maxShearForce = defaultMaxShearForce
+		util.assert(penetrationDepth > 10.0*nailDiameter, "Nail penetration depth too small for given nail diameter\n")
+		self.maxPullForce = 54.12 * ad.math.pow(o1.specificGravity, 5.0/2.0) * toMM(nailDiameter) * toMM(penetrationDepth)	-- maximum short-term load
+		self.maxPullForce = (1.0/6.0)*self.maxPullForce		-- maximum long-term load
+		self.maxPullForce = 1.1*self.maxPullForce	-- maximum normal load
+		self.maxShearForce = o1.lateralLoadCoefficient * ad.math.pow(toMM(nailDiameter), 3.0/2.0)
+
+		-- C.printf("maxPullForce: %g, maxShearForce: %g\n", ad.val(self.maxPullForce), ad.val(self.maxShearForce))
 	end
 
-	-- Nail two beams together using one nail at the center of the edge between corner ci1 and ci2 of beam1
-	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint) : {}
+	local terra determinePenetrationDepth(beam2: &BeamT, cp: Vec2, normal: Vec2, nailLength: real)
+		-- Determine the penetration depth by 'raycasting' along the contact normal direction
+		var corner1, corner2 = beam2:closestEdge(cp)
+		-- C.printf("corner1: %d, corner2: %d\n", corner1, corner2)
+		var norm_start = cp
+		var norm_dir = -normal
+		norm_start = norm_start - 0.001*norm_dir
+		var b2edge1_start = beam2:corner(corner1)
+		var b2edge1_dir = beam2:corner(corner2) - b2edge1_start
+		var oppEdge_i1, oppEdge_i2 = beam2:opposingEdge(corner1, corner2)
+		-- C.printf("oppcorner1: %d, oppcorner2: %d\n", oppEdge_i1, oppEdge_i2)
+		var b2edge2_start = beam2:corner(oppEdge_i1)
+		var b2edge2_dir = beam2:corner(oppEdge_i2) - b2edge2_start
+		var t11, t21 = rayIntersect(norm_start, norm_dir, b2edge1_start, b2edge1_dir)
+		var t12, t22 = rayIntersect(norm_start, norm_dir, b2edge2_start, b2edge2_dir)
+		-- C.printf("t21: %g, t22: %g\n", ad.val(t21), ad.val(t22))
+		var isect1 = b2edge1_start + t21*b2edge1_dir
+		var isect2 = b2edge2_start + t22*b2edge2_dir
+		var thickness = (isect2 - isect1):norm()
+		var penetrationDepth = nailLength - thickness
+		-- Thickness should be about half the penetration depth
+		util.assert(thickness < 0.7*penetrationDepth,
+			"Nail is too short. Penetration depth should be about 2x thickness of side member for our model to be accurate.\nthickness: %g\n", ad.val(thickness))
+		util.assert(thickness > 0.3*penetrationDepth,
+			"Nail is too long. Penetration depth should be about 2x thickness of side member for our model to be accurate.\nthickness: %g\n", ad.val(thickness))
+
+		-- C.printf("penetrationDepth: %g\n", ad.val(penetrationDepth))
+		return penetrationDepth
+	end
+
+	-- Nail two beams together using one nail at the center of the edge between corner ci1 and ci2 of beam1.
+	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real) : {}
 		var cp1 = beam1:corner(ci1)
 		var cp2 = beam1:corner(ci2)
 		var edge = cp2 - cp1; edge:normalize()
@@ -915,15 +1034,17 @@ local function Connections()
 		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
 			normal = -normal
 		end
-		var cp = 0.5*(cp1 + cp2)
-		self:__construct(beam1, beam2, cp, normal)
+		var cp = 0.5*(cp1 + cp2)		
+		var penetrationDepth = determinePenetrationDepth(beam2, cp, normal, nailLength)
+		self:__construct(beam1, beam2, cp, normal, nailDiameter, penetrationDepth)
 	end
 
 	-- (Convenience method)
 	-- Nail two beams together.
 	-- Connect beam1 to beam2 along the edge between corners ci1 and ci2 of beam1
+	-- The nail penetrates beam2 along the edge ci3 to ci4
 	-- This will generate two NailJoint objects
-	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint)
+	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real)
 		var cp1 = beam1:corner(ci1)
 		var cp2 = beam1:corner(ci2)
 		var edge = cp2 - cp1; edge:normalize()
@@ -933,9 +1054,18 @@ local function Connections()
 		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
 			normal = -normal
 		end
-		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal)
-		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal)
+		var penDepth1 = determinePenetrationDepth(beam2, cp1, normal, nailLength)
+		var penDepth2 = determinePenetrationDepth(beam2, cp2, normal, nailLength)
+		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal, nailDiameter, penDepth1)
+		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal, nailDiameter, penDepth2)
 		return nj1, nj2
+	end
+
+	local terra logistic(x: real, coeff: real)
+		return 1.0 / (1.0 + ad.math.exp(-coeff*x))
+	end
+	local terra lerp(a: real, b: real, t: real)
+		return (1.0-t)*a + t*b
 	end
 
 	terra NailJoint:applyForcesImpl() : {}
@@ -945,17 +1075,20 @@ local function Connections()
 			var nCompress = genNonNegative1DForce(self.contactPoint, self.contactNormal)
 			var nTension = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
 			normalForce = nCompress; normalForce:combineWith(&nTension)
-			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
-			-- var tLeft = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
-			-- var tRight = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, self.maxShearForce)
-			-- tangentForce = tLeft; tangentForce:combineWith(&tRight)
-			-- var tLeft1 = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, 0.5*self.maxShearForce)
-			-- var tLeft2 = genBoundedNonNegative1DForce(self.contactPoint, self.contactTangent, 0.5*self.maxShearForce)
-			-- var tRight1 = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, 0.5*self.maxShearForce)
-			-- var tRight2 = genBoundedNonNegative1DForce(self.contactPoint, -self.contactTangent, 0.5*self.maxShearForce)
-			-- tangentForce = tLeft1; tangentForce:combineWith(&tLeft2); tangentForce:combineWith(&tRight1); tangentForce:combineWith(&tRight2)
+			-- tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce)
+			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
 			-- tangentForce = gen1DForce(self.contactPoint, self.contactTangent)
-			-- C.printf("tangentForce: (%g, %g)\n", ad.val(tangentForce.vec(0)), ad.val(tangentForce.vec(1)))
+			-- C.printf("tangentForceMag: %g, maxShearForce: %g\n", ad.val(tangentForce.vec):norm(), ad.val(self.maxShearForce))
+			-- var logisticShapeParam = ad.math.exp(gaussian([math.log(0.1)], 1000.0, {structural=false, initialVal=[math.log(0.1)], upperBound=0.0}))
+			-- C.printf("logisticShapeParam: %g\n", ad.val(logisticShapeParam))
+			-- var logisticShapeParam = 0.1
+			var logisticShapeParam = 0.01
+			-- var logisticShapeParam = 1.0
+			var forceMag = lerp(-self.maxShearForce, self.maxShearForce, logistic(gaussian(0.0, 10000000.0, {structural=false, initialVal=0.0}), logisticShapeParam))
+			tangentForce.vec =  forceMag * self.contactTangent
+			tangentForce.pos = self.contactPoint
+			tangentForce.dir = self.contactTangent
+			tangentForce.dof = 1
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)

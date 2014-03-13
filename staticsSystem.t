@@ -78,74 +78,94 @@ local staticsModel = probcomp(function()
 
 	----------------------------------
 
+	local terra applyExternalLoad(obj: &RigidObjectT, mass: real, point: Vec2)
+		var down = Vec2.stackAlloc(0.0, -1.0)
+		obj:applyForce(ForceT{gravityConstant * mass * down, point, 0, down})
+	end
+
 	-- Enforce static equilibrium of a scene given some connections
-	local enforceStability = pfn(terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection))
-		-- Apply internal forces
-		for i=0,connections.size do
-			connections(i):applyForces()
-		end
+	local printResiduals = false
+	local forceResidualRelativeErrorSD = `0.01  -- Allow deviation of 1% the average force magnitude
+	local torqueResidualRelativeErrorSD = `0.01
+	local terra enforceStability(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection)) : {}
 
 		-- Apply gravity to everything affected by it
-		var down = Vec2.stackAlloc(0.0, -1.0)
 		for i=0,scene.objects.size do
 			var obj = scene.objects(i)
 			if obj.active and obj.affectedByGravity then
-				var gforce = gravityConstant * obj:mass() * down
-				obj:applyForce(ForceT{gforce, obj:centerOfMass(), 0, down})
+				applyExternalLoad(obj, obj:mass(), obj:centerOfMass())
 			end
+		end
+
+		-- Calculate the average (external) force magnitude
+		-- (We'll use this to figure out the 'relative' error represented by
+		--  force and torque residuals)
+		var avgForceMag = real(0.0)
+		var numForces = 0
+		for i=0,scene.objects.size do
+			for j=0,scene.objects(i).forces.size do
+				avgForceMag = avgForceMag + scene.objects(i).forces(j).vec:norm()
+				numForces = numForces + 1
+			end
+		end
+		avgForceMag = avgForceMag / numForces
+
+		var fresSoftness = forceResidualRelativeErrorSD * avgForceMag
+		var tresSoftness = torqueResidualRelativeErrorSD * avgForceMag
+
+		-- Apply internal forces
+		for i=0,connections.size do
+			connections(i):applyForces()
 		end
 
 		-- Calculate residuals and apply factors
 		-- (Individual residual style)
 		var fres = Vec2.stackAlloc(0.0, 0.0)
 		var tres = [Vector(real)].stackAlloc()
-		-- C.printf("=============================\n")
+		[util.optionally(printResiduals, function() return quote
+			C.printf("=============================\n")
+			C.printf("avgForceMag: %g\n", ad.val(avgForceMag))
+			C.printf("=============================\n")
+		end end)]
 		for i=0,scene.objects.size do
 			if scene.objects(i).active then
 				tres:clear()
 				scene.objects(i):calculateResiduals(&fres, &tres)
-				-- C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
+				[util.optionally(printResiduals, function() return quote
+					C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
+				end end)]
 				-- -- TEST: normalize by mass
 				-- var m = scene.objects(i):mass()
 				-- fres = fres / m
 				-- -- end TEST
-				manifold(fres(0), 1.0)
-				manifold(fres(1), 1.0)
+				manifold(fres(0), fresSoftness)
+				manifold(fres(1), fresSoftness)
 				for j=0,tres.size do
 					var trj = tres(j)
-					-- C.printf("tres: %g\n", ad.val(trj))
+					[util.optionally(printResiduals, function() return quote
+						C.printf("tres: %g\n", ad.val(trj))
+					end end)]
 					-- -- TEST: normalize by mass
 					-- trj = trj / m
 					-- -- end TEST
-					manifold(trj, 1.0)
+					manifold(trj, tresSoftness)
 				end
-				-- C.printf("------------------------\n")
+				[util.optionally(printResiduals, function() return quote
+					C.printf("------------------------\n")
+				end end)]
 			end
 		end
 		m.destruct(tres)
+	end
+	enforceStability = pfn(enforceStability)
 
-		-- -- Calculate residuals and apply factors
-		-- -- (Massed residual style)
-		-- var fres = Vec2.stackAlloc(0.0, 0.0)
-		-- var totalfres = real(0.0)
-		-- var tres = [Vector(real)].stackAlloc()
-		-- var totaltres = real(0.0)
-		-- for i=0,scene.objects.size do
-		-- 	if scene.objects(i).active then
-		-- 		tres:clear()
-		-- 		scene.objects(i):calculateResiduals(&fres, &tres)
-		-- 		totalfres = totalfres + fres:normSq()
-		-- 		for j=0,tres.size do
-		-- 			totaltres = totaltres + tres(j)*tres(j)
-		-- 		end
-		-- 	end
-		-- end
-		-- m.destruct(tres)
-		-- -- factor(-totalfres)
-		-- -- factor(-totaltres)
-		-- manifold(ad.math.sqrt(totalfres), 1.0)
-		-- manifold(ad.math.sqrt(totaltres), 1.0)
-	end)
+	----------------------------------
+
+	-- =============== OLD EXAMPLES WITH PHYSICALLY-INACCURATE UNITS ========================
+
+	-- This is just a fudge so that the existing examples I made have the same behavior as before
+	local oldBeamDepth = `1.0
+	local oldBeamDensity = `0.1
 
 	-- Define a simple scene with a beam rotating on a hinge
 		--    attached to the ground. There's also a cable connecting
@@ -166,7 +186,8 @@ local staticsModel = probcomp(function()
 		var beamAngle = boundedUniform(0.0, [math.pi])
 		var beamTop = beamBot + polar2rect(beamLen, beamAngle)
 		var beamWidth = 3.0
-		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth)
+		var beam = BeamT.heapAlloc(beamBot, beamTop, beamWidth, oldBeamDepth)
+		beam.density = oldBeamDensity
 		hinge:addObj(beam)
 
 		var groundPinLoc = Vec2.stackAlloc(sceneWidth*0.2, groundHeight)
@@ -204,8 +225,10 @@ local staticsModel = probcomp(function()
 		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [3*math.pi/4]
 		-- var beam2angle = [math.pi/4]
-		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
-		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
+		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth, oldBeamDepth)
+		beam1.density = oldBeamDensity
+		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth, oldBeamDepth)
+		beam2.density = oldBeamDensity
 		hinge1:addObj(beam1)
 		hinge2:addObj(beam2)
 
@@ -242,8 +265,10 @@ local staticsModel = probcomp(function()
 		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [0.6*math.pi]
 		-- var beam2angle = [0.1*math.pi]
-		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
-		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
+		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth, oldBeamDepth)
+		beam1.density = oldBeamDensity
+		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth, oldBeamDepth)
+		beam2.density = oldBeamDensity
 		hinge1:addObj(beam1)
 		hinge2:addObj(beam2)
 		var platformHeight = boundedUniform(10.0, 30.0)
@@ -252,7 +277,8 @@ local staticsModel = probcomp(function()
 		var platformLength = 10.0
 		var platform = BeamT.heapAlloc(Vec2.stackAlloc(sceneWidth*0.5 - platformLength*0.5, platformHeight + platformWidth*0.5),
 									   Vec2.stackAlloc(sceneWidth*0.5 + platformLength*0.5, platformHeight + platformWidth*0.5),
-									   platformWidth)
+									   platformWidth, oldBeamDepth)
+		platform.density = oldBeamDensity
 		var cableWidth = 0.5
 		var cable1 = Connections.Cable.heapAlloc(beam1:endpoint(1), platform:endpoint(0), beam1, platform, cableWidth)
 		var cable2 = Connections.Cable.heapAlloc(beam2:endpoint(1), platform:endpoint(1), beam2, platform, cableWidth)
@@ -298,8 +324,10 @@ local staticsModel = probcomp(function()
 		var beam2angle = boundedUniform(0.0, [math.pi])
 		-- var beam1angle = [math.pi/2]
 		-- var beam2angle = [math.pi/2]
-		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth)
-		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth)
+		var beam1 = BeamT.heapAlloc(hinge1.location, hinge1.location + polar2rect(beamLength, beam1angle), beamWidth, oldBeamDepth)
+		beam1.density = oldBeamDensity
+		var beam2 = BeamT.heapAlloc(hinge2.location, hinge2.location + polar2rect(beamLength, beam2angle), beamWidth, oldBeamDepth)
+		beam2.density = oldBeamDensity
 		hinge1:addObj(beam1)
 		hinge2:addObj(beam2)
 		scene.objects:push(beam1)
@@ -323,7 +351,8 @@ local staticsModel = probcomp(function()
 			var width = 1.5
 			var length = 4.0
 			var longAxis = polar2rect(length, rot)
-			var platform = BeamT.heapAlloc(center - longAxis, center+longAxis, width)
+			var platform = BeamT.heapAlloc(center - longAxis, center+longAxis, width, oldBeamDepth)
+			platform.density = oldBeamDensity
 			platforms:push(platform)
 			scene.objects:push(platform)
 		end
@@ -384,9 +413,11 @@ local staticsModel = probcomp(function()
 		var beam2bot = Vec2.stackAlloc(beam2x, groundHeight)
 		var beamLength = 40.0
 		var beamWidth = 4.0
-		var beam1 = BeamT.heapAlloc(beam1bot, beam1bot + Vec2.stackAlloc(0.0, beamLength), beamWidth)
+		var beam1 = BeamT.heapAlloc(beam1bot, beam1bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, oldBeamDepth)
+		beam1.density = oldBeamDensity
 		beam1:disable()
-		var beam2 = BeamT.heapAlloc(beam2bot, beam2bot + Vec2.stackAlloc(0.0, beamLength), beamWidth)
+		var beam2 = BeamT.heapAlloc(beam2bot, beam2bot + Vec2.stackAlloc(0.0, beamLength), beamWidth, oldBeamDepth)
+		beam2.density = oldBeamDensity
 		beam2:disable()
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
@@ -407,7 +438,8 @@ local staticsModel = probcomp(function()
 			var width = 1.5
 			var length = 4.0
 			var longAxis = polar2rect(length, rot)
-			var platform = BeamT.heapAlloc(center - longAxis, center+longAxis, width)
+			var platform = BeamT.heapAlloc(center - longAxis, center+longAxis, width, oldBeamDepth)
+			platform.density = oldBeamDensity
 			platforms:push(platform)
 			scene.objects:push(platform)
 		end
@@ -473,7 +505,8 @@ local staticsModel = probcomp(function()
 		var platformRight = Vec2.stackAlloc(0.5*sceneWidth + 0.5*platformWidth, platformHeight)
 		var platformCenter = 0.5*(platformLeft + platformRight)
 		var platformThickness = 4.0
-		var platform = BeamT.heapAlloc(platformLeft, platformRight, platformThickness)
+		var platform = BeamT.heapAlloc(platformLeft, platformRight, platformThickness, oldBeamDepth)
+		platform.density = oldBeamDensity
 		scene.objects:push(platform)
 
 		-- Support beams
@@ -492,8 +525,10 @@ local staticsModel = probcomp(function()
 		var beam1Top = Vec2.stackAlloc(beam1x, beamTopY)
 		var beam2Bot = Vec2.stackAlloc(beam2x, beamBotY)
 		var beam2Top = Vec2.stackAlloc(beam2x, beamTopY)
-		var beam1 = BeamT.heapAlloc(beam1Bot, beam1Top, beamWidth)
-		var beam2 = BeamT.heapAlloc(beam2Bot, beam2Top, beamWidth)
+		var beam1 = BeamT.heapAlloc(beam1Bot, beam1Top, beamWidth, oldBeamDepth)
+		beam1.density = oldBeamDensity
+		var beam2 = BeamT.heapAlloc(beam2Bot, beam2Top, beamWidth, oldBeamDepth)
+		beam2.density = oldBeamDensity
 		scene.objects:push(beam1)
 		scene.objects:push(beam2)
 
@@ -508,7 +543,8 @@ local staticsModel = probcomp(function()
 		var sparBotRight = Vec2.stackAlloc(sparBot(0)+0.5*sparWidth, sparBot(1))
 		var sparAngle = boundedUniform(0.0, [math.pi])
 		var sparTop = sparBot + polar2rect(sparLength, sparAngle)
-		var spar = BeamT.heapAlloc(sparBot, sparTop, sparWidth)
+		var spar = BeamT.heapAlloc(sparBot, sparTop, sparWidth, oldBeamDepth)
+		spar.density = oldBeamDensity		
 		scene.objects:push(spar)
 
 		-- Support beams are stacked on the ground
@@ -586,7 +622,8 @@ local staticsModel = probcomp(function()
 		-- Anchor for everything to hang from
 		var anchorCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.95*sceneHeight)
 		var anchorSize = beamThickness
-		var anchor = BeamT.heapAlloc(anchorCenter, anchorSize, anchorSize, 0.0)
+		var anchor = BeamT.heapAlloc(anchorCenter, anchorSize, anchorSize, 0.0, oldBeamDepth)
+		anchor.density = oldBeamDensity
 		anchor:disable()
 		scene.objects:push(anchor)
 
@@ -594,11 +631,13 @@ local staticsModel = probcomp(function()
 		var topBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.8*sceneHeight)
 		var topBeamLen = boundedUniform(0.1*sceneWidth, 0.5*sceneWidth)
 		-- var topBeamLen = 0.5*sceneWidth
-		var topBeam = BeamT.heapAlloc(topBeamCenter, topBeamLen, beamThickness, 0.0)
+		var topBeam = BeamT.heapAlloc(topBeamCenter, topBeamLen, beamThickness, 0.0, oldBeamDepth)
+		topBeam.density = oldBeamDensity
 		scene.objects:push(topBeam)
 		var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - boundedUniform(0.4*sceneHeight, 0.8*sceneHeight))
 		-- var botBeamCenter = Vec2.stackAlloc(0.5*sceneWidth, topBeamCenter(1) - 0.6*sceneHeight)
-		var botBeam = BeamT.heapAlloc(botBeamCenter, topBeamLen, beamThickness, 0.0)
+		var botBeam = BeamT.heapAlloc(botBeamCenter, topBeamLen, beamThickness, 0.0, oldBeamDepth)
+		botBeam.density = oldBeamDensity
 		scene.objects:push(botBeam)
 
 		-- The middle beam should be somewhere between the top and bottom beams
@@ -607,7 +646,8 @@ local staticsModel = probcomp(function()
 		var midBeamCenter = lerp(botBeamCenter, topBeamCenter, midBeamCenterT)
 		var midBeamLen = boundedUniform(0.5*topBeamLen, topBeamLen)
 		-- var midBeamLen = 0.5*topBeamLen
-		var midBeam = BeamT.heapAlloc(midBeamCenter, midBeamLen, beamThickness, 0.0)
+		var midBeam = BeamT.heapAlloc(midBeamCenter, midBeamLen, beamThickness, 0.0, oldBeamDepth)
+		midBeam.density = oldBeamDensity
 		scene.objects:push(midBeam)
 
 		-- The side beams are sandwiched between the top/mid/bottom beams.
@@ -629,8 +669,10 @@ local staticsModel = probcomp(function()
 		var sideBeams1LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
 		-- var sideBeams1LeftAngle = 0.0
 		var sideBeams1RightAngle = -sideBeams1LeftAngle
-		var sideBeams1Left = BeamT.heapAlloc(sideBeams1LeftCenter, sideBeams1Len, beamThickness, sideBeams1LeftAngle)
-		var sideBeams1Right = BeamT.heapAlloc(sideBeams1RightCenter, sideBeams1Len, beamThickness, sideBeams1RightAngle)
+		var sideBeams1Left = BeamT.heapAlloc(sideBeams1LeftCenter, sideBeams1Len, beamThickness, sideBeams1LeftAngle, oldBeamDepth)
+		sideBeams1Left.density = oldBeamDensity
+		var sideBeams1Right = BeamT.heapAlloc(sideBeams1RightCenter, sideBeams1Len, beamThickness, sideBeams1RightAngle, oldBeamDepth)
+		sideBeams1Right.density = oldBeamDensity
 		scene.objects:push(sideBeams1Left)
 		scene.objects:push(sideBeams1Right)
 
@@ -649,8 +691,10 @@ local staticsModel = probcomp(function()
 		var sideBeams2LeftAngle = boundedUniform([-math.pi/6], [math.pi/6])
 		-- var sideBeams2LeftAngle = 0.0
 		var sideBeams2RightAngle = -sideBeams2LeftAngle
-		var sideBeams2Left = BeamT.heapAlloc(sideBeams2LeftCenter, sideBeams2Len, beamThickness, sideBeams2LeftAngle)
-		var sideBeams2Right = BeamT.heapAlloc(sideBeams2RightCenter, sideBeams2Len, beamThickness, sideBeams2RightAngle)
+		var sideBeams2Left = BeamT.heapAlloc(sideBeams2LeftCenter, sideBeams2Len, beamThickness, sideBeams2LeftAngle, oldBeamDepth)
+		sideBeams2Left.density = oldBeamDensity
+		var sideBeams2Right = BeamT.heapAlloc(sideBeams2RightCenter, sideBeams2Len, beamThickness, sideBeams2RightAngle, oldBeamDepth)
+		sideBeams2Right.density = oldBeamDensity
 		scene.objects:push(sideBeams2Left)
 		scene.objects:push(sideBeams2Right)
 
@@ -707,10 +751,12 @@ local staticsModel = probcomp(function()
 
 		-- Anchors
 		var anchor1center = Vec2.stackAlloc(0.25*sceneWidth, 0.95*sceneHeight)
-		var anchor1 = BeamT.heapAlloc(anchor1center, beamThickness, beamThickness, 0.0)
+		var anchor1 = BeamT.heapAlloc(anchor1center, beamThickness, beamThickness, 0.0, oldBeamDepth)
+		anchor1.density = oldBeamDensity
 		anchor1:disable()
 		var anchor2center = Vec2.stackAlloc(0.75*sceneWidth, 0.95*sceneHeight)
-		var anchor2 = BeamT.heapAlloc(anchor2center, beamThickness, beamThickness, 0.0)
+		var anchor2 = BeamT.heapAlloc(anchor2center, beamThickness, beamThickness, 0.0, oldBeamDepth)
+		anchor2.density = oldBeamDensity
 		anchor2:disable()
 		scene.objects:push(anchor1)
 		scene.objects:push(anchor2)
@@ -723,7 +769,8 @@ local staticsModel = probcomp(function()
 		var barDisplace = 0.5*sceneHeight
 		var barCenter = 0.5*(anchor1center + anchor2center)
 		barCenter(1) = barCenter(1) - barDisplace
-		var bar = BeamT.heapAlloc(barCenter, barLength, beamThickness, barRot)
+		var bar = BeamT.heapAlloc(barCenter, barLength, beamThickness, barRot, oldBeamDepth)
+		bar.density = oldBeamDensity
 		scene.objects:push(bar)
 
 		-- Cables
@@ -757,13 +804,16 @@ local staticsModel = probcomp(function()
 		var platformHeight = boundedUniform(0.1*sceneHeight, 0.5*sceneHeight)
 		var platformLength = boundedUniform(0.4*sceneWidth, 0.75*sceneWidth)
 		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + platformHeight),
-									   platformLength, beamThickness, 0.0)
+									   platformLength, beamThickness, 0.0, oldBeamDepth)
+		platform.density = oldBeamDensity
 		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0) + 0.5*beamThickness, groundHeight),
 									   platform:endpoint(0) + 0.5*Vec2.stackAlloc(beamThickness, -beamThickness),
-									   beamThickness)
+									   beamThickness, oldBeamDepth)
+		support1.density = oldBeamDensity
 		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0) - 0.5*beamThickness, groundHeight),
 									   platform:endpoint(1) - 0.5*Vec2.stackAlloc(beamThickness, beamThickness),
-									   beamThickness)
+									   beamThickness, oldBeamDepth)
+		support2.density = oldBeamDensity
 		scene.objects:push(platform)
 		scene.objects:push(support1)
 		scene.objects:push(support2)
@@ -784,30 +834,51 @@ local staticsModel = probcomp(function()
 		return scene
 	end)
 
+	-- =============== NEW, PHYSICALLY-ACCURATE EXAMPLES ========================
+
+	local mm = macro(function(x)
+		return `0.001*x
+	end)
+
+	-- TODO: Fix up everything for physically-correct units
 	local simpleNailTest = pfn(terra()
-		var groundHeight = 2.0
-		var sceneWidth = 100.0
-		var sceneHeight = 100.0
+		var groundHeight = mm(5.0)
+		var sceneWidth = mm(250.0)
+		var sceneHeight = mm(250.0)
 		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
 		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
 		var ground = Ground(groundHeight, 0.0, sceneWidth)
 		scene.objects:push(ground)
 
-		var beamThickness = 4.0
+		-- Approx. measurements for a gauge 14-1/2 box nail
+		var nailDiameter = mm(2.0)
+		var nailLength = mm(32.0)
+
+		-- We'd like to have:
+		--  * penetrationDepth > 10*nailDiameter
+		--  * penetrationDepth ~= 2*sideMemberThickness --> sideMemberThickness ~= 1/3 * nailLength
+		-- So
+		--  * penetrationDepth > 20mm
+		--  * sideMemberThickness ~= 10mm
+
+		-- We'll use beams with square cross sections; that is, width == depth
+		var beamThickness = mm(10.0)
 		var halfThickness = 0.5*beamThickness
 
 		-- Objects
 		var platformHeight = 0.3*sceneHeight
 		var platformLength = 0.75*sceneWidth
 		var platform = BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight + platformHeight),
-									   platformLength, beamThickness, 0.0)
-		platform.density = 0.01
+									   platformLength, beamThickness, 0.0, beamThickness)
+		-- platform:disable()
 		var support1 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(0)(0)-halfThickness, groundHeight),
 									   Vec2.stackAlloc(platform:endpoint(0)(0)-halfThickness, 0.5*sceneHeight),
-									   beamThickness)
+									   beamThickness, beamThickness)
+		-- support1:disable()
 		var support2 = BeamT.heapAlloc(Vec2.stackAlloc(platform:endpoint(1)(0)+halfThickness, groundHeight),
 							   		   Vec2.stackAlloc(platform:endpoint(1)(0)+halfThickness, 0.5*sceneHeight),
-							   		   beamThickness)
+							   		   beamThickness, beamThickness)
+		-- support2:disable()
 		scene.objects:push(platform)
 		scene.objects:push(support1)
 		scene.objects:push(support2)
@@ -815,18 +886,23 @@ local staticsModel = probcomp(function()
 		-- Connections
 		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
 		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
-		-- var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1)
-		-- var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3)
+		-- var ps1a, ps1b = Connections.NailJoint.makeBeamContacts(platform, support1, 0, 1, nailDiameter, nailLength)
+		-- var ps2a, ps2b = Connections.NailJoint.makeBeamContacts(platform, support2, 2, 3, nailDiameter, nailLength)
 		-- connections:push(ps1a); connections:push(ps1b)
 		-- connections:push(ps2a); connections:push(ps2b)
-		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1)
-		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3)
+		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength)
+		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength)
 		connections:push(ps1)
 		connections:push(ps2)
 		connections:push(gs1a); connections:push(gs1b)
 		connections:push(gs2a); connections:push(gs2b)
 
+		-- Extra load
+		applyExternalLoad(platform, 20.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+
 		enforceStability(&scene, &connections)
+		-- enforceStability(&scene, &connections, 0.01, 0.001)
+		-- enforceStability(&scene, &connections, 0.5, 0.5)
 
 		-- C.printf("----------------------\n")
 		-- C.printf("=== Platform forces ====\n")
@@ -884,7 +960,7 @@ local function renderInitFn(samples, im)
 	end
 end
 
-local forceScale = 0.1
+local forceScale = 0.2
 -- local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
