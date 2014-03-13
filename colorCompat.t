@@ -228,6 +228,8 @@ end
 local function SaveToFile(name, samples)
 	local outsamples = string.format("%s.txt",name)
 	local outhtml = string.format("%s.html",name)
+	print(outsamples)
+	print(outhtml)
 
 	local terra SaveToFile()
 		var numsamps = samples.size
@@ -323,7 +325,7 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps)
 
 	--Since there are such strict constraints, it's really difficult to get
 	--decent scoring samples...
-	local estimateNumSamps = 600000
+	local estimateNumSamps = 500000
 	local terra EstimateTrueStats()
 		C.printf("Estimating true stats...\n")
 		--var numsamps = 1000000
@@ -651,12 +653,12 @@ local hmcSamples = m.gc(doHMCInference())
 SaveToFile("HMCColorSamples", hmcSamples)
 
 
-io.write("Random.\n")
-io.flush()
-local randomSamples = m.gc(doRandomInference())
-SaveToFile("RandomColorSamples", randomSamples)
+-- io.write("Random.\n")
+-- io.flush()
+-- local randomSamples = m.gc(doRandomInference())
+-- SaveToFile("RandomColorSamples", randomSamples)
 
-Eval(randomSamples, hmcSamples, hmcNumSteps)
+-- Eval(randomSamples, hmcSamples, hmcNumSteps)
 
 
 print("done.")
