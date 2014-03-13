@@ -27,12 +27,17 @@ local Circle = templatize(function(real)
 		var r = self.size
 		var R = other.size
 		var d = self.pos:dist(other.pos)
+		-- No intersection
 		if d > r+R then
 			return real(0.0)
 		end
 		if R < r then
 			r = other.size
 			R = self.size
+		end
+		-- Complete containment
+		if d < R-r then
+			return [math.pi]*r*r
 		end
 		var d2 = d*d
 		var r2 = r*r
@@ -351,9 +356,10 @@ local function renderSamples(samples, moviename)
 	local terra renderFrames()
 		-- init opengl context (via glut window; sort of hacky)
 		var argc = 0
+
 		gl.glutInit(&argc, nil)
+		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_DOUBLE())
 		gl.glutInitWindowSize(imageWidth, imageHeight)
-		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
 		gl.glutCreateWindow("Render")
 		gl.glViewport(0, 0, imageWidth, imageHeight)
 
@@ -407,7 +413,7 @@ end
 local kernelType = HMC
 -- local kernelType = RandomWalk
 local hmcNumSteps = 100
-local numsamps = 20000
+local numsamps = 2000
 local verbose = true
 
 if kernelType == RandomWalk then numsamps = 0.75*hmcNumSteps*numsamps end
