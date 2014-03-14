@@ -78,6 +78,26 @@ local terra drawQuad(p0: Vec2d, p1: Vec2d, p2: Vec2d, p3: Vec2d, color: Color3d)
 	gl.glEnd()
 end
 
+-- Returns t1, t2
+local rayIntersect = templatize(function(real)
+	local Vec2 = Vec(real, 2)
+	return terra(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2)
+		-- dx = bs.x - as.x
+		-- dy = bs.y - as.y
+		-- det = bd.x * ad.y - bd.y * ad.x
+		-- u = (dy * bd.x - dx * bd.y) / det
+		-- v = (dy * ad.x - dx * ad.y) / det
+		var dx = p2(0) - p1(0)
+		var dy = p2(1) - p1(1)
+		var det = d2(0)*d1(1) - d2(1)*d1(0)
+		var t1 = (dy*d2(0) - dx*d2(1)) / det
+		var t2 = (dy*d1(0) - dx*d1(1)) / det
+
+		return t1, t2
+	end
+end)
+
+
 -- A force is:
 --    * A vector indicating the direction and magnitude of the force
 --    * A position indicating where the force is applied
@@ -346,6 +366,12 @@ local Beam = templatize(function(real)
 		self:__construct(c - axis, c + axis, w, depth)
 	end
 
+	-- Construct from a length, width, and angle, and base (rectangular only)
+	terra BeamT:__construct(l: real, w: real, a: real, base: Vec2, depth: real) : {}
+		var axis = polar2rect(l, a)
+		self:__construct(base, base + axis, w, depth)
+	end
+
 	-- (Inherit parent destructor)
 
 	terra BeamT:__copy(other: &BeamT)
@@ -460,31 +486,60 @@ local Beam = templatize(function(real)
 		end
 	end
 
-	-- Find closest edge to a point
-	local function genEdgeCheck(self, p, i1, i2, besti1, besti2, bestdot)
-		return quote
-			var a = self:corner(i1)
-			var b = self:corner(i2)
-			var ab = b - a; ab:normalize()
-			var ap = p - a; ap:normalize()
-			var dot = ab:dot(ap)
-			if dot > bestdot then
-				besti1 = i1
-				besti2 = i2
-				bestdot = dot
-			end
+	-- Find the distance to a particular edge when starting at some point p
+	--    and looking along some direction d
+	terra BeamT:lineDistToEdge(p: Vec2, d: Vec2, ci1: uint, ci2: uint)
+		-- Do a ray intersection. Report the (p + td) t value.
+		-- If the edge t value is not in [0,1], then return -1.0 (no intersection)
+		var ep1 = self:corner(ci1)
+		var ep2 = self:corner(ci2)
+		var ed = ep2 - ep1; ed:normalize()
+		p = p - 1e-15*d  -- Don't want to miss intersections at 0
+		var t1, t2 = [rayIntersect(real)](p, d, ep1, ed)
+		if t2 >=0.0 and t2 <= 1.0 then
+			return ad.math.fabs(t1)
+		else
+			return real(-1.0)
 		end
 	end
-	terra BeamT:closestEdge(p: Vec2)
-		-- Look for edge with largest dot product
-		var besti1 = 0
-		var besti2 = 1
-		var bestdot = real(-1.0)
-		[genEdgeCheck(self, p, 0, 1, besti1, besti2, bestdot)]
-		[genEdgeCheck(self, p, 1, 2, besti1, besti2, bestdot)]
-		[genEdgeCheck(self, p, 2, 3, besti1, besti2, bestdot)]
-		[genEdgeCheck(self, p, 3, 0, besti1, besti2, bestdot)]
-		return besti1, besti2
+
+	-- Find the thickness of the beam from point p looking along direction d
+	terra BeamT:thickness(p: Vec2, d: Vec2)
+		-- Find line distance to all four edges
+		var d01 = self:lineDistToEdge(p, d, 0, 1)
+		var d12 = self:lineDistToEdge(p, d, 1, 2)
+		var d23 = self:lineDistToEdge(p, d, 2, 3)
+		var d30 = self:lineDistToEdge(p, d, 3, 0)
+		-- The ray (p + td) can only pass through two of them, so find the two non-negative
+		--    distances and return the bigger minus the smaller
+		if d01 >= 0.0 and d12 >= 0.0 then
+			return ad.math.fmax(d01 - d12, d12 - d01)
+		elseif d01 >= 0.0 and d23 >= 0.0 then
+			return ad.math.fmax(d01 - d23, d23 - d01)
+		elseif d01 >= 0.0 and d30 >= 0.0 then
+			return ad.math.fmax(d01 - d30, d30 - d01)
+		elseif d12 >= 0.0 and d23 >= 0.0 then
+			return ad.math.fmax(d12 - d23, d23 - d12)
+		elseif d12 >= 0.0 and d30 >= 0.0 then
+			return ad.math.fmax(d01 - d30, d30 - d01)
+		elseif d23 >= 0.0 and d30 >= 0.0 then
+			return ad.math.fmax(d23 - d30, d30 - d23)
+		-- If none of the above cases pass, then the ray (p + td) never intersects the beam at all
+		-- Return -1.0 in this case
+		else
+			return real(-1.0)
+		end
+	end
+
+	-- Find the 'apparent' thickness of the beam from point p looking along direction d
+	-- This is the distance a ray travels from p before it exits the back side of the beam
+	terra BeamT:apparentThickness(p: Vec2, d: Vec2)
+		-- Find the line distance to all four edges, report the maximum
+		var d01 = self:lineDistToEdge(p, d, 0, 1)
+		var d12 = self:lineDistToEdge(p, d, 1, 2)
+		var d23 = self:lineDistToEdge(p, d, 2, 3)
+		var d30 = self:lineDistToEdge(p, d, 3, 0)
+		return ad.math.fmax(d01, ad.math.fmax(d12, ad.math.fmax(d23, d30)))
 	end
 
 	-- OpenGL drawing code
@@ -674,34 +729,6 @@ local function Connections()
 			f
 		end
 	end)
-
-	----------------------------------
-
-	-- Returns t1, t2
-	local terra rayIntersect(p1: Vec2, d1: Vec2, p2: Vec2, d2: Vec2)
-		-- dx = bs.x - as.x
-		-- dy = bs.y - as.y
-		-- det = bd.x * ad.y - bd.y * ad.x
-		-- u = (dy * bd.x - dx * bd.y) / det
-		-- v = (dy * ad.x - dx * ad.y) / det
-		var dx = p2(0) - p1(0)
-		var dy = p2(1) - p1(1)
-		var det = d2(0)*d1(1) - d2(1)*d1(0)
-		var t1 = (dy*d2(0) - dx*d2(1)) / det
-		var t2 = (dy*d1(0) - dx*d1(1)) / det
-
-		return t1, t2
-	end
-
-	-- local terra testRayIntersect()
-	-- 	var p1 = Vec2.stackAlloc(0.0, 1.0)
-	-- 	var d1 = Vec2.stackAlloc(1.0, 0.0)
-	-- 	var p2 = Vec2.stackAlloc(1.0, 0.0)
-	-- 	var d2 = Vec2.stackAlloc(0.0, 1.0)
-	-- 	var t1, t2 = rayIntersect(p1, d1, p2, d2)
-	-- 	util.assert(t1 == 1.0 and t2 == 1.0, "t1: %g, t2: %g\n", ad.val(t1), ad.val(t2))
-	-- end
-	-- testRayIntersect()
 
 	----------------------------------
 
@@ -995,18 +1022,9 @@ local function Connections()
 	end
 
 	local terra determinePenetrationDepth(beam2: &BeamT, cp: Vec2, normal: Vec2, nailLength: real)
-		-- Determine the penetration depth by 'raycasting' along the contact normal direction
-		var corner1, corner2 = beam2:closestEdge(cp)
-		var oppEdge_i1, oppEdge_i2 = beam2:opposingEdge(corner1, corner2)
-		var norm_start = cp
-		var norm_dir = -normal
-		norm_start = norm_start - 1e-15*norm_dir
-		var b2edge_start = beam2:corner(oppEdge_i1)
-		var b2edge_dir = beam2:corner(oppEdge_i2) - b2edge_start
-		var t1, t2 = rayIntersect(norm_start, norm_dir, b2edge_start, b2edge_dir)
-		-- If beam2 is not perpendicular to beam1, then some of this thickness will include open air.
-		-- var thickness = ad.math.fmax(t11, t12)
-		var thickness = t1
+		-- Find the apparent thickness from cp looking along the normal
+		var thickness = beam2:apparentThickness(cp, -normal)
+		-- C.printf("thickness: %g\n", ad.val(thickness))
 		var penetrationDepth = nailLength - thickness
 		-- Thickness should be about half the penetration depth
 		util.assert(thickness < 0.7*penetrationDepth,
