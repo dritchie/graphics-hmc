@@ -1219,7 +1219,7 @@ end
 
 ----------------------------------
 
-local numsamps = 10
+local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
