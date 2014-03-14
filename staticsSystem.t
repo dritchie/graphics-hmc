@@ -19,6 +19,7 @@ local trace = terralib.require("prob.trace")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
+#include <string.h>
 ]]
 
 local Vec2d = Vec(double, 2)
@@ -974,25 +975,86 @@ local staticsModel = probcomp(function()
 
 		enforceStability(&scene, &connections)
 
-		-- C.printf("----------------------\n")
-		-- C.printf("=== Platform forces ====\n")
-		-- for i=0,platform.forces.size do
-		-- 	C.printf("(%g, %g)\n", ad.val(platform.forces(i).vec(0)), ad.val(platform.forces(i).vec(1)))
-		-- end
-		-- C.printf("=== Support 1 forces ====\n")
-		-- for i=0,support1.forces.size do
-		-- 	C.printf("(%g, %g)\n", ad.val(support1.forces(i).vec(0)), ad.val(support1.forces(i).vec(1)))
-		-- end
-		-- C.printf("=== Support 2 forces ====\n")
-		-- for i=0,support2.forces.size do
-		-- 	C.printf("(%g, %g)\n", ad.val(support2.forces(i).vec(0)), ad.val(support2.forces(i).vec(1)))
-		-- end
-		-- C.printf("----------------------\n")
+		connections:clearAndDelete()
+		m.destruct(connections)
+		return scene
+	end)
+
+	local aFrameTest = pfn(terra()
+		var groundHeight = mm(5.0)
+		var sceneWidth = mm(250.0)
+		var sceneHeight = mm(250.0)
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		-- Approx. measurements for a gauge 14-1/2 box nail
+		var nailDiameter = mm(2.0)
+		var nailLength = mm(32.0)
+
+		-- We'll use beams with square cross sections; that is, width == depth
+		var beamThickness = mm(10.0)
+		var halfThickness = 0.5*beamThickness
+
+		-- Objects
+
+		var sceneCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.5*sceneHeight)
+		var left = Vec2.stackAlloc(-1.0, 0.0)
+
+		var support1BaseX = 0.15*sceneWidth
+		var support2BaseX = 0.85*sceneWidth
+		var support1Ang = [0.45*math.pi]
+		var support2Ang = [0.55*math.pi]
+		var supportLength = 0.5*sceneHeight
+		var support1 = BeamT.heapAlloc(supportLength, beamThickness, support1Ang, Vec2.stackAlloc(support1BaseX, groundHeight), beamThickness)
+		var support2 = BeamT.heapAlloc(supportLength, beamThickness, support2Ang, Vec2.stackAlloc(support2BaseX, groundHeight), beamThickness)
+		scene.objects:push(support1)
+		scene.objects:push(support2)
+
+		-- var platformT = 0.7
+		var platformT = boundedUniform(0.1, 0.9)
+		var lefti1, lefti2 = support1:closerEdge(sceneCenter, left, 1, 2, 3, 0)
+		if lefti1 > lefti2 then
+			var tmp = lefti1
+			lefti1 = lefti2
+			lefti2 = tmp
+		end
+		var leftTopCorner = lerp(support1:corner(lefti1), support1:corner(lefti2), platformT)
+		var righti1, righti2 = support2:closerEdge(sceneCenter, -left, 1, 2, 3, 0)
+		if righti1 > righti2 then
+			var tmp = righti1
+			righti1 = righti2
+			righti2 = tmp
+		end
+		var rightTopCorner = lerp(support2:corner(righti1), support2:corner(righti2), platformT)
+		var platform = BeamT.heapAlloc(leftTopCorner - Vec2.stackAlloc(0.0, halfThickness), rightTopCorner - Vec2.stackAlloc(0.0, halfThickness), beamThickness, beamThickness)
+		scene.objects:push(platform)
+		-- platform:disable()
+
+		-- Connections
+		-- var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
+		-- var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
+		var gs1 = Connections.FrictionalContact.heapAlloc(support1, ground, 0, 1)
+		var gs2 = Connections.FrictionalContact.heapAlloc(support2, ground, 0, 1)
+		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength)
+		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength)
+		connections:push(ps1)
+		connections:push(ps2)
+		-- connections:push(gs1a); connections:push(gs1b)
+		-- connections:push(gs2a); connections:push(gs2b)
+		connections:push(gs1)
+		connections:push(gs2)
+
+		-- Extra load
+		applyExternalLoad(platform, 37.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+
+		enforceStability(&scene, &connections)
 
 		connections:clearAndDelete()
 		m.destruct(connections)
 		return scene
-	end) 
+	end)
 
 	----------------------------------
 
@@ -1007,13 +1069,43 @@ local staticsModel = probcomp(function()
 		-- return simpleHangingStructure()
 		-- return simpleContactTest()
 		-- return simpleNailTest()
-		return simpleNailTest2()
+		-- return simpleNailTest2()
+		return aFrameTest()
 	end
 end)
 
 ----------------------------------
 
 local rendering = terralib.require("rendering")
+local colors = terralib.require("colors")
+gl.exposeConstants({"GL_CURRENT_RASTER_POSITION", "GL_CURRENT_RASTER_POSITION_VALID", "GL_VIEWPORT",
+{"GLUT_BITMAP_HELVETICA_18", "void*"}})
+
+local terra displayString(font: &opaque, str: rawstring)
+	if str ~= nil and C.strlen(str) > 0 then
+		while @str ~= 0 do
+			gl.glutBitmapCharacter(font, @str)
+			str = str + 1
+		end
+	end
+end
+
+local lpfont = gl.mGLUT_BITMAP_HELVETICA_18()
+local lpcolor = colors.Black
+local terra displayLogprob(lp: double)
+	gl.glMatrixMode(gl.mGL_PROJECTION())
+	gl.glLoadIdentity()
+	var viewport : int[4]
+	gl.glGetIntegerv(gl.mGL_VIEWPORT(), viewport)
+	gl.gluOrtho2D(double(viewport[0]), double(viewport[2]), double(viewport[1]), double(viewport[3]))
+	gl.glMatrixMode(gl.mGL_MODELVIEW())
+	gl.glLoadIdentity()
+	var str : int8[64]
+	C.sprintf(str, "lp: %g", lp)
+	gl.glColor3f([lpcolor])
+	gl.glRasterPos2f(viewport[0] + 0.02*viewport[2], viewport[1] + 0.9*viewport[3])
+	displayString(lpfont, str)
+end
 
 local imageWidth = 500
 local function renderInitFn(samples, im)
@@ -1031,7 +1123,8 @@ local function renderInitFn(samples, im)
 	end
 end
 
-local forceScale = 0.2
+-- local forceScale = 0.2
+local forceScale = 0.02
 -- local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
@@ -1039,7 +1132,8 @@ local function renderDrawFn(sample, im)
 		var scene = &sample.value
 		gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 		gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
-		scene:draw(forceScale) 
+		scene:draw(forceScale)
+		displayLogprob(sample.logprob)
 		gl.glFlush()
 		gl.glReadPixels(0, 0, im.width, im.height,
 			gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
@@ -1125,7 +1219,7 @@ end
 
 ----------------------------------
 
-local numsamps = 1000
+local numsamps = 10
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,

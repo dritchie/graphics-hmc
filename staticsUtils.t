@@ -493,13 +493,24 @@ local Beam = templatize(function(real)
 		-- If the edge t value is not in [0,1], then return -1.0 (no intersection)
 		var ep1 = self:corner(ci1)
 		var ep2 = self:corner(ci2)
-		var ed = ep2 - ep1; ed:normalize()
+		var ed = ep2 - ep1
 		p = p - 1e-15*d  -- Don't want to miss intersections at 0
 		var t1, t2 = [rayIntersect(real)](p, d, ep1, ed)
 		if t2 >=0.0 and t2 <= 1.0 then
 			return ad.math.fabs(t1)
 		else
 			return real(-1.0)
+		end
+	end
+
+	-- Which of two edges is closer?
+	terra BeamT:closerEdge(p: Vec2, d: Vec2, e11: uint, e12: uint, e21: uint, e22: uint)
+		var dist1 = self:lineDistToEdge(p, d, e11, e12)
+		var dist2 = self:lineDistToEdge(p, d, e21, e22)
+		if dist1 < dist2 then
+			return e11,e12
+		else
+			return e21,e22
 		end
 	end
 
@@ -539,6 +550,8 @@ local Beam = templatize(function(real)
 		var d12 = self:lineDistToEdge(p, d, 1, 2)
 		var d23 = self:lineDistToEdge(p, d, 2, 3)
 		var d30 = self:lineDistToEdge(p, d, 3, 0)
+		-- C.printf("d01, d12, d23, d30: %g, %g, %g, %g\n",
+		-- 	ad.val(d01), ad.val(d12), ad.val(d23), ad.val(d30))
 		return ad.math.fmax(d01, ad.math.fmax(d12, ad.math.fmax(d23, d30)))
 	end
 
@@ -940,6 +953,23 @@ local function Connections()
 		self.frictionCoeff = defaultFrictionCoeff
 	end
 
+	-- Connect two Beams under frictional contact
+	-- Connect beam1 to beam2 along the edge between corners ci1 anc ci2 of beam1
+	-- Connection is at the center of the ci1,ci2 edge
+	terra FrictionalContact:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint) : {}
+		var cp1 = beam1:corner(ci1)
+		var cp2 = beam1:corner(ci2)
+		var edge = cp2 - cp1; edge:normalize()
+		var normal = perp(edge)
+		-- Ensure that the normal points in the right direction
+		-- (away from the center of mass of beam2)
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+			normal = -normal
+		end
+		var cp = 0.5*(cp1 + cp2)
+		self:__construct(beam1, beam2, cp, normal)
+	end
+
 	-- (Convenience method)
 	-- Connect two Beams under frictional contact
 	-- Connect beam1 to beam2 along the edge between corners ci1 anc ci2 of beam1
@@ -1012,7 +1042,8 @@ local function Connections()
 		self.contactPoint = cp
 		self.contactNormal = cn
 		self.contactTangent = perp(cn)
-		util.assert(penetrationDepth > 10.0*nailDiameter, "Nail penetration depth too small for given nail diameter\n")
+		util.assert(penetrationDepth > 10.0*nailDiameter,
+			"Nail penetration depth too small for given nail diameter\npenetrationDepth: %g, nailDiameter: %g\n", ad.val(penetrationDepth), ad.val(nailDiameter))
 		self.maxPullForce = 54.12 * ad.math.pow(o1.specificGravity, 5.0/2.0) * toMM(nailDiameter) * toMM(penetrationDepth)	-- maximum short-term load
 		self.maxPullForce = (1.0/6.0)*self.maxPullForce		-- maximum long-term load
 		self.maxPullForce = 1.1*self.maxPullForce	-- maximum normal load
@@ -1028,9 +1059,7 @@ local function Connections()
 		var penetrationDepth = nailLength - thickness
 		-- Thickness should be about half the penetration depth
 		util.assert(thickness < 0.7*penetrationDepth,
-			"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g\n", ad.val(thickness))
-		-- util.assert(thickness > 0.3*penetrationDepth,
-		-- 	"Nail is too long. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g\n", ad.val(thickness))
+			"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g, penetrationDepth: %g\n", ad.val(thickness), ad.val(penetrationDepth))
 		return penetrationDepth
 	end
 
@@ -1087,6 +1116,7 @@ local function Connections()
 			var nTension = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
 			normalForce = nCompress; normalForce:combineWith(&nTension)
 			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce, 0.01)
+			-- C.printf("tangentForceMag: %g, maxShearForce: %g\n", ad.val(tangentForce.vec):norm(), ad.val(self.maxShearForce))
 		end
 		if self.objs[0].active then
 			self.objs[0]:applyForce(normalForce)
