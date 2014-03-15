@@ -104,7 +104,7 @@ end)
 --    * A number indicating the number of degrees of freedom in the force
 --      (i.e. is it constrained to point in a particular direction, or is it free?)
 --    * (Optionally) a vector indicating the direction of the force, if it is 1 DOF
-local forceColor = colors.Tableau10.Red
+local forceColor = colors.Tableau10.Gray
 local forceLineWidth = 3.0
 local Force = templatize(function(real)
 
@@ -144,12 +144,10 @@ local Force = templatize(function(real)
 		else return false end
 	end
 
-	if real == double then
-		terra ForceT:draw(scale: double)
-			var endpoint = self.pos + scale*self.vec
-			drawLine(self.pos, endpoint, forceLineWidth, Color3d.stackAlloc([forceColor]))
-		end
-	end
+	terra ForceT:draw(scale: double)
+		var endpoint = self.pos + scale*self.vec
+		drawLine(ad.val(self.pos), ad.val(endpoint), forceLineWidth, Color3d.stackAlloc([forceColor]))
+	end	
 
 	return ForceT
 end)
@@ -291,12 +289,10 @@ local RigidObject = templatize(function(real)
 	inheritance.virtual(RigidObjectT, "mass")
 
 	-- OpenGL drawing
-	if real == double then
-		inheritance.purevirtual(RigidObjectT, "drawImpl", {}->{})
-		terra RigidObjectT:draw()
-			if self.visible then
-				self:drawImpl()
-			end
+	inheritance.purevirtual(RigidObjectT, "drawImpl", {}->{})
+	terra RigidObjectT:draw()
+		if self.visible then
+			self:drawImpl()
 		end
 	end
 
@@ -327,11 +323,9 @@ local Beam = templatize(function(real)
 		depth: real,	-- for volume (and mass) calculation
 		density: real,
 		specificGravity: real,
-		lateralLoadCoefficient: real
+		lateralLoadCoefficient: real,
+		color: Color3d
 	}
-	if real == double then
-		BeamT.entries:insert({field="color", type=Color3d})
-	end
 	inheritance.dynamicExtend(RigidObjectT, BeamT)
 
 	-- Construct from four points
@@ -346,9 +340,7 @@ local Beam = templatize(function(real)
 		self.density = beamDefaultDensity
 		self.specificGravity = beamDefaultSpecificGravity
 		self.lateralLoadCoefficient = beamDefaultLateralLoadCoefficient
-		[util.optionally(real == double, function() return quote
-			self.color = Color3d.stackAlloc([beamDefaultColor])
-		end end)]
+		self.color = Color3d.stackAlloc([beamDefaultColor])
 	end
 
 	-- Construct from two endpoints and a width (rectangular only)
@@ -384,9 +376,7 @@ local Beam = templatize(function(real)
 		self.density = other.density
 		self.specificGravity = other.specificGravity
 		self.lateralLoadCoefficient = other.lateralLoadCoefficient
-		[util.optionally(real==double, function() return quote
-			self.color = other.color
-		end end)]
+		self.color = other.color
 	end
 
 	terra BeamT:newcopy() : &RigidObjectT
@@ -556,12 +546,10 @@ local Beam = templatize(function(real)
 	end
 
 	-- OpenGL drawing code
-	if real == double then
-		terra BeamT:drawImpl() : {}
-			drawQuad(self.bot1, self.bot2, self.top2, self.top1, self.color)
-		end
-		inheritance.virtual(BeamT, "drawImpl")
+	terra BeamT:drawImpl() : {}
+		drawQuad(ad.val(self.bot1), ad.val(self.bot2), ad.val(self.top2), ad.val(self.top1), self.color)
 	end
+	inheritance.virtual(BeamT, "drawImpl")	
 
 	m.addConstructors(BeamT)
 	return BeamT
@@ -641,24 +629,22 @@ local RigidScene = templatize(function(real)
 	end
 
 	-- OpenGL drawing code
-	if real == double then
-		terra RigidSceneT:draw(forceScale: double)
-			gl.glMatrixMode(gl.mGL_PROJECTION())
-			gl.glLoadIdentity()
-			gl.gluOrtho2D(0, self.width, 0, self.height)
-			gl.glMatrixMode(gl.mGL_MODELVIEW())
-			gl.glLoadIdentity()
-			-- Pass 1: Draw objects
+	terra RigidSceneT:draw(forceScale: double)
+		gl.glMatrixMode(gl.mGL_PROJECTION())
+		gl.glLoadIdentity()
+		gl.gluOrtho2D(0, ad.val(self.width), 0, ad.val(self.height))
+		gl.glMatrixMode(gl.mGL_MODELVIEW())
+		gl.glLoadIdentity()
+		-- Pass 1: Draw objects
+		for i=0,self.objects.size do
+			self.objects(i):draw()
+		end
+		-- Pass 2: Draw forces
+		if forceScale > 0.0 then
 			for i=0,self.objects.size do
-				self.objects(i):draw()
-			end
-			-- Pass 2: Draw forces
-			if forceScale > 0.0 then
-				for i=0,self.objects.size do
-					-- Also draw forces
-					for j=0,self.objects(i).forces.size do
-						self.objects(i).forces(j):draw(forceScale)
-					end
+				-- Also draw forces
+				for j=0,self.objects(i).forces.size do
+					self.objects(i).forces(j):draw(forceScale)
 				end
 			end
 		end

@@ -3,11 +3,13 @@ terralib.require("prob")
 local util = terralib.require("util")
 local m = terralib.require("mem")
 local templatize = terralib.require("templatize")
+local inheritance = terralib.require("inheritance")
 local ad = terralib.require("ad")
 local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
 local rand = terralib.require("prob.random")
 local gl = terralib.require("gl")
+local colors = terralib.require("colors")
 
 local GradientAscent = terralib.require("gradientAscent")
 
@@ -84,6 +86,27 @@ local staticsModel = probcomp(function()
 		obj:applyForce(ForceT{gravityConstant * mass * down, point, 0, down})
 	end
 
+	-- Check if a beam's residuals are all less than 3 sigma from 0. If not,
+	--    color the beam red to mark it as unstable.
+	local unstableColor = colors.Tableau10.Red
+	local terra checkStability(obj: &RigidObjectT, fres: Vec2, tres: &Vector(real), fsigma: real, tsigma: real)
+		var threeSigmaF = 3.0*fsigma
+		var threeSigmaT = 3.0*tsigma
+		var beam = [&BeamT](obj)
+		var allStable = ad.math.fabs(fres(0)) < threeSigmaF and ad.math.fabs(fres(1)) < threeSigmaF
+		if allStable then
+			for i=0,tres.size do
+				if not (ad.math.fabs(tres(i)) < threeSigmaT) then
+					allStable = false
+					break
+				end
+			end
+		end
+		if not allStable then
+			beam.color = Color3d.stackAlloc([unstableColor])
+		end
+	end
+
 	-- Enforce static equilibrium of a scene given some connections
 	local printResiduals = false
 	local forceResidualRelativeErrorSD = `0.01  -- Allow deviation of 1% the average force magnitude
@@ -132,8 +155,9 @@ local staticsModel = probcomp(function()
 			if scene.objects(i).active then
 				tres:clear()
 				scene.objects(i):calculateResiduals(&fres, &tres)
+				checkStability(scene.objects(i), fres, &tres, fresSoftness, tresSoftness)
 				[util.optionally(printResiduals, function() return quote
-					C.printf("fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
+					C.printf("relative fres: (%g, %g)\n", ad.val(fres(0)/avgForceMag), ad.val(fres(1)/avgForceMag))
 				end end)]
 				-- -- TEST: normalize by mass
 				-- var m = scene.objects(i):mass()
@@ -144,7 +168,7 @@ local staticsModel = probcomp(function()
 				for j=0,tres.size do
 					var trj = tres(j)
 					[util.optionally(printResiduals, function() return quote
-						C.printf("tres: %g\n", ad.val(trj))
+						C.printf("relative tres: %g\n", ad.val(trj/avgForceMag))
 					end end)]
 					-- -- TEST: normalize by mass
 					-- trj = trj / m
@@ -1047,7 +1071,7 @@ local staticsModel = probcomp(function()
 		connections:push(gs2)
 
 		-- Extra load
-		applyExternalLoad(platform, 37.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+		applyExternalLoad(platform, 40.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
 
 		enforceStability(&scene, &connections)
 
