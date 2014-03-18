@@ -1,3 +1,4 @@
+terralib.require("prob")
 
 local util = terralib.require("util")
 local m = terralib.require("mem")
@@ -202,6 +203,7 @@ local RigidObject = templatize(function(real)
 
 	-- Create a heap-allocated dynamic copy
 	inheritance.purevirtual(RigidObjectT, "newcopy", {}->{&RigidObjectT})
+
 	-- This method checks to see if f is collocated with any other force, and if so,
 	--    it combines them.
 	-- This enforces the invariant that all forces are applied at unique locations.
@@ -211,6 +213,11 @@ local RigidObject = templatize(function(real)
 			if self.forces(i):tryCombiningWith(&f) then return end
 		end
 		self.forces:push(f)
+	end
+
+	terra RigidObjectT:applyExternalLoad(gravConst: real, mass: real, point: Vec2)
+		var down = Vec2.stackAlloc(0.0, -1.0)
+		self:applyForce(ForceT{gravConst * mass * down, point, 0, down})
 	end
 
 	-- Retrieve some number of points on the object that are valid centers of
