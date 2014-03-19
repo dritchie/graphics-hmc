@@ -493,6 +493,8 @@ local Beam = templatize(function(real)
 		var ed = ep2 - ep1
 		p = p - 1e-15*d  -- Don't want to miss intersections at 0
 		var t1, t2 = [rayIntersect(real)](p, d, ep1, ed)
+		-- C.printf("p: (%g, %g), d: (%g, %g), t1: %g, t2: %g\n",
+		-- 	ad.val(p(0)), ad.val(p(1)), ad.val(d(0)), ad.val(d(1)), ad.val(t1), ad.val(t2))
 		if t2 >=0.0 and t2 <= 1.0 then
 			return ad.math.fabs(t1)
 		else
@@ -502,13 +504,34 @@ local Beam = templatize(function(real)
 
 	-- Which of two edges is closer?
 	terra BeamT:closerEdge(p: Vec2, d: Vec2, e11: uint, e12: uint, e21: uint, e22: uint)
+		-- C.printf("-- BEGIN closerEdge\n")
 		var dist1 = self:lineDistToEdge(p, d, e11, e12)
+		-- util.assert(dist1 == self:lineDistToEdge(p, d, e12, e11))
 		var dist2 = self:lineDistToEdge(p, d, e21, e22)
+		-- util.assert(dist2 == self:lineDistToEdge(p, d, e22, e21))
+		-- C.printf("dist1: %g, dist2: %g\n", ad.val(dist1), ad.val(dist2))
+		-- C.printf("-- END closerEdge\n")
+		var c1: uint
+		var c2: uint
 		if dist1 < dist2 then
-			return e11,e12
+			c1 = e11
+			c2 = e12
 		else
-			return e21,e22
+			c1 = e21
+			c2 = e22
 		end
+		-- Sort lowest-to-highest, for consistency
+		if c1 > c2 then
+			var tmp = c1
+			c1 = c2
+			c2 = tmp
+		end
+		return c1, c2
+	end
+
+	-- This notion of width is only meaningful for rectangular beams; use wisely
+	terra BeamT:width()
+		return (self.top2 - self.top1):norm()
 	end
 
 	-- Find the thickness of the beam from point p looking along direction d
@@ -1035,8 +1058,12 @@ local function Connections()
 		self.contactPoint = cp
 		self.contactNormal = cn
 		self.contactTangent = perp(cn)
-		util.assert(penetrationDepth > 10.0*nailDiameter,
-			"Nail penetration depth too small for given nail diameter\npenetrationDepth: %g, nailDiameter: %g\n", ad.val(penetrationDepth), ad.val(nailDiameter))
+
+		var constrainedPenetrationDepth = gaussian(penetrationDepth, 10000.0, {structural=false, initialVal=penetrationDepth, lowerBound=10.0*nailDiameter})
+		manifold(constrainedPenetrationDepth - penetrationDepth, 0.5*nailDiameter)
+		-- util.assert(penetrationDepth > 10.0*nailDiameter,
+		-- 	"Nail penetration depth too small for given nail diameter\npenetrationDepth: %g, nailDiameter: %g\n", ad.val(penetrationDepth), ad.val(nailDiameter))
+		
 		self.maxPullForce = 54.12 * ad.math.pow(o1.specificGravity, 5.0/2.0) * toMM(nailDiameter) * toMM(penetrationDepth)	-- maximum short-term load
 		self.maxPullForce = (1.0/6.0)*self.maxPullForce		-- maximum long-term load
 		self.maxPullForce = 1.1*self.maxPullForce	-- maximum normal load
@@ -1050,9 +1077,12 @@ local function Connections()
 		var thickness = beam2:apparentThickness(cp, -normal)
 		-- C.printf("thickness: %g\n", ad.val(thickness))
 		var penetrationDepth = nailLength - thickness
+
 		-- Thickness should be about half the penetration depth
-		util.assert(thickness < 0.7*penetrationDepth,
-			"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g, penetrationDepth: %g\n", ad.val(thickness), ad.val(penetrationDepth))
+		manifold(thickness/penetrationDepth - 0.5, 0.1)
+		-- util.assert(thickness < 0.7*penetrationDepth,
+		-- 	"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g, penetrationDepth: %g\n", ad.val(thickness), ad.val(penetrationDepth))
+		
 		return penetrationDepth
 	end
 

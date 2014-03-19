@@ -6,6 +6,9 @@ local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
 local staticsUtils = terralib.require("staticsUtils")
 
+local C = terralib.includecstring [[
+#include <stdio.h>
+]]
 
 local function genExamples(gravityConstant, Connections)
 
@@ -835,38 +838,40 @@ local function genExamples(gravityConstant, Connections)
 
 		-- Objects
 
-		var sceneCenter = Vec2.stackAlloc(0.5*sceneWidth, 0.5*sceneHeight)
 		var left = Vec2.stackAlloc(-1.0, 0.0)
 
 		var support1BaseX = 0.15*sceneWidth
 		var support2BaseX = 0.85*sceneWidth
+		-- var support1Ang = [0.5*math.pi]
+		-- var support2Ang = [0.5*math.pi]
 		-- var support1Ang = [0.45*math.pi]
 		-- var support2Ang = [0.55*math.pi]
-		var support1Ang = boundedUniform([0.45*math.pi], [0.55*math.pi])
-		var support2Ang = boundedUniform([0.45*math.pi], [0.55*math.pi])
+		-- var support1Ang = [0.35*math.pi]
+		-- var support2Ang = [0.65*math.pi]
+		-- var support1Ang = boundedUniform([0.45*math.pi], [0.55*math.pi])
+		-- var support2Ang = boundedUniform([0.45*math.pi], [0.55*math.pi])
+		var support1Ang = boundedUniform([0.35*math.pi], [0.65*math.pi])
+		var support2Ang = boundedUniform([0.35*math.pi], [0.65*math.pi])
 		var supportLength = 0.5*sceneHeight
 		var support1 = BeamT.heapAlloc(supportLength, beamThickness, support1Ang, Vec2.stackAlloc(support1BaseX, groundHeight), beamThickness)
 		var support2 = BeamT.heapAlloc(supportLength, beamThickness, support2Ang, Vec2.stackAlloc(support2BaseX, groundHeight), beamThickness)
 		scene.objects:push(support1)
 		scene.objects:push(support2)
 
-		-- var platformT = 0.7
-		var platformT = boundedUniform(0.1, 0.9)
-		var lefti1, lefti2 = support1:closerEdge(sceneCenter, left, 1, 2, 3, 0)
-		if lefti1 > lefti2 then
-			var tmp = lefti1
-			lefti1 = lefti2
-			lefti2 = tmp
-		end
-		var leftTopCorner = lerp(support1:corner(lefti1), support1:corner(lefti2), platformT)
-		var righti1, righti2 = support2:closerEdge(sceneCenter, -left, 1, 2, 3, 0)
-		if righti1 > righti2 then
-			var tmp = righti1
-			righti1 = righti2
-			righti2 = tmp
-		end
-		var rightTopCorner = lerp(support2:corner(righti1), support2:corner(righti2), platformT)
-		var platform = BeamT.heapAlloc(leftTopCorner - Vec2.stackAlloc(0.0, halfThickness), rightTopCorner - Vec2.stackAlloc(0.0, halfThickness), beamThickness, beamThickness)
+		-- C.printf("-----------------\n")
+
+		var platformT = 0.6
+		-- var platformT = boundedUniform(0.1, 0.9)
+
+		var lefti1, lefti2 = support1:closerEdge(support2:centerOfMass(), left, 1, 2, 3, 0)
+		var leftEdgePoint = lerp(support1:corner(lefti1), support1:corner(lefti2), platformT)
+		var relAngLeft = ad.math.fabs([math.pi/2] - support1Ang)
+		var horizOffsetLeft = halfThickness*ad.math.tan(relAngLeft)
+		var righti1, righti2 = support2:closerEdge(support1:centerOfMass(), -left, 1, 2, 3, 0)
+		var rightEdgePoint = lerp(support2:corner(righti1), support2:corner(righti2), platformT)
+		var relAngRight = ad.math.fabs(support2Ang - [math.pi/2])
+		var horizOffsetRight = halfThickness*ad.math.tan(relAngRight)
+		var platform = BeamT.heapAlloc(leftEdgePoint + Vec2.stackAlloc(horizOffsetLeft, 0.0), rightEdgePoint - Vec2.stackAlloc(horizOffsetRight, 0.0), beamThickness, beamThickness)
 		scene.objects:push(platform)
 		-- platform:disable()
 
@@ -885,7 +890,7 @@ local function genExamples(gravityConstant, Connections)
 		connections:push(gs2)
 
 		-- Extra load
-		platform:applyExternalLoad(gravityConstant, 40.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+		platform:applyExternalLoad(gravityConstant, 55.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
 
 		return scene, connections
 	end)

@@ -82,6 +82,9 @@ local staticsModel = probcomp(function()
 
 		var fresSoftness = forceResidualRelativeErrorSD * avgForceMag
 		var tresSoftness = torqueResidualRelativeErrorSD * avgForceMag
+		-- var fresSoftness = 0.98
+		-- var tresSoftness = 0.98
+		-- C.printf("%g                         \n", ad.val(fresSoftness))
 
 		-- Apply internal forces
 		for i=0,connections.size do
