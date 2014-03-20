@@ -68,8 +68,7 @@ local staticsModel = probcomp(function()
 		end
 
 		-- Calculate the average (external) force magnitude
-		-- (We'll use this to figure out the 'relative' error represented by
-		--  force and torque residuals)
+		-- var avgForceMag = 1748.96
 		var avgForceMag = real(0.0)
 		var numForces = 0
 		for i=0,scene.objects.size do
@@ -79,12 +78,10 @@ local staticsModel = probcomp(function()
 			end
 		end
 		avgForceMag = avgForceMag / numForces
+		var invAvgForceMag = 1.0/avgForceMag
 
-		var fresSoftness = forceResidualRelativeErrorSD * avgForceMag
-		var tresSoftness = torqueResidualRelativeErrorSD * avgForceMag
-		-- var fresSoftness = 0.98
-		-- var tresSoftness = 0.98
-		-- C.printf("%g                         \n", ad.val(fresSoftness))
+		var fresSoftness = forceResidualRelativeErrorSD
+		var tresSoftness = torqueResidualRelativeErrorSD
 
 		-- Apply internal forces
 		for i=0,connections.size do
@@ -104,9 +101,12 @@ local staticsModel = probcomp(function()
 			if scene.objects(i).active then
 				tres:clear()
 				scene.objects(i):calculateResiduals(&fres, &tres)
+				-- Normalize residuals by avgForceMag
+				fres = invAvgForceMag * fres
+				for j=0,tres.size do tres(j) = invAvgForceMag * tres(j) end
 				checkStability(scene.objects(i), fres, &tres, fresSoftness, tresSoftness)
 				[util.optionally(printResiduals, function() return quote
-					C.printf("relative fres: (%g, %g)\n", ad.val(fres(0)/avgForceMag), ad.val(fres(1)/avgForceMag))
+					C.printf("relative fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
 				end end)]
 				-- -- TEST: normalize by mass
 				-- var m = scene.objects(i):mass()
@@ -117,7 +117,7 @@ local staticsModel = probcomp(function()
 				for j=0,tres.size do
 					var trj = tres(j)
 					[util.optionally(printResiduals, function() return quote
-						C.printf("relative tres: %g\n", ad.val(trj/avgForceMag))
+						C.printf("relative tres: %g\n", ad.val(trj))
 					end end)]
 					-- -- TEST: normalize by mass
 					-- trj = trj / m
@@ -138,7 +138,8 @@ local staticsModel = probcomp(function()
 	local examples = staticsExamples(gravityConstant, Connections)
 
 	-- local example = examples.simpleNailTest
-	local example = examples.aFrameTest
+	-- local example = examples.aFrameTest
+	local example = examples.arch
 
 	return terra()
 		var scene, connections = example()
@@ -198,8 +199,8 @@ local function renderInitFn(samples, im)
 end
 
 -- local forceScale = 0.2
-local forceScale = 0.02
--- local forceScale = 0.0
+-- local forceScale = 0.02
+local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
 	return quote

@@ -895,6 +895,80 @@ local function genExamples(gravityConstant, Connections)
 		return scene, connections
 	end)
 
+	-- Returns the point and tangent at the interpolant value t
+	local terra bezier(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: real)
+		var t2 = t*t
+		var t3 = t*t2
+		var oneMinusT = 1.0 - t
+		var oneMinusT2 = oneMinusT*oneMinusT
+		var oneMinusT3 = oneMinusT*oneMinusT2
+		var point = oneMinusT3*p0 + 3.0*oneMinusT2*t*p1 + 3.0*oneMinusT*t2*p2 + t3*p3
+		var tangent = 3.0*oneMinusT2*(p1 - p0) + 6.0*oneMinusT*t*(p2 - p1) + 3.0*t2*(p3 - p2)
+		return point, tangent
+	end
+	Examples.arch = pfn(terra()
+		var groundHeight = 0.5
+		var sceneWidth = 10.0
+		var sceneHeight = 10.0
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		var sceneXmid = 0.5*sceneWidth
+
+		var numBlocks = 9
+		var blockDensity = 2700.0  -- approx. density of granite
+		-- var blockDensity = 4000.0
+		-- var blockWidth = 0.5
+		-- var peakHeight = 8.0
+		-- var baseWidth = 8.0
+		-- var peakHeight = 3.0
+		-- var baseWidth = 3.0
+		var blockWidth = boundedUniform(0.2, 1.5)
+		var peakHeight = boundedUniform(2.0, 10.0)
+		var baseWidth = boundedUniform(2.0, 8.0)
+
+		-- Generate blocks
+		var baseHalfWidth = 0.5*baseWidth
+		var baseXmin = -baseHalfWidth
+		var baseXmax = baseHalfWidth
+		var blockHalfWidth = 0.5*blockWidth
+		var p0 = Vec2.stackAlloc(baseXmin, groundHeight)
+		var p1 = Vec2.stackAlloc(baseXmin, peakHeight)
+		var p2 = Vec2.stackAlloc(baseXmax, peakHeight)
+		var p3 = Vec2.stackAlloc(baseXmax, groundHeight)
+		var blocks = [Vector(&BeamT)].stackAlloc()
+		for i=0,numBlocks do
+			var tlo = double(i)/numBlocks
+			var thi = double(i+1)/numBlocks
+			var plo, dlo = bezier(p0, p1, p2, p3, tlo)
+			var phi, dhi = bezier(p0, p1, p2, p3, thi)
+			plo(0) = plo(0) + sceneXmid
+			phi(0) = phi(0) + sceneXmid
+			var nlo = staticsUtils.perp(dlo); nlo:normalize(); nlo = blockHalfWidth*nlo
+			var nhi = staticsUtils.perp(dhi); nhi:normalize(); nhi = blockHalfWidth*nhi
+			var block = BeamT.heapAlloc(plo + nlo, plo - nlo, phi + nhi, phi - nhi, blockWidth)
+			scene.objects:push(block)
+			blocks:push(block)
+		end
+
+		-- Ground contacts
+		var gc0, gc1 = Connections.FrictionalContact.makeBeamContacts(blocks(0), ground, 0, 1)
+		var gc2, gc3 = Connections.FrictionalContact.makeBeamContacts(blocks:back(), ground, 2, 3)
+		connections:push(gc0); connections:push(gc1); connections:push(gc2); connections:push(gc3)
+
+		-- Inter-block contacts
+		for i=0,blocks.size-1 do
+			var bc0, bc1 = Connections.FrictionalContact.makeBeamContacts(blocks(i), blocks(i+1), 2, 3)
+			connections:push(bc0); connections:push(bc1)
+		end
+
+		m.destruct(blocks)
+
+		return scene, connections
+	end)
+
 	return Examples
 end
 
