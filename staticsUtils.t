@@ -235,7 +235,9 @@ local RigidObject = templatize(function(real)
 	inheritance.virtual(RigidObjectT, "getCentersOfRotation")
 
 	-- Calculate force and torque residuals
+	-- Returns the average force and torque magnitude
 	terra RigidObjectT:calculateResiduals(fresOut: &Vec2, tresOut: &Vector(real))
+		tresOut:clear()
 		-- Inactive objects have zero residual
 		if not self.active then
 			return real(0.0), real(0.0)
@@ -270,23 +272,28 @@ local RigidObject = templatize(function(real)
 			end
 			-- Compute force residual
 			var totalf = Vec2.stackAlloc(0.0)
+			var avgFmag = real(0.0)
 			for i=0,self.forces.size do
 				totalf = totalf + self.forces(i).vec
+				avgFmag = avgFmag + self.forces(i).vec:norm()
 			end
+			avgFmag = avgFmag / self.forces.size
 			@fresOut = totalf
-			-- Compute torque residual
-			var normconst = 1.0/cor.size
-			var tsumsq = real(0.0)
-			-- C.printf("--------------\n")
+			-- Compute torque residuals
+			-- var normconst = 1.0/cor.size
+			var avgTmag = real(0.0)
 			for i=0,cor.size do
 				var indvidualResidual = real(0.0)
 				for j=0,self.forces.size do
 					var t = self.forces(j):torque(cor(i))
-					-- C.printf("%g\n", ad.val(t))
+					avgTmag = avgTmag + ad.math.fabs(t)
 					indvidualResidual = indvidualResidual + t
 				end
-				tresOut:push(normconst*indvidualResidual)
+				-- tresOut:push(normconst*indvidualResidual)
+				tresOut:push(indvidualResidual)
 			end
+			avgTmag = avgTmag / (cor.size*self.forces.size)
+			return avgFmag, avgTmag
 		end
 	end
 
@@ -692,7 +699,8 @@ end)
 local function Connections()
 	local forcePriorMean = 0.0
 	local forcePriorVariance = 100000000000.0
-	-- local forcePriorVariance = 100.0
+	-- local forcePriorVariance = 10000000000000000.0
+	-- local forcePriorVariance = 1000000.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
@@ -721,7 +729,8 @@ local function Connections()
 	local genBounded1DForce = macro(function(pos, dir, boundMag, optBoundShape)
 		optBoundShape = optBoundShape or `1.0
 		return quote
-			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
+			-- var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
+			var mag = uniform(-boundMag, boundMag, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -739,7 +748,8 @@ local function Connections()
 	-- Generate a bounded, nonnegative 1-DOF force along a particular direction
 	local genBoundedNonNegative1DForce = macro(function(pos, dir, boundMag)
 		return quote
-			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
+			-- var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
+			var mag = uniform(0.0, boundMag, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -1021,6 +1031,11 @@ local function Connections()
 		if self.objs[1].active then
 			normalForce.vec = -normalForce.vec
 			tangentForce.vec = -tangentForce.vec
+			-- Don't double-count the DOFs for these forces
+			if self.objs[0].active then
+				normalForce.dof = 0
+				tangentForce.dof = 0
+			end
 			self.objs[1]:applyForce(normalForce)
 			self.objs[1]:applyForce(tangentForce)
 		end
@@ -1148,6 +1163,11 @@ local function Connections()
 		if self.objs[1].active then
 			normalForce.vec = -normalForce.vec
 			tangentForce.vec = -tangentForce.vec
+			-- Don't double-count the DOFs for these forces
+			if self.objs[0].active then
+				normalForce.dof = 0
+				tangentForce.dof = 0
+			end
 			self.objs[1]:applyForce(normalForce)
 			self.objs[1]:applyForce(tangentForce)
 		end

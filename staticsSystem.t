@@ -35,19 +35,11 @@ local staticsModel = probcomp(function()
 	-- Check if a beam's residuals are all less than 3 sigma from 0. If not,
 	--    color the beam red to mark it as unstable.
 	local unstableColor = colors.Tableau10.Red
-	local terra checkStability(obj: &RigidObjectT, fres: Vec2, tres: &Vector(real), fsigma: real, tsigma: real)
+	local terra checkStability(obj: &RigidObjectT, fres: real, tres: real, fsigma: real, tsigma: real)
 		var threeSigmaF = 3.0*fsigma
 		var threeSigmaT = 3.0*tsigma
 		var beam = [&BeamT](obj)
-		var allStable = ad.math.fabs(fres(0)) < threeSigmaF and ad.math.fabs(fres(1)) < threeSigmaF
-		if allStable then
-			for i=0,tres.size do
-				if not (ad.math.fabs(tres(i)) < threeSigmaT) then
-					allStable = false
-					break
-				end
-			end
-		end
+		var allStable = fres < threeSigmaF and tres < threeSigmaT
 		if not allStable then
 			beam.color = Color3d.stackAlloc([unstableColor])
 		end
@@ -55,8 +47,8 @@ local staticsModel = probcomp(function()
 
 	-- Enforce static equilibrium of a scene given some connections
 	local printResiduals = false
-	local forceResidualRelativeErrorSD = `0.01  -- Allow deviation of 1% the average force magnitude
-	local torqueResidualRelativeErrorSD = `0.01
+	local fresSoftness = `0.01  -- Allow deviation of 1% the average force magnitude
+	local tresSoftness = `0.01
 	local terra enforceStability(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection)) : {}
 
 		-- Apply gravity to everything affected by it
@@ -66,22 +58,6 @@ local staticsModel = probcomp(function()
 				obj:applyExternalLoad(gravityConstant, obj:mass(), obj:centerOfMass())
 			end
 		end
-
-		-- Calculate the average (external) force magnitude
-		-- var avgForceMag = 1748.96
-		var avgForceMag = real(0.0)
-		var numForces = 0
-		for i=0,scene.objects.size do
-			for j=0,scene.objects(i).forces.size do
-				avgForceMag = avgForceMag + scene.objects(i).forces(j).vec:norm()
-				numForces = numForces + 1
-			end
-		end
-		avgForceMag = avgForceMag / numForces
-		var invAvgForceMag = 1.0/avgForceMag
-
-		var fresSoftness = forceResidualRelativeErrorSD
-		var tresSoftness = torqueResidualRelativeErrorSD
 
 		-- Apply internal forces
 		for i=0,connections.size do
@@ -94,41 +70,52 @@ local staticsModel = probcomp(function()
 		var tres = [Vector(real)].stackAlloc()
 		[util.optionally(printResiduals, function() return quote
 			C.printf("=============================\n")
-			C.printf("avgForceMag: %g\n", ad.val(avgForceMag))
-			C.printf("=============================\n")
 		end end)]
+		-- var factorsum = real(0.0)
 		for i=0,scene.objects.size do
 			if scene.objects(i).active then
 				tres:clear()
-				scene.objects(i):calculateResiduals(&fres, &tres)
-				-- Normalize residuals by avgForceMag
-				fres = invAvgForceMag * fres
-				for j=0,tres.size do tres(j) = invAvgForceMag * tres(j) end
-				checkStability(scene.objects(i), fres, &tres, fresSoftness, tresSoftness)
+				var avgFmag, avgTmag = scene.objects(i):calculateResiduals(&fres, &tres)
 				[util.optionally(printResiduals, function() return quote
-					C.printf("relative fres: (%g, %g)\n", ad.val(fres(0)), ad.val(fres(1)))
+					C.printf("** avgFmag: %g, avgTmag: %g\n", ad.val(avgFmag), ad.val(avgTmag))
 				end end)]
-				-- -- TEST: normalize by mass
-				-- var m = scene.objects(i):mass()
-				-- fres = fres / m
-				-- -- end TEST
-				manifold(fres(0), fresSoftness)
-				manifold(fres(1), fresSoftness)
+				-- Compute residuals from data given to us
+				var fres_ = fres:norm()
+				var tres_ = real(0.0)
 				for j=0,tres.size do
 					var trj = tres(j)
-					[util.optionally(printResiduals, function() return quote
-						C.printf("relative tres: %g\n", ad.val(trj))
-					end end)]
-					-- -- TEST: normalize by mass
-					-- trj = trj / m
-					-- -- end TEST
-					manifold(trj, tresSoftness)
+					tres_ = tres_ + trj*trj
 				end
+				tres_ = ad.math.sqrt(tres_ / tres.size)
+				-- Normalize residuals
+				if avgFmag > 0.0 then
+					fres_ = fres_ / avgFmag
+				end
+				[util.optionally(printResiduals, function() return quote
+					C.printf("relative fres: %g\n", ad.val(fres_))
+				end end)]
+				if avgTmag > 0.0 then
+					tres_ = tres_ / avgTmag
+				end
+				[util.optionally(printResiduals, function() return quote
+					C.printf("relative tres: %g\n", ad.val(tres_))
+				end end)]
+				-- Visualize stable/unstable elements
+				checkStability(scene.objects(i), fres_, tres_, fresSoftness, tresSoftness)
+				-- Add stability factors
+				-- manifold(fres_, fresSoftness)
+				-- manifold(tres_, tresSoftness)
+				var ffactor = softeq(fres_, 0.0, fresSoftness)
+				var tfactor = softeq(tres_, 0.0, tresSoftness)
+				-- factorsum = factorsum + ffactor + tfactor
+				factor(ffactor)
+				factor(tfactor)
 				[util.optionally(printResiduals, function() return quote
 					C.printf("------------------------\n")
 				end end)]
 			end
 		end
+		-- C.printf("factorsum: %g                   \n", ad.val(factorsum))
 		m.destruct(tres)
 	end
 	enforceStability = pfn(enforceStability)
