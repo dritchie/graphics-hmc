@@ -701,6 +701,7 @@ local function Connections()
 	local forcePriorVariance = 100000000000.0
 	-- local forcePriorVariance = 10000000000000000.0
 	-- local forcePriorVariance = 1000000.0
+	-- local forcePriorVariance = 10000.0
 
 	local Vec2 = Vec(real, 2)
 	local ForceT = Force(real)
@@ -729,8 +730,8 @@ local function Connections()
 	local genBounded1DForce = macro(function(pos, dir, boundMag, optBoundShape)
 		optBoundShape = optBoundShape or `1.0
 		return quote
-			-- var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
-			var mag = uniform(-boundMag, boundMag, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
+			-- var mag = uniform(-boundMag, boundMag, {structural=false, lowerBound=-boundMag, upperBound=boundMag, boundShapeParam=optBoundShape, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -748,8 +749,8 @@ local function Connections()
 	-- Generate a bounded, nonnegative 1-DOF force along a particular direction
 	local genBoundedNonNegative1DForce = macro(function(pos, dir, boundMag)
 		return quote
-			-- var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
-			var mag = uniform(0.0, boundMag, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
+			var mag = gaussian(forcePriorMean, forcePriorVariance, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
+			-- var mag = uniform(0.0, boundMag, {structural=false, lowerBound=0.0, upperBound=boundMag, initialVal=0.0})
 		in
 			ForceT { mag*dir, pos, 1, dir}
 		end
@@ -1075,7 +1076,7 @@ local function Connections()
 		self.contactTangent = perp(cn)
 
 		var constrainedPenetrationDepth = gaussian(penetrationDepth, 10000.0, {structural=false, initialVal=penetrationDepth, lowerBound=10.0*nailDiameter})
-		manifold(constrainedPenetrationDepth - penetrationDepth, 0.5*nailDiameter)
+		factor(softeq(constrainedPenetrationDepth, penetrationDepth, 0.5*nailDiameter))
 		-- util.assert(penetrationDepth > 10.0*nailDiameter,
 		-- 	"Nail penetration depth too small for given nail diameter\npenetrationDepth: %g, nailDiameter: %g\n", ad.val(penetrationDepth), ad.val(nailDiameter))
 		
@@ -1094,7 +1095,7 @@ local function Connections()
 		var penetrationDepth = nailLength - thickness
 
 		-- Thickness should be about half the penetration depth
-		manifold(thickness/penetrationDepth - 0.5, 0.1)
+		factor(softeq(thickness/penetrationDepth, 0.5, 0.1))
 		-- util.assert(thickness < 0.7*penetrationDepth,
 		-- 	"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g, penetrationDepth: %g\n", ad.val(thickness), ad.val(penetrationDepth))
 		

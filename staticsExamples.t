@@ -890,7 +890,7 @@ local function genExamples(gravityConstant, Connections)
 		connections:push(gs2)
 
 		-- Extra load
-		platform:applyExternalLoad(gravityConstant, 55.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+		platform:applyExternalLoad(gravityConstant, 40.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
 
 		return scene, connections
 	end)
@@ -919,15 +919,15 @@ local function genExamples(gravityConstant, Connections)
 
 		var numBlocks = 9
 		var blockDensity = 2700.0  -- approx. density of granite
-		var blockWidth = 1.5
-		var peakHeight = 8.0
-		var baseWidth = 8.0
+		-- var blockWidth = 1.5
+		-- var peakHeight = 8.0
+		-- var baseWidth = 8.0
 		-- var blockWidth = 0.5
 		-- var peakHeight = 3.0
 		-- var baseWidth = 3.0
-		-- var blockWidth = boundedUniform(0.2, 1.5)
-		-- var peakHeight = boundedUniform(2.0, 10.0)
-		-- var baseWidth = boundedUniform(2.0, 8.0)
+		var blockWidth = boundedUniform(0.2, 1.5)
+		var peakHeight = boundedUniform(2.0, 10.0)
+		var baseWidth = boundedUniform(2.0, 8.0)
 
 		-- Generate blocks
 		var baseHalfWidth = 0.5*baseWidth
