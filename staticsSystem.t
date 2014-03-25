@@ -257,8 +257,8 @@ local function renderInitFn(samples, im)
 end
 
 -- local forceScale = 0.2
-local forceScale = 0.01
--- local forceScale = 0.0
+-- local forceScale = 0.01
+local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
 	return quote

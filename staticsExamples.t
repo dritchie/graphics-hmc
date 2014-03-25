@@ -929,6 +929,9 @@ local function genExamples(gravityConstant, Connections)
 		-- var secondSupportConnectT1 = boundedUniform(0.25, 0.75)
 		var secondSupportConnectT2 = boundedUniform(0.05, 0.5)
 
+		var loadSize = mm(50.0)
+		var loadDensity = 2000.0
+
 		-- Make objects
 		var mainBeam = BeamT.heapAlloc(shelfHeight/ad.math.cos(mainAngle), beamThickness,
 									   [math.pi/2]-mainAngle, Vec2.stackAlloc(baseCenterX - 0.5*baseWidth, groundHeight),
@@ -940,10 +943,15 @@ local function genExamples(gravityConstant, Connections)
 											   				beamThickness, beamDepth)
 		var secondSupport = BeamT.createBridgingBeam(mainBeam, shelf, secondSupportConnectT1, secondSupportConnectT2,
 													 beamThickness, beamDepth)
+		var loadingBlock = BeamT.createConnectingBeamWithLengthVec(shelf, 0.5, Vec2.stackAlloc(0.0, loadSize), loadSize, loadSize)
+		-- var loadingBlock = BeamT.heapAlloc(shelf:endpoint(0) + Vec2.stackAlloc(0.5*loadSize, 0.5*beamThickness + loadSize),
+		-- 								   shelf:endpoint(0) + Vec2.stackAlloc(0.5*loadSize, 0.5*beamThickness), loadSize, loadSize)
+		loadingBlock.density = loadDensity
 		scene.objects:push(mainBeam)
 		scene.objects:push(supportBeam)
 		scene.objects:push(shelf)
 		scene.objects:push(secondSupport)
+		scene.objects:push(loadingBlock)
 
 		-- Make connections
 		connections:push(Connections.FrictionalContact.heapAlloc(mainBeam, ground, 0, 1))
@@ -952,6 +960,8 @@ local function genExamples(gravityConstant, Connections)
 		connections:push(Connections.NailJoint.heapAlloc(shelf, mainBeam, 2, 3, nailDiameter, nailLength, numNails))
 		connections:push(Connections.NailJoint.heapAlloc(secondSupport, mainBeam, 0, 1, nailDiameter, nailLength, numNails))
 		connections:push(Connections.NailJoint.heapAlloc(secondSupport, shelf, 2, 3, nailDiameter, nailLength, numNails))
+		var lc1, lc2 = Connections.FrictionalContact.makeBeamContacts(loadingBlock, shelf, 2, 3)
+		connections:push(lc1); connections:push(lc2)
 
 		return scene, connections
 	end)
