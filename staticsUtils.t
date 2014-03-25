@@ -413,14 +413,30 @@ local Beam = templatize(function(real)
 	end
 
 	-- Create a Beam that will connect to beam at the point t percent along
-	--   its length. This new Beam's other endpoint is at ep, it points along
-	--   direction d, and it has width w.
-	BeamT.methods.createConnectingBeam = terra(beam: &BeamT, t: real, ep: Vec2, d: Vec2, w: real, depth: real)
+	--   its length. This new Beam's other endpoint is at ep,  and it has width w.
+	BeamT.methods.createConnectingBeamWithEndpoint = terra(beam: &BeamT, t: real, ep: Vec2, w: real, depth: real)
+		var approxEp2 = lerp(beam:endpoint(0), beam:endpoint(1), t)
+		var d = approxEp2 - ep; d:normalize()
 		var p, c1, c2 = beam:interpolateAlongClosestEdge(ep, d, t)
+		d = p - ep; d:normalize()
 		var dot = beam:dotProdWithEdge(perp(d), c1, c2)
 		var sepdist = minsep(dot, w)
 		var ep2 = p - sepdist*d
 		return BeamT.heapAlloc(ep, ep2, w, depth)
+	end
+	-- Same as above, but instead of the other endpoint, we get vector indicating (roughly) how long
+	--    (and in what direction) the created beam should be.
+	-- Provided direction should point AWAY from the connection point
+	BeamT.methods.createConnectingBeamWithLengthVec = terra(beam: &BeamT, t: real, d: Vec2, w: real, depth: real)
+		var approxEp2 = lerp(beam:endpoint(0), beam:endpoint(1), t)
+		var ep = approxEp2 + d
+		var fullD = d
+		d = -d; d:normalize()
+		var p, c1, c2 = beam:interpolateAlongClosestEdge(ep, d, t)
+		var dot = beam:dotProdWithEdge(perp(d), c1, c2)
+		var sepdist = minsep(dot, w)
+		var ep2 = p - sepdist*d
+		return BeamT.heapAlloc(ep2+fullD, ep2, w, depth)
 	end
 
 	-- Create a Beam that will connect beam1 to beam2 at the points t1 and t2
@@ -1132,7 +1148,7 @@ local function Connections()
 	-- meters to millimeters
 	local toMM = macro(function(x) return `1000.0*x end)
 
-	terra NailJoint:__construct(o1: &BeamT, o2: &BeamT, cp: Vec2, cn: Vec2, nailDiameter: real, penetrationDepth: real) : {}
+	terra NailJoint:__construct(o1: &BeamT, o2: &BeamT, cp: Vec2, cn: Vec2, nailDiameter: real, penetrationDepth: real, numNails: uint) : {}
 		self.objs[0] = o1
 		self.objs[1] = o2
 		self.contactPoint = cp
@@ -1148,6 +1164,10 @@ local function Connections()
 		self.maxPullForce = (1.0/6.0)*self.maxPullForce		-- maximum long-term load
 		self.maxPullForce = 1.1*self.maxPullForce	-- maximum normal load
 		self.maxShearForce = o1.lateralLoadCoefficient * ad.math.pow(toMM(nailDiameter), 3.0/2.0)
+
+		-- Boost force thresholds as we use more nails
+		self.maxPullForce = double(numNails)*self.maxPullForce
+		self.maxShearForce = double(numNails)*self.maxShearForce
 
 		-- C.printf("maxPullForce: %g, maxShearForce: %g\n", ad.val(self.maxPullForce), ad.val(self.maxShearForce))
 	end
@@ -1167,7 +1187,7 @@ local function Connections()
 	end
 
 	-- Nail two beams together using one nail at the center of the edge between corner ci1 and ci2 of beam1.
-	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real) : {}
+	terra NailJoint:__construct(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real, numNails: uint) : {}
 		var cp1 = beam1:corner(ci1)
 		var cp2 = beam1:corner(ci2)
 		var edge = cp2 - cp1; edge:normalize()
@@ -1179,7 +1199,7 @@ local function Connections()
 		end
 		var cp = 0.5*(cp1 + cp2)		
 		var penetrationDepth = determinePenetrationDepth(beam2, cp, normal, nailLength)
-		self:__construct(beam1, beam2, cp, normal, nailDiameter, penetrationDepth)
+		self:__construct(beam1, beam2, cp, normal, nailDiameter, penetrationDepth, numNails)
 	end
 
 	-- (Convenience method)
@@ -1187,7 +1207,7 @@ local function Connections()
 	-- Connect beam1 to beam2 along the edge between corners ci1 and ci2 of beam1
 	-- The nail penetrates beam2 along the edge ci3 to ci4
 	-- This will generate two NailJoint objects
-	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real)
+	NailJoint.methods.makeBeamContacts = terra(beam1: &BeamT, beam2: &BeamT, ci1: uint, ci2: uint, nailDiameter: real, nailLength: real, numNails: uint)
 		var cp1 = beam1:corner(ci1)
 		var cp2 = beam1:corner(ci2)
 		var edge = cp2 - cp1; edge:normalize()
@@ -1199,8 +1219,8 @@ local function Connections()
 		end
 		var penDepth1 = determinePenetrationDepth(beam2, cp1, normal, nailLength)
 		var penDepth2 = determinePenetrationDepth(beam2, cp2, normal, nailLength)
-		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal, nailDiameter, penDepth1)
-		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal, nailDiameter, penDepth2)
+		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal, nailDiameter, penDepth1, numNails)
+		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal, nailDiameter, penDepth2, numNails)
 		return nj1, nj2
 	end
 

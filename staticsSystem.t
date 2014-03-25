@@ -183,7 +183,8 @@ local staticsModel = probcomp(function()
 	local examples = staticsExamples(gravityConstant, Connections)
 
 	-- local example = examples.simpleNailTest
-	local example = examples.aFrameTest
+	-- local example = examples.aFrameTest
+	local example = examples.cantileveredShelf
 	-- local example = examples.arch
 
 	return terra()

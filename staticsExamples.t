@@ -703,6 +703,10 @@ local function genExamples(gravityConstant, Connections)
 		return `0.001*x
 	end)
 
+	local radians = macro(function(x)
+		return `x*[math.pi]/180.0
+	end)
+
 	Examples.simpleNailTest = pfn(terra()
 		var groundHeight = mm(5.0)
 		var sceneWidth = mm(250.0)
@@ -748,8 +752,8 @@ local function genExamples(gravityConstant, Connections)
 		-- Connections
 		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
 		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
-		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength)
-		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength)
+		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength, 1)
+		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength, 1)
 		connections:push(ps1)
 		connections:push(ps2)
 		connections:push(gs1a); connections:push(gs1b)
@@ -806,8 +810,8 @@ local function genExamples(gravityConstant, Connections)
 		-- Connections
 		var gs1a, gs1b = Connections.FrictionalContact.makeBeamContacts(support1, ground, 0, 1)
 		var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
-		var ps1 = Connections.NailJoint.heapAlloc(support1, platform, 2, 3, nailDiameter, nailLength)
-		var ps2 = Connections.NailJoint.heapAlloc(support2, platform, 2, 3, nailDiameter, nailLength)
+		var ps1 = Connections.NailJoint.heapAlloc(support1, platform, 2, 3, nailDiameter, nailLength, 1)
+		var ps2 = Connections.NailJoint.heapAlloc(support2, platform, 2, 3, nailDiameter, nailLength, 1)
 		connections:push(ps1)
 		connections:push(ps2)
 		connections:push(gs1a); connections:push(gs1b)
@@ -867,8 +871,8 @@ local function genExamples(gravityConstant, Connections)
 		-- var gs2a, gs2b = Connections.FrictionalContact.makeBeamContacts(support2, ground, 0, 1)
 		var gs1 = Connections.FrictionalContact.heapAlloc(support1, ground, 0, 1)
 		var gs2 = Connections.FrictionalContact.heapAlloc(support2, ground, 0, 1)
-		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength)
-		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength)
+		var ps1 = Connections.NailJoint.heapAlloc(platform, support1, 0, 1, nailDiameter, nailLength, 1)
+		var ps2 = Connections.NailJoint.heapAlloc(platform, support2, 2, 3, nailDiameter, nailLength, 1)
 		connections:push(ps1)
 		connections:push(ps2)
 		-- connections:push(gs1a); connections:push(gs1b)
@@ -878,6 +882,66 @@ local function genExamples(gravityConstant, Connections)
 
 		-- Extra load
 		platform:applyExternalLoad(gravityConstant, 40.0, platform:centerOfMass() + Vec2.stackAlloc(0.0, halfThickness))
+
+		return scene, connections
+	end)
+
+	Examples.cantileveredShelf = pfn(terra()
+		var groundHeight = mm(10.0)
+		var sceneWidth = mm(915.0)	-- Roughly 3 feet
+		var sceneHeight = mm(915.0)
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		-- Approx. measurements for a gauge 14-1/2 box nail
+		var nailDiameter = mm(2.0)
+		var nailLength = mm(32.0)
+		-- var nailDiameter = mm(4.0)
+		-- var nailLength = mm(64.0)
+
+		var beamThickness = mm(10.0)
+		-- var beamThickness = mm(20.0)
+		var beamDepth = mm(200.0) -- Here, we'll assume the beams extend back into the screen to form boards
+		-- var beamDepth = beamThickness
+
+		-- We insert multiple nails at each connection, depending on how deep the beams are
+		var nailSpacing = mm(20.0)
+		var numNails = uint(beamDepth/nailSpacing)
+
+		-- Parameters
+		-- var baseCenterX = 0.6*sceneWidth
+		-- var baseWidth = 0.4*sceneWidth
+		-- var mainAngle = radians(35.0)
+		-- var supportConnectT = 0.5
+		-- var shelfHeight = 0.65*sceneHeight
+		-- var shelfLength = 0.65*sceneWidth
+		var baseCenterX = 0.6*sceneWidth
+		var baseWidth = boundedUniform(0.2*sceneWidth, 0.6*sceneWidth)
+		var mainAngle = radians(boundedUniform(0.0, 45.0))
+		var supportConnectT = boundedUniform(0.2, 0.7)
+		var shelfHeight = 0.65*sceneHeight
+		var shelfLength = boundedUniform(0.1*sceneWidth, 0.6*sceneWidth)
+
+		-- Make objects
+		var mainBeam = BeamT.heapAlloc(shelfHeight/ad.math.cos(mainAngle), beamThickness,
+									   [math.pi/2]-mainAngle, Vec2.stackAlloc(baseCenterX - 0.5*baseWidth, groundHeight),
+									   beamDepth)
+		var supportBeam = BeamT.createConnectingBeamWithEndpoint(mainBeam, supportConnectT,
+													 			 Vec2.stackAlloc(baseCenterX + 0.5*baseWidth, groundHeight),
+													 			 beamThickness, beamDepth)
+		var shelf = BeamT.createConnectingBeamWithLengthVec(mainBeam, 0.95, Vec2.stackAlloc(-shelfLength, 0.0),
+											   				beamThickness, beamDepth)
+		scene.objects:push(mainBeam)
+		scene.objects:push(supportBeam)
+		scene.objects:push(shelf)
+
+		-- Make connections
+		connections:push(Connections.FrictionalContact.heapAlloc(mainBeam, ground, 0, 1))
+		connections:push(Connections.FrictionalContact.heapAlloc(supportBeam, ground, 0, 1))
+		connections:push(Connections.NailJoint.heapAlloc(supportBeam, mainBeam, 2, 3, nailDiameter, nailLength, numNails))
+		connections:push(Connections.NailJoint.heapAlloc(shelf, mainBeam, 2, 3, nailDiameter, nailLength, numNails))
 
 		return scene, connections
 	end)
