@@ -39,6 +39,10 @@ local min = macro(function(a,b)
 	end
 end)
 
+local lerp = macro(function(a, b, t)
+	return `(1.0-t)*a + t*b
+end)
+
 local perp = macro(function(vec)
 	local VecT = vec:gettype()
 	return `VecT.stackAlloc(-vec(1), vec(0))
@@ -376,6 +380,66 @@ local Beam = templatize(function(real)
 	terra BeamT:__construct(l: real, w: real, a: real, base: Vec2, depth: real) : {}
 		var axis = polar2rect(l, a)
 		self:__construct(base, base + axis, w, depth)
+	end
+
+	-- (Utilities used by the below creation methods)
+
+	-- Identify the long edge closest to point p along direction d, then
+	--    find the point that is t percent along that edge
+	terra BeamT:interpolateAlongClosestEdge(p: Vec2, d: Vec2, t: real)
+		var c1, c2 = self:closerEdge(p, d, 0, 3, 1, 2)
+		return lerp(self:corner(c1), self:corner(c2), t), c1, c2
+	end
+
+	-- Compute the dot product (cos of angle of separation) between edge
+	--    (c1, c2) of beam and the direction d.
+	-- We use whichever orientation of d produces the largest value (closest to 1)
+	terra BeamT:dotProdWithEdge(d: Vec2, c1: uint, c2: uint)
+		var edgevec = self:corner(c1) - self:corner(c2)
+		edgevec:normalize()
+		return ad.math.fmax(edgevec:dot(d), edgevec:dot(-d))
+	end
+
+	-- Given the dot product between the two connecting edges of two Beams,
+	--    find the minimum separation that will keep those Beams in contact
+	--    but not interpenetrating.
+	-- d is the dot product
+	-- w is the width of the connecting Beam.
+	local terra minsep(d: real, w: real)
+		-- Option 1: w/2d * sqrt(1 - d^2)
+		return (w/(2.0*d)) * ad.math.sqrt(1 - d*d)
+		-- -- Option 2: w/2 * tan(|acos(d)|)
+		-- return 0.5*w*ad.math.tan(ad.math.fabs(ad.math.acos(d)))
+	end
+
+	-- Create a Beam that will connect to beam at the point t percent along
+	--   its length. This new Beam's other endpoint is at ep, it points along
+	--   direction d, and it has width w.
+	BeamT.methods.createConnectingBeam = terra(beam: &BeamT, t: real, ep: Vec2, d: Vec2, w: real, depth: real)
+		var p, c1, c2 = beam:interpolateAlongClosestEdge(ep, d, t)
+		var dot = beam:dotProdWithEdge(perp(d), c1, c2)
+		var sepdist = minsep(dot, w)
+		var ep2 = p - sepdist*d
+		return BeamT.heapAlloc(ep, ep2, w, depth)
+	end
+
+	-- Create a Beam that will connect beam1 to beam2 at the points t1 and t2
+	--    percent along their respective lengths. The new Beam will have width w.
+	BeamT.methods.createBridgingBeam = terra(beam1: &BeamT, beam2: &BeamT, t1: real, t2: real, w: real, depth: real)
+		var approxEp1 = lerp(beam1:endpoint(0), beam1:endpoint(1), t1)
+		var approxEp2 = lerp(beam2:endpoint(0), beam2:endpoint(1), t2)
+		var d = approxEp1 - approxEp2; d:normalize()
+		var ep1, c11, c12 = beam1:interpolateAlongClosestEdge(approxEp2, d, t1)
+		var ep2, c21, c22 = beam2:interpolateAlongClosestEdge(approxEp1, -d, t2)
+		d = ep1 - ep2; d:normalize()
+		var dperp = perp(d)
+		var dot1 = beam1:dotProdWithEdge(dperp, c11, c12)
+		var dot2 = beam2:dotProdWithEdge(dperp, c21, c22)
+		var sepdist1 = minsep(dot1, w)
+		var sepdist2 = minsep(dot2, w)
+		ep1 = ep1 - sepdist1*d
+		ep2 = ep2 + sepdist2*d
+		return BeamT.heapAlloc(ep1, ep2, w, depth)
 	end
 
 	-- (Inherit parent destructor)
@@ -1138,13 +1202,6 @@ local function Connections()
 		var nj1 = NailJoint.heapAlloc(beam1, beam2, cp1, normal, nailDiameter, penDepth1)
 		var nj2 = NailJoint.heapAlloc(beam1, beam2, cp2, normal, nailDiameter, penDepth2)
 		return nj1, nj2
-	end
-
-	local terra logistic(x: real, coeff: real)
-		return 1.0 / (1.0 + ad.math.exp(-coeff*x))
-	end
-	local terra lerp(a: real, b: real, t: real)
-		return (1.0-t)*a + t*b
 	end
 
 	terra NailJoint:applyForcesImpl() : {}
