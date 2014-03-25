@@ -886,7 +886,7 @@ local function genExamples(gravityConstant, Connections)
 		return scene, connections
 	end)
 
-	Examples.cantileveredShelf = pfn(terra()
+	Examples.funkyTable = pfn(terra()
 		var groundHeight = mm(10.0)
 		var sceneWidth = mm(915.0)	-- Roughly 3 feet
 		var sceneHeight = mm(915.0)
@@ -908,21 +908,26 @@ local function genExamples(gravityConstant, Connections)
 
 		-- We insert multiple nails at each connection, depending on how deep the beams are
 		var nailSpacing = mm(20.0)
-		var numNails = uint(beamDepth/nailSpacing)
+		-- var numNails = uint(beamDepth/nailSpacing)
+		var numNails = 1
 
 		-- Parameters
-		-- var baseCenterX = 0.6*sceneWidth
-		-- var baseWidth = 0.4*sceneWidth
-		-- var mainAngle = radians(35.0)
-		-- var supportConnectT = 0.5
-		-- var shelfHeight = 0.65*sceneHeight
-		-- var shelfLength = 0.65*sceneWidth
 		var baseCenterX = 0.6*sceneWidth
-		var baseWidth = boundedUniform(0.2*sceneWidth, 0.6*sceneWidth)
-		var mainAngle = radians(boundedUniform(0.0, 45.0))
-		var supportConnectT = boundedUniform(0.2, 0.7)
+		-- var baseWidth = 0.4*sceneWidth
+		var mainAngle = radians(35.0)
+		var supportConnectT = 0.5
 		var shelfHeight = 0.65*sceneHeight
-		var shelfLength = boundedUniform(0.1*sceneWidth, 0.6*sceneWidth)
+		-- var shelfLength = 0.45*sceneWidth
+		var secondSupportConnectT1 = 0.5
+		-- var secondSupportConnectT2 = 0.25
+		-- var baseCenterX = 0.6*sceneWidth
+		var baseWidth = boundedUniform(0.2*sceneWidth, 0.6*sceneWidth)
+		-- var mainAngle = radians(boundedUniform(0.0, 45.0))
+		-- var supportConnectT = boundedUniform(0.4, 0.6)	-- was (0.25, 0.75)
+		-- var shelfHeight = 0.65*sceneHeight
+		var shelfLength = boundedUniform(0.2*sceneWidth, 0.7*sceneWidth)
+		-- var secondSupportConnectT1 = boundedUniform(0.25, 0.75)
+		var secondSupportConnectT2 = boundedUniform(0.05, 0.5)
 
 		-- Make objects
 		var mainBeam = BeamT.heapAlloc(shelfHeight/ad.math.cos(mainAngle), beamThickness,
@@ -933,15 +938,20 @@ local function genExamples(gravityConstant, Connections)
 													 			 beamThickness, beamDepth)
 		var shelf = BeamT.createConnectingBeamWithLengthVec(mainBeam, 0.95, Vec2.stackAlloc(-shelfLength, 0.0),
 											   				beamThickness, beamDepth)
+		var secondSupport = BeamT.createBridgingBeam(mainBeam, shelf, secondSupportConnectT1, secondSupportConnectT2,
+													 beamThickness, beamDepth)
 		scene.objects:push(mainBeam)
 		scene.objects:push(supportBeam)
 		scene.objects:push(shelf)
+		scene.objects:push(secondSupport)
 
 		-- Make connections
 		connections:push(Connections.FrictionalContact.heapAlloc(mainBeam, ground, 0, 1))
 		connections:push(Connections.FrictionalContact.heapAlloc(supportBeam, ground, 0, 1))
 		connections:push(Connections.NailJoint.heapAlloc(supportBeam, mainBeam, 2, 3, nailDiameter, nailLength, numNails))
 		connections:push(Connections.NailJoint.heapAlloc(shelf, mainBeam, 2, 3, nailDiameter, nailLength, numNails))
+		connections:push(Connections.NailJoint.heapAlloc(secondSupport, mainBeam, 0, 1, nailDiameter, nailLength, numNails))
+		connections:push(Connections.NailJoint.heapAlloc(secondSupport, shelf, 2, 3, nailDiameter, nailLength, numNails))
 
 		return scene, connections
 	end)

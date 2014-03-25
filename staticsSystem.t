@@ -39,6 +39,8 @@ local staticsModel = probcomp(function()
 	-- Toggle whether we're normalizing residuals by the overall average
 	--    external force magnitude, or by per-element total average force magnitudes.
 	local overallExtFMagNorm = true
+	-- Toggle diagnostic output for residuals
+	local printResiduals = false
 
 	-- Check if a beam's residuals are all less than 3 sigma from 0. If not,
 	--    color the beam red to mark it as unstable.
@@ -117,6 +119,9 @@ local staticsModel = probcomp(function()
 		-- (Individual residual style)
 		var fres = Vec2.stackAlloc(0.0, 0.0)
 		var tres = [Vector(real)].stackAlloc()
+		[util.optionally(printResiduals, function() return quote
+			C.printf("==============================\n")
+		end end)]
 		for i=0,scene.objects.size do
 			if scene.objects(i).active then
 				tres:clear()
@@ -146,6 +151,9 @@ local staticsModel = probcomp(function()
 					-- Add stability factors
 					factor(softeq(fres_, 0.0, fresSoftness))
 					factor(softeq(tres_, 0.0, tresSoftness))
+					[util.optionally(printResiduals, function() return quote
+						C.printf("fres: %g, tres: %g\n", ad.val(fres_), ad.val(tres_))
+					end end)]
 				end end)]
 
 				-- Version 2: Individual residuals
@@ -172,6 +180,10 @@ local staticsModel = probcomp(function()
 					end
 				end end)]
 
+				[util.optionally(printResiduals, function() return quote
+					C.printf("---------------------\n")
+				end end)]
+
 			end
 		end
 		m.destruct(tres)
@@ -184,7 +196,7 @@ local staticsModel = probcomp(function()
 
 	-- local example = examples.simpleNailTest
 	-- local example = examples.aFrameTest
-	local example = examples.cantileveredShelf
+	local example = examples.funkyTable
 	-- local example = examples.arch
 
 	return terra()
@@ -245,8 +257,8 @@ local function renderInitFn(samples, im)
 end
 
 -- local forceScale = 0.2
--- local forceScale = 0.02
-local forceScale = 0.0
+local forceScale = 0.01
+-- local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
 	return quote

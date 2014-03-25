@@ -1155,8 +1155,8 @@ local function Connections()
 		self.contactNormal = cn
 		self.contactTangent = perp(cn)
 
-		var constrainedPenetrationDepth = gaussian(penetrationDepth, 10000.0, {structural=false, initialVal=penetrationDepth, lowerBound=10.0*nailDiameter})
-		factor(softeq(constrainedPenetrationDepth, penetrationDepth, 0.5*nailDiameter))
+		-- var constrainedPenetrationDepth = gaussian(penetrationDepth, 10000.0, {structural=false, initialVal=penetrationDepth, lowerBound=10.0*nailDiameter})
+		-- factor(softeq(constrainedPenetrationDepth, penetrationDepth, 0.5*nailDiameter))
 		-- util.assert(penetrationDepth > 10.0*nailDiameter,
 		-- 	"Nail penetration depth too small for given nail diameter\npenetrationDepth: %g, nailDiameter: %g\n", ad.val(penetrationDepth), ad.val(nailDiameter))
 		
@@ -1179,7 +1179,7 @@ local function Connections()
 		var penetrationDepth = nailLength - thickness
 
 		-- Thickness should be about half the penetration depth
-		factor(softeq(thickness/penetrationDepth, 0.5, 0.1))
+		-- factor(softeq(thickness/penetrationDepth, 0.5, 0.1))
 		-- util.assert(thickness < 0.7*penetrationDepth,
 		-- 	"Nail is too short. Penetration depth should be about 2x thickness of side member for shear model to be accurate.\nthickness: %g, penetrationDepth: %g\n", ad.val(thickness), ad.val(penetrationDepth))
 		
@@ -1231,7 +1231,10 @@ local function Connections()
 			var nCompress = genNonNegative1DForce(self.contactPoint, self.contactNormal)
 			var nTension = genBoundedNonNegative1DForce(self.contactPoint, -self.contactNormal, self.maxPullForce)
 			normalForce = nCompress; normalForce:combineWith(&nTension)
-			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce, 0.01)
+			tangentForce = genBounded1DForce(self.contactPoint, self.contactTangent, self.maxShearForce, 0.1) -- was 0.01
+			-- normalForce = gen1DForce(self.contactPoint, self.contactNormal)
+			-- tangentForce = gen1DForce(self.contactPoint, self.contactTangent)
+			-- C.printf("normalForceMag: %g, maxPullForce: %g\n", ad.val(normalForce.vec):norm(), ad.val(self.maxPullForce))
 			-- C.printf("tangentForceMag: %g, maxShearForce: %g\n", ad.val(tangentForce.vec):norm(), ad.val(self.maxShearForce))
 		end
 		if self.objs[0].active then
