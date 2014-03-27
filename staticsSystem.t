@@ -18,6 +18,10 @@ local C = terralib.includecstring [[
 local Vec2d = Vec(double, 2)
 local Color3d = Vec(double, 3)
 
+local lerp = macro(function(a, b, t)
+	return `(1.0-t)*a + t*b
+end)
+
 ----------------------------------
 
 local staticsModel = probcomp(function()
@@ -44,35 +48,32 @@ local staticsModel = probcomp(function()
 
 	-- Check if a beam's residuals are all less than 3 sigma from 0. If not,
 	--    color the beam red to mark it as unstable.
-	local unstableColor = colors.Tableau10.Red
+	local stabColor0 = colors.Tableau10.Blue
+	local stabColor1 = colors.Tableau10.Green
+	local stabColor2 = colors.Tableau10.Yellow
+	local stabColor3 = colors.Tableau10.Red
+	local terra colorByStability(maxResRatio: real)
+		var mrr = ad.val(maxResRatio)
+		if mrr < 1.0 then return lerp(Color3d.stackAlloc(stabColor0), Color3d.stackAlloc(stabColor1), mrr)
+		elseif mrr < 2.0 then return lerp(Color3d.stackAlloc(stabColor1), Color3d.stackAlloc(stabColor2), mrr-1.0)
+		elseif mrr < 3.0 then return lerp(Color3d.stackAlloc(stabColor2), Color3d.stackAlloc(stabColor3), mrr-3.0)
+		else return Color3d.stackAlloc(stabColor3) end
+	end
 	local checkStability = nil
 	if rmseRes then
 		checkStability = terra(obj: &RigidObjectT, fres: real, tres: real, fsigma: real, tsigma: real)
-			var threeSigmaF = 3.0*fsigma
-			var threeSigmaT = 3.0*tsigma
 			var beam = [&BeamT](obj)
-			var allStable = fres < threeSigmaF and tres < threeSigmaT
-			if not allStable then
-				beam.color = Color3d.stackAlloc([unstableColor])
-			end
+			var maxResRatio = ad.math.fmax(fres/fsigma, tres/tsigma)
+			beam.color = colorByStability(maxResRatio)
 		end
 	else
 		checkStability = terra(obj: &RigidObjectT, fres: Vec2, tres: &Vector(real), fsigma: real, tsigma: real)
-			var threeSigmaF = 3.0*fsigma
-			var threeSigmaT = 3.0*tsigma
 			var beam = [&BeamT](obj)
-			var allStable = ad.math.fabs(fres(0)) < threeSigmaF and ad.math.fabs(fres(1)) < threeSigmaF
-			if allStable then
-				for i=0,tres.size do
-					if not (ad.math.fabs(tres(i)) < threeSigmaT) then
-						allStable = false
-						break
-					end
-				end
-			end
-			if not allStable then
-				beam.color = Color3d.stackAlloc([unstableColor])
-			end
+			var maxResRatio = ad.math.fmax(ad.math.fabs(fres(0))/fsigma, ad.math.fabs(fres(1))/fsigma)
+			for i=0,tres.size do
+				maxResRatio = ad.math.fmax(maxResRatio, ad.math.fabs(tres(i))/tsigma)
+			end	
+			beam.color = colorByStability(maxResRatio)
 		end
 	end
 
