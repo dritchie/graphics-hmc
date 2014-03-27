@@ -32,6 +32,6 @@ local Tableau10 =
 return
 {
 	Black = dqv({0, 0, 0}),
-	White = dqv({1, 1, 1}),
+	White = dqv({255, 255, 255}),
 	Tableau10 = Tableau10
 }

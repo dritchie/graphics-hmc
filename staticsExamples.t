@@ -1063,8 +1063,6 @@ local function genExamples(gravityConstant, Connections)
 		-- Generate the ground block
 		var w = boundedUniform(blockMinWidth, blockMaxWidth)
 		var h = boundedUniform(blockMinHeight, blockMaxHeight)
-		-- var w = mm(60.0)
-		-- var h = mm(60.0)
 		blocks:push(BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight), w, h, blockDepth))
 
 		-- Generate other blocks
@@ -1077,8 +1075,72 @@ local function genExamples(gravityConstant, Connections)
 			var bxmin = parent:endpoint(1)(0) - oneSidedRange
 			var bxmax = parent:endpoint(1)(0) + oneSidedRange
 			var bx = boundedUniform(bxmin, bxmax)
-			-- var bx = lerp(bxmin, bxmax, 0.75)
 			blocks:push(BeamT.heapAlloc(Vec2.stackAlloc(bx, by), w, h, blockDepth))
+		end
+
+		-- Store objects
+		for i=0,blocks.size do scene.objects:push(blocks(i)) end
+
+		-- Generate connections
+		var c1, c2 = Connections.FrictionalContact.makeBeamContacts(blocks(0), ground, 0, 1)
+		connections:push(c1); connections:push(c2)
+		for i=1,blocks.size do
+			var c1, c2 = Connections.FrictionalContact.makeBeamContacts(blocks(i), blocks(i-1), 0, 1, 2, 3)
+			connections:push(c1); connections:push(c2)
+		end
+
+		m.destruct(blocks)
+
+		return scene, connections
+	end)
+
+	Examples.linearChainNonRegularBlockStack = pfn(terra()
+		var groundHeight = mm(5.0)
+		var sceneWidth = mm(400.0)
+		-- var sceneHeight = mm(400.0)
+		var sceneHeight = mm(600.0)
+		var scene = RigidSceneT.stackAlloc(sceneWidth, sceneHeight)
+		var connections = [Vector(&Connections.RigidConnection)].stackAlloc()
+		var ground = Ground(groundHeight, 0.0, sceneWidth)
+		scene.objects:push(ground)
+
+		-- Parameters
+		-- var numBlocks = 4
+		var numBlocks = 6
+		var blockDepth = mm(20.0)
+		var blockMinWidth = mm(20.0)
+		var blockMaxWidth = mm(80.0)
+		var blockMinHeight = blockMinWidth
+		var blockMaxHeight = blockMaxWidth
+		var blockMinAng = radians(-30.0)
+		var blockMaxAng = radians(30.0)
+		var minContactArea = mm(5.0)
+
+		var blocks = [Vector(&BeamT)].stackAlloc()
+
+		-- Generate the ground block
+		var w = boundedUniform(blockMinWidth, blockMaxWidth)
+		var h = boundedUniform(blockMinHeight, blockMaxHeight)
+		var baseAng = boundedUniform(blockMinAng, blockMaxAng)
+		var topAng = boundedUniform(blockMinAng, blockMaxAng)
+		blocks:push(BeamT.createFlushConnectingBeam(ground, Vec2.stackAlloc(0.5*sceneWidth, groundHeight), baseAng, topAng, h, w, blockDepth))
+
+		-- Generate other blocks
+		for i=1,numBlocks do
+			var parent = blocks(i-1)
+			w = boundedUniform(blockMinWidth, blockMaxWidth)
+			h = boundedUniform(blockMinHeight, blockMaxHeight)
+			baseAng = boundedUniform(blockMinAng, blockMaxAng)
+			topAng = boundedUniform(blockMinAng, blockMaxAng)
+			var basePoint = parent:endpoint(1)
+			var tang = parent:edgeVec(2, 3)
+			var edgelen = tang:norm()
+			tang = tang / edgelen
+			var oneSidedRange = 0.5*edgelen + 0.5*w - minContactArea
+			var perturb = boundedUniform(-oneSidedRange, oneSidedRange)
+			-- var perturb = 0.0
+			basePoint = basePoint + perturb*tang
+			blocks:push(BeamT.createFlushConnectingBeam(parent, basePoint, baseAng, topAng, h, w, blockDepth))
 		end
 
 		-- Store objects

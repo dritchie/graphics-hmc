@@ -48,10 +48,26 @@ local perp = macro(function(vec)
 	return `VecT.stackAlloc(-vec(1), vec(0))
 end)
 
+local rot = macro(function(vec, ang)
+	local VecT = vec:gettype()
+	return quote
+		var sinang = ad.math.sin(ang)
+		var cosang = ad.math.cos(ang)
+	in
+		VecT.stackAlloc(cosang*vec(0) - sinang*vec(1), sinang*vec(0) + cosang*vec(1))
+	end
+end)
+
+-- Magnitude of cross product
+local cross = macro(function(v1, v2)
+	return `v1(0)*v2(1) - v1(1)*v2(0)
+end)
+
 -- Check whether two vectors are on the same line
 -- (Uses the z-component of the cross product)
+local collinearThresh = 1e-16
 local collinear = macro(function(v1, v2)
-	return `v1(0)*v2(1) - v1(1)*v2(0) == 0.0
+	return `ad.math.fabs(cross(v1, v2)) < collinearThresh
 end)
 
 local terra drawLine(bot: Vec2d, top: Vec2d, width: double, color: Color3d)
@@ -388,6 +404,39 @@ local Beam = templatize(function(real)
 		self:__construct(base, ep2, w, depth)
 	end
 
+	-- Create a non-rectangular beam from a base point and normal, base angle, top angle, length, width, and depth
+	terra BeamT:__construct(basePoint: Vec2, baseNormal: Vec2, baseAng: real, topAng: real, len: real, w: real, depth: real) : {}
+		-- C.printf("------------------------------------------------\n")
+		-- C.printf("basePoint: (%g, %g), baseNormal: (%g, %g)\n",
+		-- 	ad.val(basePoint(0)), ad.val(basePoint(1)), ad.val(baseNormal(0)), ad.val(baseNormal(1)))
+		var baseTangent = perp(baseNormal)
+		var w2 = 0.5*w
+		baseTangent = w2*baseTangent
+		var bot1 = basePoint - baseTangent
+		var bot2 = basePoint + baseTangent
+		-- C.printf("bot1: (%g, %g), bot2: (%g, %g)\n",
+		-- 	ad.val(bot1(0)), ad.val(bot1(1)), ad.val(bot2(0)), ad.val(bot2(1)))
+		baseNormal = rot(baseNormal, baseAng)
+		var topMid = basePoint + len*baseNormal
+		var top1 = topMid - baseTangent
+		var top2 = topMid + baseTangent
+		-- C.printf("top1: (%g, %g), top2: (%g, %g)\n",
+		-- 	ad.val(top1(0)), ad.val(top1(1)), ad.val(top2(0)), ad.val(top2(1)))
+		-- A bunch of trigonometry to figure out where the top corners should be, given the rotated end cap
+		-- NOTE: Am I handling signs of angles here in an OK way?
+		var theta1 = ad.math.fabs(topAng)
+		var theta2 = ad.math.fabs(baseAng)
+		var theta4 = [math.pi/2] - theta2
+		var theta3 = [math.pi] - theta4
+		var theta5 = [math.pi] - theta3 - theta1
+		var displacement = w2*ad.math.sin(topAng)/ad.math.sin(theta5)	-- Use topAng instead of theta1 to get signed value
+		top1 = top1 - displacement*baseNormal
+		top2 = top2 + displacement*baseNormal
+		-- C.printf("[AFTER DISPLACE] top1: (%g, %g), top2: (%g, %g)\n",
+		-- 	ad.val(top1(0)), ad.val(top1(1)), ad.val(top2(0)), ad.val(top2(1)))
+		self:__construct(bot1, bot2, top1, top2, depth)
+	end
+
 	-- (Utilities used by the below creation methods)
 
 	-- Identify the long edge closest to point p along direction d, then
@@ -462,6 +511,13 @@ local Beam = templatize(function(real)
 		ep1 = ep1 - sepdist1*d
 		ep2 = ep2 + sepdist2*d
 		return BeamT.heapAlloc(ep1, ep2, w, depth)
+	end
+
+	-- Create a non-rectangular beam that will connect flush to beam at point p
+	BeamT.methods.createFlushConnectingBeam = terra(beam: &BeamT, p: Vec2, baseAng: real, topAng: real, l: real, w: real, d: real)
+		var c1, c2 = beam:edgeContainingPoint(p)
+		var normal = beam:edgeNormal(c1, c2)
+		return BeamT.heapAlloc(p, normal, baseAng, topAng, l, w, d)
 	end
 
 	-- (Inherit parent destructor)
@@ -578,6 +634,40 @@ local Beam = templatize(function(real)
 		else
 			util.fatalError("BeamT:opposingEdge: no such edge\n")
 		end
+	end
+
+	-- Get the (outward-facing) normal of edge c1, c2
+	terra BeamT:edgeNormal(c1: uint, c2: uint)
+		var p1 = self:corner(c1)
+		var p2 = self:corner(c2)
+		var vec = p2 - p1; vec:normalize(); vec = perp(vec)
+		if vec:dot(self:centerOfMass() - p1) > 0.0 then
+			vec = -vec
+		end
+		return vec
+	end
+
+	-- Generate the (unnormalized) vector along the edge c1, c2
+	terra BeamT:edgeVec(c1: uint, c2: uint)
+		var p1 = self:corner(c1)
+		var p2 = self:corner(c2)
+		return p2 - p1
+	end
+
+	-- Find the edge that point p lies on
+	-- Assumes that p is on some edge, throws an error if not
+	terra BeamT:edgeContainingPoint(p: Vec2)
+		-- For an edge (p1, p2) to contain p, it must be collinear
+		--    with (p1, p)
+		var c0 = self:corner(0)
+		var c1 = self:corner(1)
+		var c2 = self:corner(2)
+		var c3 = self:corner(3)
+		if collinear(c1-c0, p-c0) then return 0, 1 end
+		if collinear(c2-c1, p-c1) then return 1, 2 end
+		if collinear(c3-c2, p-c2) then return 2, 3 end
+		if collinear(c0-c3, p-c3) then return 0, 3 end
+		util.fatalError("BeamT:edgeContainingPoint - provided point is not on any edge.\n")
 	end
 
 	-- Find the distance to a particular edge when starting at some point p

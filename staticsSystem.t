@@ -201,7 +201,8 @@ local staticsModel = probcomp(function()
 	-- local example = examples.aFrameTest
 	-- local example = examples.funkyTable
 	-- local example = examples.arch
-	local example = examples.linearChainRegularBlockStack
+	-- local example = examples.linearChainRegularBlockStack
+	local example = examples.linearChainNonRegularBlockStack
 
 	return terra()
 		var scene, connections = example()
@@ -244,6 +245,14 @@ local terra displayLogprob(lp: double)
 	displayString(lpfont, str)
 end
 
+local ensureEven = macro(function(x)
+	return quote
+		var y = x
+		if y % 2 ~= 0 then y = y + 1 end
+	in
+		y
+	end
+end)
 local imageWidth = 500
 local function renderInitFn(samples, im)
 	return quote
@@ -252,7 +261,8 @@ local function renderInitFn(samples, im)
 		var scene0 = &samples(0).value
 		var aspectRatio = scene0.height / scene0.width
 		var imageHeight = int(aspectRatio*imageWidth)
-		gl.glutInitWindowSize(imageWidth, imageWidth)
+		imageHeight = ensureEven(imageHeight)
+		gl.glutInitWindowSize(imageWidth, imageHeight)
 		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
 		gl.glutCreateWindow("Render")
 		gl.glViewport(0, 0, imageWidth, imageHeight)
