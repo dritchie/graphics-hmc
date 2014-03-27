@@ -382,6 +382,12 @@ local Beam = templatize(function(real)
 		self:__construct(base, base + axis, w, depth)
 	end
 
+	-- Construct axis-aligned beam from a base, width, height, and depth
+	terra BeamT:__construct(base: Vec2, w: real, h: real, depth: real) : {}
+		var ep2 = base; ep2(1) = ep2(1) + h
+		self:__construct(base, ep2, w, depth)
+	end
+
 	-- (Utilities used by the below creation methods)
 
 	-- Identify the long edge closest to point p along direction d, then
@@ -480,7 +486,7 @@ local Beam = templatize(function(real)
 	end
 	inheritance.virtual(BeamT, "newcopy")
 
-	-- Generate a bunch of points uniformly space along the length of this beam
+	-- Generate a bunch of points uniformly spaced along the length of this beam
 	terra BeamT:getCentersOfRotation(num: uint, output: &Vector(Vec2)) : bool
 		var e1 = self:endpoint(0)
 		var e2 = self:endpoint(1)
@@ -489,6 +495,10 @@ local Beam = templatize(function(real)
 			var cor = (1.0-t)*e1 + t*e2
 			output:push(cor)
 		end
+		-- output:push(self:corner(0))
+		-- output:push(self:corner(1))
+		-- output:push(self:corner(2))
+		-- output:push(self:corner(3))
 		return true
 	end
 	inheritance.virtual(BeamT, "getCentersOfRotation")
@@ -1070,7 +1080,7 @@ local function Connections()
 		var normal = perp(edge)
 		-- Ensure that the normal points in the right direction
 		-- (away from the center of mass of beam2)
-		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0.0 then
 			normal = -normal
 		end
 		var cp = 0.5*(cp1 + cp2)
@@ -1088,13 +1098,74 @@ local function Connections()
 		var normal = perp(edge)
 		-- Ensure that the normal points in the right direction
 		-- (away from the center of mass of beam2)
-		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0.0 then
 			normal = -normal
 		end
 		var fc1 = FrictionalContact.heapAlloc(beam1, beam2, cp1, normal)
 		var fc2 = FrictionalContact.heapAlloc(beam1, beam2, cp2, normal)
 		return fc1, fc2
 	end
+
+	-- Connect beam1 to beam2 using two frictional contacts
+	-- The user asserts that beam1 and beam2 touch along edges (e11, e12) and (e21, e22)
+	-- This method figures out where the contacts should be placed along that shared edge
+	FrictionalContact.methods.makeBeamContacts:adddefinition((terra(beam1: &BeamT, beam2: &BeamT, e11: uint, e12: uint, e21: uint, e22: uint)
+		-- C.printf("----------------------------------    \n")
+		-- We know that the four edge points lie on the same line. So we pick one point to be 'zero' (arbitrarily),
+		--    compute signed distances from it to all other points, and then place the contacts at the middle two points
+		var p11 = beam1:corner(e11)
+		var p12 = beam1:corner(e12)
+		var p21 = beam2:corner(e21)
+		var p22 = beam2:corner(e22)
+		-- C.printf("p11: (%g, %g), p12: (%g, %g)\n",
+		-- 	ad.val(p11(0)), ad.val(p11(1)), ad.val(p12(0)), ad.val(p12(1)))
+		-- C.printf("p21: (%g, %g), p12: (%g, %g)\n",
+		-- 	ad.val(p21(0)), ad.val(p21(1)), ad.val(p22(0)), ad.val(p22(1)))
+		var origin = p11	-- Arbitrary choice
+		var axis = p12 - p11
+		-- Relabel the points so that we can correspond the 'lo' and 'hi'
+		--    ends of each edge
+		var lo1 = p11
+		var hi1 = p12
+		-- C.printf("lo1: (%g, %g), hi1: (%g, %g)\n",
+		-- 	ad.val(lo1(0)), ad.val(lo1(1)), ad.val(hi1(0)), ad.val(hi1(1)))
+		var axis2 = p22 - p21
+		var lo2 = p21
+		var hi2 = p22
+		-- C.printf("lo2: (%g, %g), hi2: (%g, %g)\n",
+		-- 	ad.val(lo2(0)), ad.val(lo2(1)), ad.val(hi2(0)), ad.val(hi2(1)))
+		if axis:dot(axis2) < 0.0 then
+			lo2 = p22
+			hi2 = p21
+			-- C.printf("[FLIPPED!] lo2: (%g, %g), hi2: (%g, %g)\n",
+			-- 	ad.val(lo2(0)), ad.val(lo2(1)), ad.val(hi2(0)), ad.val(hi2(1)))
+		end
+		-- Compute distances along the arbitrarily-chosen number line
+		var dlo1 = 0.0
+		var dhi1 = axis:norm()
+		axis = axis / dhi1	-- Normalize axis
+		var dlo2 = (lo2 - origin):dot(axis)
+		var dhi2 = (hi2 - origin):dot(axis)
+		-- C.printf("dlo1: %g, dhi1: %g, dlo2: %g, dhi2: %g\n",
+		-- 	ad.val(dlo1), ad.val(dhi1), ad.val(dlo2), ad.val(dhi2))
+		-- The contact points should be at max(dlo1, dlo2) and min(dhi1, dhi2)
+		var cplo = lo1
+		if dlo2 > dlo1 then cplo = lo2 end
+		var cphi = hi1
+		if dhi2 < dhi1 then cphi = hi2 end
+		-- if cplo == lo1 then C.printf("Picking cplo = lo1\n") else C.printf("Picking cplo = lo2\n") end
+		-- if cphi == hi1 then C.printf("Picking cphi = hi1\n") else C.printf("Picking cphi = hi2\n") end
+
+		-- Derive the contact normal, as in all the other constructors
+		var normal = perp(axis)
+		if (beam2:centerOfMass() - cplo):dot(normal) >= 0.0 then
+			normal = -normal
+		end
+		-- Create and return contact objects
+		var fc1 = FrictionalContact.heapAlloc(beam1, beam2, cplo, normal)
+		var fc2 = FrictionalContact.heapAlloc(beam1, beam2, cphi, normal)
+		return fc1, fc2
+	end):getdefinitions()[1])
 
 	terra FrictionalContact:applyForcesImpl() : {}
 		var normalForce : ForceT
@@ -1194,7 +1265,7 @@ local function Connections()
 		var normal = perp(edge)
 		-- Ensure that the normal points in the right direction
 		-- (away from the center of mass of beam2)
-		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0.0 then
 			normal = -normal
 		end
 		var cp = 0.5*(cp1 + cp2)		
@@ -1214,7 +1285,7 @@ local function Connections()
 		var normal = perp(edge)
 		-- Ensure that the normal points in the right direction
 		-- (away from the center of mass of beam2)
-		if (beam2:centerOfMass() - cp1):dot(normal) >= 0 then
+		if (beam2:centerOfMass() - cp1):dot(normal) >= 0.0 then
 			normal = -normal
 		end
 		var penDepth1 = determinePenetrationDepth(beam2, cp1, normal, nailLength)

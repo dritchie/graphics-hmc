@@ -77,8 +77,10 @@ local staticsModel = probcomp(function()
 	end
 
 	-- Enforce static equilibrium of a scene given some connections
-	local fresSoftness = `0.01  -- Allow deviation of 1% the average force magnitude
-	local tresSoftness = `0.01
+	-- local fresSoftness = `0.01  -- Allow deviation of 1% the average force magnitude
+	-- local tresSoftness = `0.01
+	local fresSoftness = `0.005
+	local tresSoftness = `0.005
 	local terra enforceStability(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection)) : {}
 
 		-- Apply gravity to everything affected by it
@@ -196,8 +198,9 @@ local staticsModel = probcomp(function()
 
 	-- local example = examples.simpleNailTest
 	-- local example = examples.aFrameTest
-	local example = examples.funkyTable
+	-- local example = examples.funkyTable
 	-- local example = examples.arch
+	local example = examples.linearChainRegularBlockStack
 
 	return terra()
 		var scene, connections = example()
@@ -257,8 +260,8 @@ local function renderInitFn(samples, im)
 end
 
 -- local forceScale = 0.2
--- local forceScale = 0.01
-local forceScale = 0.0
+local forceScale = 0.03
+-- local forceScale = 0.0
 -- local forceScale = 1.0
 local function renderDrawFn(sample, im)
 	return quote
