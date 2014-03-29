@@ -294,7 +294,7 @@ local newton = terralib.require("prob.newtonProj")
 local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")
 
-local numsamps = 1000
+local numsamps = 2000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
@@ -339,7 +339,7 @@ end
 
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
-rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, imageWidth)
+rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename)
 
 
 
