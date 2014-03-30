@@ -75,12 +75,14 @@ local TriMesh = templatize(function(real)
 		topology: &TriMeshTopology,
 		ownsTopology: bool,
 		nodes: Vector(Vec2),
+		nodeBoundaryMarkers: Vector(bool)
 	}
 
 	terra TriMeshT:__construct() : {}
 		self.topology = nil
 		self.ownsTopology = false
 		m.init(self.nodes)
+		m.init(self.nodeBoundaryMarkers)
 	end
 
 	terra TriMeshT:__construct(topo: &TriMeshTopology) : {}
@@ -100,13 +102,15 @@ local TriMesh = templatize(function(real)
 		C.fgets(buf, 1023, f)
 		var numNodes = C.atoi(C.strtok(buf, " "))
 		self.nodes:resize(numNodes)
-		-- Read node lines (node index, x, y, ...)
+		self.nodeBoundaryMarkers:resize(numNodes)
+		-- Read node lines (node index, x, y, boundary marker)
 		for i=0,numNodes do
 			C.fgets(buf, 1023, f)
 			var index = C.atoi(C.strtok(buf, " "))
 			var node = self.nodes:getPointer(index)
 			node(0) = C.atof(C.strtok(nil, " "))
 			node(1) = C.atof(C.strtok(nil, " "))
+			self.nodeBoundaryMarkers(i) = bool(C.atoi(C.strtok(nil, " ")))
 		end
 		C.fclose(f)
 	end
@@ -115,11 +119,77 @@ local TriMesh = templatize(function(real)
 		self.topology = other.topology
 		self.ownsTopology = other.ownsTopology
 		self.nodes = m.copy(other.nodes)
+		self.nodeBoundaryMarkers = m.copy(other.nodeBoundaryMarkers)
 	end
 
 	terra TriMeshT:__destruct()
 		m.destruct(self.nodes)
+		m.destruct(self.nodeBoundaryMarkers)
 		if self.ownsTopology then m.delete(self.topology) end
+	end
+
+	terra TriMeshT:unsignedElementArea(i: uint)
+		var elem = self.topology.elements:getPointer(i)
+		var p0 = self.nodes(elem.node0)
+		var p1 = self.nodes(elem.node1)
+		var p2 = self.nodes(elem.node2)
+		var a = (p1-p0):norm()
+		var b = (p2-p1):norm()
+		var c = (p0-p2):norm()
+		var s = 0.5*(a+b+c)
+		return ad.math.sqrt(s*(s-a)*(s-b)*(s-c))
+	end
+
+	terra TriMeshT:signedElementArea(i: uint)
+		var elem = self.topology.elements:getPointer(i)
+		var p1 = self.nodes(elem.node0)
+		var p2 = self.nodes(elem.node1)
+		var p3 = self.nodes(elem.node2)
+		return 0.5*(-p2(0)*p1(1) + p3(0)*p1(1) + p1(0)*p2(1) - p3(0)*p2(1) - p1(0)*p3(1) + p2(0)*p3(1))
+	end
+
+	terra TriMeshT:totalSignedArea()
+		var a = real(0.0)
+		for i=0,self.topology.elements.size do
+			a = a + self:signedElementArea(i)
+		end
+		return a
+	end
+
+	-- Flip the winding order of any triangle with negative area
+	-- NOTE: alters associated TriMeshTopology object
+	terra TriMeshT:orientElementsForPositiveArea()
+		for i=0,self.topology.elements.size do
+			if self:signedElementArea(i) < 0.0 then
+				var elem = self.topology.elements:getPointer(i)
+				var tmp = elem.node0
+				elem.node0 = elem.node2
+				elem.node2 = tmp
+				util.assert(self:signedElementArea(i) > 0.0)
+			end
+		end
+	end
+
+	terra TriMeshT:elementInteriorAngles(i: uint)
+		var elem = self.topology.elements:getPointer(i)
+		var p0 = self.nodes(elem.node0)
+		var p1 = self.nodes(elem.node1)
+		var p2 = self.nodes(elem.node2)
+		var v1 = p1-p0; v1:normalize()
+		var v2 = p2-p1; v2:normalize()
+		var v3 = p0-p2; v3:normalize()
+		var d1 = v2:dot(-v1)
+		var d2 = v3:dot(-v2)
+		var d3 = v1:dot(-v3)
+		return ad.math.acos(d1), ad.math.acos(d2), ad.math.acos(d3)
+	end
+
+	terra TriMeshT:numBoundaryNodes()
+		var n = 0
+		for i=0,self.nodeBoundaryMarkers.size do
+			n = n + int(self.nodeBoundaryMarkers(i))
+		end
+		return n
 	end
 
 	local elemColor = colors.Tableau10.Blue
@@ -215,32 +285,94 @@ end
 
 -- Topology and initial node pos is constant, so we store it in a global
 local globalMesh = global(TriMesh(double))
+local globalNumBoundaryNodes = global(int)
 local terra initGlobalMesh()
 	globalMesh = [TriMesh(double)].stackAlloc("meshes/circle.ele", "meshes/circle.node")
+	globalMesh:orientElementsForPositiveArea()
+	globalNumBoundaryNodes = globalMesh:numBoundaryNodes()
 end
 initGlobalMesh()
 
 local shapeModel = probcomp(function()
 	local Vec2 = Vec(real, 2)
 	local TriMeshT = TriMesh(real)
+
+	local radians = macro(function(x)
+		return `x*[math.pi]/180.0
+	end)
+
+	local degrees = macro(function(x)
+		return `180.0*x/[math.pi]
+	end)
+
+	local lowerBarrier = macro(function(val, lowerBound, shape)
+		return quote
+			if val < lowerBound then factor([-math.huge])
+			else factor(-1.0/(shape*(val-lowerBound))) end
+		end
+	end)
+
+	local upperBarrier = macro(function(val, upperBound, shape)
+		return quote
+			if val > upperBound then factor([-math.huge])
+			else factor(1.0/(shape*(val-upperBound))) end
+		end
+	end)
+
 	return terra()
 		var mesh = TriMeshT.stackAlloc(globalMesh.topology)
 		mesh.nodes:resize(globalMesh.nodes.size)
+
+		-- Put random perturbation on nodes
 		for i=0,mesh.nodes.size do
-			-- mesh.nodes(i) = Vec2(globalMesh.nodes(i))
-			mesh.nodes(i)(0) = gaussian(globalMesh.nodes(i)(0), 0.1, {structural=false, initialVal=globalMesh.nodes(i)(0)})
-			mesh.nodes(i)(1) = gaussian(globalMesh.nodes(i)(1), 0.1, {structural=false, initialVal=globalMesh.nodes(i)(1)})
+			mesh.nodes(i)(0) = gaussian(globalMesh.nodes(i)(0), 0.2, {structural=false, initialVal=globalMesh.nodes(i)(0)})
+			mesh.nodes(i)(1) = gaussian(globalMesh.nodes(i)(1), 0.2, {structural=false, initialVal=globalMesh.nodes(i)(1)})
 		end
+
+		-- Prevent elements from reaching zero area
+		-- Prevent interior angles from getting too bad
+		for i=0,mesh.topology.elements.size do
+			-- var area = mesh:unsignedElementArea(i)
+			-- var area = mesh:signedElementArea(i)
+			-- lowerBarrier(area, 0.0, 100.0)
+			var ang1, ang2, ang3 = mesh:elementInteriorAngles(i)
+			lowerBarrier(ang1, radians(20.0), 100.0)
+			lowerBarrier(ang2, radians(20.0), 100.0)
+			lowerBarrier(ang3, radians(20.0), 100.0)
+		end
+
+		-- Enforce smoothness along the boundary
+		-- Enforcing a minimum angle of pi - 2pi/numBoundaryNodes would
+		--    mean that a circle is the only viable shape.
+		-- Allowing bigger angles makes for more shape possibilities
+		for i=0,globalNumBoundaryNodes do
+			var previ : int = i - 1; if previ < 0 then previ = globalNumBoundaryNodes-1 end
+			var nexti = (i + 1) % globalNumBoundaryNodes
+			var p0 = mesh.nodes(previ)
+			var p1 = mesh.nodes(i)
+			var p2 = mesh.nodes(nexti)
+			var v1 = p0 - p1; v1:normalize()
+			var v2 = p2 - p1; v2:normalize()
+			var d = v1:dot(v2)
+			var ang = ad.math.acos(d)
+			lowerBarrier(ang, [math.pi] - 3.0*[2*math.pi]/globalNumBoundaryNodes, 100.0)
+		end
+
+		-- Enforce unit area
+		var totalArea = mesh:totalSignedArea()
+		factor(softeq(totalArea, [math.pi], 0.01))
+
 		return mesh
 	end
 end)
 
 -------------------------------------------------------------------------------
 
-local numsamps = 10
+local numsamps = 1000
 
 local terra run()
-	return [forwardSample(shapeModel, numsamps)]
+	return [mcmc(shapeModel, HMC({numSteps=100, verbosity=0}), {numsamps=numsamps, verbose=true})]
+	-- return [forwardSample(shapeModel, numsamps)]
 end
 local samples = m.gc(run())
 moviename = arg[1] or "movie"
