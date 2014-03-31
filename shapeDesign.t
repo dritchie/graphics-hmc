@@ -25,14 +25,29 @@ local struct TriMeshElement
 	node2: uint
 }
 
+terra TriMeshElement:otherNode(n0: uint, n1: uint)
+	if (self.node0 == n0 and self.node1 == n1) or (self.node0 == n1 and self.node1 == n0) then
+		return self.node2
+	elseif (self.node0 == n0 and self.node2 == n1) or (self.node0 == n1 and self.node2 == n0) then
+		return self.node1
+	elseif (self.node1 == n0 and self.node2 == n1) or (self.node1 == n1 and self.node2 == n0) then
+		return self.node0
+	else
+		util.fatalError("TriMeshElement:otherNode - triangle does not contain the two nodes provided\n")
+	end
+end
+
+
 -- Stores the topology of a triangle mesh
 local struct TriMeshTopology
 {
-	elements: Vector(TriMeshElement)
+	elements: Vector(TriMeshElement),
+	node2tri: Vector(Vector(uint))
 }
 
 terra TriMeshTopology:__construct() : {}
 	m.init(self.elements)
+	m.init(self.node2tri)
 end
 
 -- Construct by loading from a file
@@ -56,10 +71,35 @@ terra TriMeshTopology:__construct(elefile: rawstring) : {}
 		elem.node2 = C.atoi(C.strtok(nil, " "))
 	end
 	C.fclose(f)
+
+	-- *** Build map of node -> triangle *** --
+	for i=0,numElems do
+		var elem = self.elements:getPointer(i)
+		if self.node2tri.size < elem.node0+1 then self.node2tri:resize(elem.node0+1) end
+		self.node2tri(elem.node0):push(i)
+		if self.node2tri.size < elem.node1+1 then self.node2tri:resize(elem.node1+1) end
+		self.node2tri(elem.node1):push(i)
+		if self.node2tri.size < elem.node2+1 then self.node2tri:resize(elem.node2+1) end
+		self.node2tri(elem.node2):push(i)
+	end
 end
 
 terra TriMeshTopology:__destruct()
 	m.destruct(self.elements)
+	m.destruct(self.node2tri)
+end
+
+-- Get all triangles containing the two provided nodes
+terra TriMeshTopology:elementsContainingEdge(n0: uint, n1: uint, outlist: &Vector(uint))
+	outlist:clear()
+	var n0tris = self.node2tri:getPointer(n0)
+	for i=0,n0tris.size do
+		var elemid = n0tris(i)
+		var elem = self.elements:getPointer(elemid)
+		if elem.node0 == n1 or elem.node1 == n1 or elem.node2 == n1 then
+			outlist:push(elemid)
+		end
+	end
 end
 
 m.addConstructors(TriMeshTopology)
@@ -190,6 +230,43 @@ local TriMesh = templatize(function(real)
 			n = n + int(self.nodeBoundaryMarkers(i))
 		end
 		return n
+	end
+
+	-- Compute total signed curvature along a boundary polyline in the mesh
+	-- Assumes that the given node indices actually do connect to form a polyline.
+	-- Assumes that the given nodes are actually on the boundary
+	-- (If it becomes necessary, we could insert checks for both of these things)
+	terra TriMeshT:totalSignedCurvature(nodeList: &Vector(uint))
+		util.assert(nodeList.size >= 3, "Need at least three nodes to compute total signed curvature\n")
+		var trilist = [Vector(uint)].stackAlloc()
+		var tsc = real(0.0)
+		for i=1,nodeList.size-1 do
+			var i0 = i-1
+			var i1 = i
+			var i2 = i+1
+			var p0 = self.nodes(i0)
+			var p1 = self.nodes(i1)
+			var p2 = self.nodes(i2)
+			var v10 = p0 - p1; v10:normalize()
+			var v12 = p2 - p1; v12:normalize()
+			-- Take dot product to get unsigned angle, then figure out whether we need to
+			--    flip the sign.
+			var d = v10:dot(v12)
+			var ang = [math.pi] - ad.math.acos(d)
+			self.topology:elementsContainingEdge(i0, i1, &trilist)
+			var otherVert1 = self.nodes(self.topology.elements(trilist(0)):otherNode(i0, i1))
+			self.topology:elementsContainingEdge(i1, i2, &trilist)
+			var otherVert2 = self.nodes(self.topology.elements(trilist(0)):otherNode(i1, i2))
+			var avgOtherVert = 0.5*(otherVert1 + otherVert2)
+			var inwardVec = avgOtherVert - p1
+			var halfVec = 0.5*(v10 + v12)
+			if inwardVec:dot(halfVec) < 0.0 then
+				ang = - ang
+			end
+			tsc = tsc + ang
+		end
+		m.destruct(trilist)
+		return tsc
 	end
 
 	local elemColor = colors.Tableau10.Blue
@@ -360,7 +437,16 @@ local shapeModel = probcomp(function()
 
 		-- Enforce unit area
 		var totalArea = mesh:totalSignedArea()
+		-- C.printf("%g                           \n", ad.val(totalArea))
 		factor(softeq(totalArea, [math.pi], 0.01))
+
+		-- Encourage high curvature along part of the boundary
+		var nodelist = [Vector(uint)].stackAlloc(globalNumBoundaryNodes/4)
+		for i=0,globalNumBoundaryNodes/4 do
+			nodelist(i) = i
+		end
+		var tsc = mesh:totalSignedCurvature(&nodelist)
+		factor(softeq(tsc, [2*math.pi], [math.pi/16]))
 
 		return mesh
 	end
