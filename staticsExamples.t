@@ -1105,10 +1105,10 @@ local function genExamples(gravityConstant, Connections)
 		scene.objects:push(ground)
 
 		-- Parameters
-		-- var numBlocks = 4
+		var numBlocks = 4
 		-- var numBlocks = 5
 		-- var numBlocks = 6
-		var numBlocks = 7
+		-- var numBlocks = 7
 		var blockDepth = mm(20.0)
 		var blockMinWidth = mm(20.0)
 		var blockMaxWidth = mm(80.0)
@@ -1150,9 +1150,13 @@ local function genExamples(gravityConstant, Connections)
 
 		-- Generate connections
 		var c1, c2 = Connections.FrictionalContact.makeBeamContacts(blocks(0), ground, 0, 1)
+		-- c1.frictionCoeff = 0.9
+		-- c2.frictionCoeff = 0.9
 		connections:push(c1); connections:push(c2)
 		for i=1,blocks.size do
 			var c1, c2 = Connections.FrictionalContact.makeBeamContacts(blocks(i), blocks(i-1), 0, 1, 2, 3)
+			-- c1.frictionCoeff = 0.9
+			-- c2.frictionCoeff = 0.9
 			connections:push(c1); connections:push(c2)
 		end
 
@@ -1169,48 +1173,20 @@ local function genExamples(gravityConstant, Connections)
 
 		-- -- Encourage desired shape (sideways-V)
 		-- var shapeFactorSoftness = mm(10.0)
+		-- var leanAng = radians(-30.0)
+		-- var lineLen = 2.0*sceneHeight
 		-- var line1Start = Vec2.stackAlloc(0.5*sceneWidth, groundHeight)
-		-- var line1End = Vec2.stackAlloc(0.1*sceneWidth, 0.4*sceneHeight)
-		-- var line2Start = line1End
-		-- var line2End = Vec2.stackAlloc(0.5*sceneWidth, 0.8*sceneHeight)
-		-- for i=0,blocks.size/2 do
+		-- var line1End = line1Start + polar2rect(lineLen, [math.pi/2]-leanAng)
+		-- for i=0,int(ad.math.ceil(blocks.size/2.0)) do
 		-- 	var dist = ad.math.sqrt(blocks(i):centerOfMass():distSqToLineSeg(line1Start, line1End))
 		-- 	factor(softeq(dist, 0.0, shapeFactorSoftness))
 		-- end
-		-- for i=blocks.size/2,blocks.size do
+		-- var line2Start = blocks(blocks.size/2):centerOfMass()
+		-- var line2End = line2Start + polar2rect(lineLen, [math.pi/2]+leanAng)
+		-- for i=int(ad.math.ceil(blocks.size/2.0)),blocks.size do
 		-- 	var dist = ad.math.sqrt(blocks(i):centerOfMass():distSqToLineSeg(line2Start, line2End))
 		-- 	factor(softeq(dist, 0.0, shapeFactorSoftness))
 		-- end
-
-		-- -- Encourage desired shape (sideways-V)
-		-- -- C.printf("----------------------------\n")
-		-- var shapeFactorSoftness = ad.math.fabs(ad.math.cos(radians(5.0)) - ad.math.cos(radians(0.0)))
-		-- var targetDotProd = ad.math.cos(radians(90.0))
-		-- -- C.printf("%g                         \n", ad.val(targetDotProd))
-		-- var vec1 = blocks(0):centerOfMass() - blocks((numBlocks-1)/2):centerOfMass()
-		-- var vec2 = blocks(numBlocks-1):centerOfMass() - blocks((numBlocks-1)/2):centerOfMass()
-		-- vec1:normalize()
-		-- vec2:normalize()
-		-- var dotProd = vec1:dot(vec2)
-		-- -- C.printf("%g                       \n", ad.val(dotProd))
-		-- factor(softeq(dotProd, targetDotProd, shapeFactorSoftness))
-
-		-- Encourage desired shape (sideways-V)
-		var shapeFactorSoftness = mm(10.0)
-		var leanAng = radians(-30.0)
-		var lineLen = 2.0*sceneHeight
-		var line1Start = Vec2.stackAlloc(0.5*sceneWidth, groundHeight)
-		var line1End = line1Start + polar2rect(lineLen, [math.pi/2]-leanAng)
-		for i=0,int(ad.math.ceil(blocks.size/2.0)) do
-			var dist = ad.math.sqrt(blocks(i):centerOfMass():distSqToLineSeg(line1Start, line1End))
-			factor(softeq(dist, 0.0, shapeFactorSoftness))
-		end
-		var line2Start = blocks(blocks.size/2):centerOfMass()
-		var line2End = line2Start + polar2rect(lineLen, [math.pi/2]+leanAng)
-		for i=int(ad.math.ceil(blocks.size/2.0)),blocks.size do
-			var dist = ad.math.sqrt(blocks(i):centerOfMass():distSqToLineSeg(line2Start, line2End))
-			factor(softeq(dist, 0.0, shapeFactorSoftness))
-		end
 
 		m.destruct(blocks)
 

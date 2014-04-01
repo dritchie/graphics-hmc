@@ -294,7 +294,7 @@ local newton = terralib.require("prob.newtonProj")
 local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")
 
-local numsamps = 2000
+local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
