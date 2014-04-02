@@ -2,6 +2,7 @@ terralib.require("prob")
 
 local util = terralib.require("util")
 local m = terralib.require("mem")
+local inheritance = terralib.require("inheritance")
 local ad = terralib.require("ad")
 local Vector = terralib.require("vector")
 local Vec = terralib.require("linalg").Vec
@@ -9,6 +10,9 @@ local colors = terralib.require("colors")
 
 local staticsUtils = terralib.require("staticsUtils")
 local staticsExamples = terralib.require("staticsExamples")
+
+local lpsolve = terralib.require("lpsolve")
+local HashMap = terralib.require("hashmap")
 
 local C = terralib.includecstring [[
 #include <stdio.h>
@@ -36,6 +40,165 @@ local staticsModel = probcomp(function()
 
 	----------------------------------
 
+	--- Test for stability exactly by solving the static equilibrium LP ---
+	-- (We only run this test for non-ad traces, i.e. the endpoint of an HMC trajectory)
+	-- NOTE: This currently assumes that we only have FrictionalContacts and that the only
+	--    external force is gravity
+	local isExactlyStable = nil
+	if real == double then
+		-- We identify each contact by its position in the connections array.
+		--    The compressive force variable will be numbered 1 + 2*index
+		--    The friction force variable will be numbered 1 + 2*index + 1
+		--    (The 1 + is because LP_SOLVE is 1-based internally)
+		local compressionVarIDForContact = macro(function(contactID)
+			return `1 + 2*contactID
+		end)
+		local frictionVarIDForContact = macro(function(contactID)
+			return `1 + 2*contactID + 1
+		end)
+		-- The sign of the force variable flips depending on the direction
+		--    of the contact normal and the object under examination
+		local fsign = macro(function(obj, contact)
+			return quote
+				var res = 1.0
+				if contact.contactNormal:dot(obj:centerOfMass() - contact.contactPoint) < 0.0 then
+					res = -1.0
+				end
+			in
+				res
+			end
+		end)
+		isExactlyStable = terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection))
+			-- Assume all connections are frictional contacts, so two DoFs per connection
+			var numVars = 2*connections.size
+
+			-- Build a map from objects to their index in the scene list
+			var obj2index = [HashMap(&RigidObjectT, uint)].stackAlloc()
+			for i=0,scene.objects.size do
+				obj2index:put(scene.objects(i), i)
+			end
+
+			-- Build a map from objects to the IDs of the contacts that involve them
+			var obj2contact = [Vector(Vector(uint))].stackAlloc(scene.objects.size)
+			for i=0,connections.size do
+				util.assert([inheritance.isInstanceOf(Connections.FrictionalContact)](connections(i)),
+					"isExactlyStable currently requires all connections to be FrictionalContacts\n")
+				var contact = [&Connections.FrictionalContact](connections(i))
+				obj2contact(obj2index(contact.objs[0])):push(i)
+				obj2contact(obj2index(contact.objs[1])):push(i)
+			end
+
+			-- *** BUILD THE LP *** --
+
+			-- Initialize
+			var lp = lpsolve.make_lp(0, numVars)
+			lpsolve.set_verbose(lp, 0)
+
+			-- Constrain all the friction forces to be within the friction cone
+			var indices = [Vector(int)].stackAlloc()
+			var coeffs = [Vector(double)].stackAlloc()
+			indices:resize(2)
+			coeffs:resize(2)
+			coeffs(0) = 1.0
+			for i=0,connections.size do
+				var contact = [&Connections.FrictionalContact](connections(i))
+				indices(0) = frictionVarIDForContact(i)
+				indices(1) = compressionVarIDForContact(i)
+				-- frictionForce >= -frictionCoeff*compressiveForce
+				--   --> frictionForce + frictionCoeff*compressiveForce >= 0
+				coeffs(1) = contact.frictionCoeff
+				lpsolve.add_constraintex(lp, 2, &coeffs(0), &indices(0), lpsolve.GE, 0.0)
+				-- frictionForce <= frictionCoeff*compressiveForce
+				--   --> frictionForce - frictionCoeff*compressiveForce <= 0
+				coeffs(1) = -contact.frictionCoeff
+				lpsolve.add_constraintex(lp, 2, &coeffs(0), &indices(0), lpsolve.LE, 0.0)
+			end
+
+			-- Use equality constraints to enforce equilibrium
+			for i=0,scene.objects.size do
+				var obj = scene.objects(i)
+				if obj.active then
+					var gravityForce = 0.0
+					if obj.affectedByGravity then 
+						gravityForce = -gravityConstant*obj:mass()
+					end
+					var numContacts = obj2contact(i).size
+					indices:resize(2*numContacts)
+					coeffs:resize(2*numContacts)
+
+					-- Force balance gives two constraints: one for x and one for y
+					-- x constraint: sum of horizontal forces is zero
+					for j=0,numContacts do
+						var cid = obj2contact(i)(j)
+						var contact = [&Connections.FrictionalContact](connections(cid))
+						indices(2*j) = compressionVarIDForContact(cid)
+						indices(2*j+1) = frictionVarIDForContact(cid)
+						coeffs(2*j) = fsign(obj, contact) * contact.contactNormal(0)
+						coeffs(2*j+1) = fsign(obj, contact) * contact.contactTangent(0)
+					end
+					lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, 0.0)
+					-- y constraint: sum of vertical forces counteracts gravity
+					for j=0,numContacts do
+						var cid = obj2contact(i)(j)
+						var contact = [&Connections.FrictionalContact](connections(cid))
+						indices(2*j) = compressionVarIDForContact(cid)
+						indices(2*j+1) = frictionVarIDForContact(cid)
+						coeffs(2*j) = fsign(obj, contact) * contact.contactNormal(1)
+						coeffs(2*j+1) = fsign(obj, contact) * contact.contactTangent(1)
+					end
+					lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, -gravityForce)
+
+					-- Torque balance: We sum up the DOFs of all the forces on this object, then take
+					--    min(numDOFs - 2, 1) as the number of places we should evaluate net torque
+					var numDOFs = 0
+					for j=0,obj.forces.size do numDOFs = numDOFs + obj.forces(j).dof end
+					var numTorquePoints = numDOFs - 2; if numTorquePoints == 0 then numTorquePoints = 1 end
+					var evalpoints = [Vector(Vec2)].stackAlloc()
+					obj:getCentersOfRotation(numTorquePoints, &evalpoints)
+					-- Evaluate net torque at every one of these points
+					for j=0,evalpoints.size do
+						var torquePoint = evalpoints(j)
+						-- Build up the net torque here
+						for k=0,numContacts do
+							var cid = obj2contact(i)(k)
+							var contact = [&Connections.FrictionalContact](connections(cid))
+							var v = torquePoint - contact.contactPoint
+							indices(2*j) = compressionVarIDForContact(cid)
+							indices(2*j+1) = frictionVarIDForContact(cid)
+							-- Torque is F x v, where F is sign * (compress * normal + friction * tangent)
+							-- This simplifies to the following coefficients:
+							--    compress: sign * (normal_x * v_y - normal_y * v_x)
+							--    friction: sign * (tangent_x * v_y - tangent_y * v_x)
+							coeffs(2*j) = fsign(obj, contact) * (contact.contactNormal(0)*v(1) - contact.contactNormal(1)*v(0))
+							coeffs(2*j+1) = fsign(obj, contact) * (contact.contactTangent(0)*v(1) - contact.contactTangent(1)*v(0))
+						end
+						lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, 0.0)
+					end
+					m.destruct(evalpoints)
+				end
+			end
+
+			-- Solve LP, check for feasibility
+			var retcode = lpsolve.solve(lp)
+			var isStable : bool
+			if retcode == lpsolve.OPTIMAL then
+				isStable = true
+			elseif retcode == lpsolve.INFEASIBLE then
+				isStable = false
+			else
+				util.fatalError("Unexpected LP_SOLVE return code: %d\n", retcode)
+			end
+
+			m.destruct(obj2index)
+			m.destruct(obj2contact)
+			lpsolve.delete_lp(lp)
+
+			return isStable
+		end
+	end
+
+	----------------------------------
+
 	-- Toggle whether we're considering each residual independently
 	--   or using the RMS of all of them
 	-- (Force and Torque residuals are treated separately, though)
@@ -46,35 +209,53 @@ local staticsModel = probcomp(function()
 	-- Toggle diagnostic output for residuals
 	local printResiduals = false
 
-	-- Check if a beam's residuals are all less than 3 sigma from 0. If not,
-	--    color the beam red to mark it as unstable.
+	-- Color a beam by its 'stability,' using residual as a proxy for stability
+	-- DEPRECATED. We use the LP_SOLVE-based method below, instead
 	local stabColor0 = colors.Tableau10.Blue
 	local stabColor1 = colors.Tableau10.Green
 	local stabColor2 = colors.Tableau10.Yellow
 	local stabColor3 = colors.Tableau10.Red
-	local terra colorByStability(maxResRatio: real)
+	local terra colorByResidual(maxResRatio: real)
 		var mrr = ad.val(maxResRatio)
 		if mrr < 1.0 then return lerp(Color3d.stackAlloc(stabColor0), Color3d.stackAlloc(stabColor1), mrr)
 		elseif mrr < 2.0 then return lerp(Color3d.stackAlloc(stabColor1), Color3d.stackAlloc(stabColor2), mrr-1.0)
 		elseif mrr < 3.0 then return lerp(Color3d.stackAlloc(stabColor2), Color3d.stackAlloc(stabColor3), mrr-3.0)
 		else return Color3d.stackAlloc(stabColor3) end
 	end
-	local checkStability = nil
+	local visualizeResiduals = nil
 	if rmseRes then
-		checkStability = terra(obj: &RigidObjectT, fres: real, tres: real, fsigma: real, tsigma: real)
+		visualizeResiduals = terra(obj: &RigidObjectT, fres: real, tres: real, fsigma: real, tsigma: real)
 			var beam = [&BeamT](obj)
 			var maxResRatio = ad.math.fmax(fres/fsigma, tres/tsigma)
-			beam.color = colorByStability(maxResRatio)
+			beam.color = colorByResidual(maxResRatio)
 		end
 	else
-		checkStability = terra(obj: &RigidObjectT, fres: Vec2, tres: &Vector(real), fsigma: real, tsigma: real)
+		visualizeResiduals = terra(obj: &RigidObjectT, fres: Vec2, tres: &Vector(real), fsigma: real, tsigma: real)
 			var beam = [&BeamT](obj)
 			var maxResRatio = ad.math.fmax(ad.math.fabs(fres(0))/fsigma, ad.math.fabs(fres(1))/fsigma)
 			for i=0,tres.size do
 				maxResRatio = ad.math.fmax(maxResRatio, ad.math.fabs(tres(i))/tsigma)
 			end	
-			beam.color = colorByStability(maxResRatio)
+			beam.color = colorByResidual(maxResRatio)
 		end
+	end
+
+	-- Color the whole structure red if it fails the LP_SOLVE stability check
+	local colorIfUnstable = nil
+	if real == double then
+		colorIfUnstable = terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection))
+			if not isExactlyStable(scene, connections) then
+				for i=0,scene.objects.size do
+					var obj = scene.objects(i)
+					if obj.active then
+						var beam = [&BeamT](obj)
+						beam.color = Color3d.stackAlloc([colors.Tableau10.Red])
+					end
+				end
+			end
+		end
+	else
+		colorIfUnstable = terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection)) end
 	end
 
 	-- Enforce static equilibrium of a scene given some connections
@@ -118,6 +299,9 @@ local staticsModel = probcomp(function()
 			connections(i):applyForces()
 		end
 
+		-- -- Flag the whole structure with a red color if it can't be made stable
+		-- colorIfUnstable(scene, connections)
+
 		-- Calculate residuals and apply factors
 		-- (Individual residual style)
 		var fres = Vec2.stackAlloc(0.0, 0.0)
@@ -150,7 +334,7 @@ local staticsModel = probcomp(function()
 						if avgTmag > 0.0 then tres_ = tres_ / avgTmag end
 					end end)]
 					-- Visualize stable/unstable elements
-					checkStability(scene.objects(i), fres_, tres_, fresSoftness, tresSoftness)
+					visualizeResiduals(scene.objects(i), fres_, tres_, fresSoftness, tresSoftness)
 					-- Add stability factors
 					factor(softeq(fres_, 0.0, fresSoftness))
 					factor(softeq(tres_, 0.0, tresSoftness))
@@ -174,7 +358,7 @@ local staticsModel = probcomp(function()
 						if avgTmag > 0.0 then for j=0,tres.size do tres(j) = tres(j) / avgTmag end end
 					end end)]
 					-- Visualize stable/unstable elements
-					checkStability(scene.objects(i), fres, &tres, fresSoftness, tresSoftness)
+					visualizeResiduals(scene.objects(i), fres, &tres, fresSoftness, tresSoftness)
 					-- Add stability factors
 					factor(softeq(fres(0), 0.0, fresSoftness))
 					factor(softeq(fres(1), 0.0, fresSoftness))
