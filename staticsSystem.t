@@ -60,12 +60,12 @@ local staticsModel = probcomp(function()
 		--    of the contact normal and the object under examination
 		local fsign = macro(function(obj, contact)
 			return quote
-				var res = 1.0
+				var sgn = 1.0
 				if contact.contactNormal:dot(obj:centerOfMass() - contact.contactPoint) < 0.0 then
-					res = -1.0
+					sgn = -1.0
 				end
 			in
-				res
+				sgn
 			end
 		end)
 		isExactlyStable = terra(scene: &RigidSceneT, connections: &Vector(&Connections.RigidConnection))
@@ -81,8 +81,8 @@ local staticsModel = probcomp(function()
 			-- Build a map from objects to the IDs of the contacts that involve them
 			var obj2contact = [Vector(Vector(uint))].stackAlloc(scene.objects.size)
 			for i=0,connections.size do
-				util.assert([inheritance.isInstanceOf(Connections.FrictionalContact)](connections(i)),
-					"isExactlyStable currently requires all connections to be FrictionalContacts\n")
+				-- util.assert([inheritance.isInstanceOf(Connections.FrictionalContact)](connections(i)),
+				-- 	"isExactlyStable currently requires all connections to be FrictionalContacts\n")
 				var contact = [&Connections.FrictionalContact](connections(i))
 				obj2contact(obj2index(contact.objs[0])):push(i)
 				obj2contact(obj2index(contact.objs[1])):push(i)
@@ -99,17 +99,24 @@ local staticsModel = probcomp(function()
 			var coeffs = [Vector(double)].stackAlloc()
 			indices:resize(2)
 			coeffs:resize(2)
-			coeffs(0) = 1.0
 			for i=0,connections.size do
 				var contact = [&Connections.FrictionalContact](connections(i))
-				indices(0) = frictionVarIDForContact(i)
-				indices(1) = compressionVarIDForContact(i)
+				-- Variables have a default lower bound of 0, but friction forces can go negative
+				-- We have to explicitly say that friction force variables are unbounded
+				lpsolve.set_unbounded(lp, frictionVarIDForContact(i))
+				-- Now we introduce the two friction cone constraints:
 				-- frictionForce >= -frictionCoeff*compressiveForce
 				--   --> frictionForce + frictionCoeff*compressiveForce >= 0
+				indices(0) = frictionVarIDForContact(i)
+				indices(1) = compressionVarIDForContact(i)
+				coeffs(0) = 1.0
 				coeffs(1) = contact.frictionCoeff
 				lpsolve.add_constraintex(lp, 2, &coeffs(0), &indices(0), lpsolve.GE, 0.0)
 				-- frictionForce <= frictionCoeff*compressiveForce
 				--   --> frictionForce - frictionCoeff*compressiveForce <= 0
+				indices(0) = frictionVarIDForContact(i)
+				indices(1) = compressionVarIDForContact(i)
+				coeffs(0) = 1.0
 				coeffs(1) = -contact.frictionCoeff
 				lpsolve.add_constraintex(lp, 2, &coeffs(0), &indices(0), lpsolve.LE, 0.0)
 			end
@@ -122,9 +129,17 @@ local staticsModel = probcomp(function()
 					if obj.affectedByGravity then 
 						gravityForce = -gravityConstant*obj:mass()
 					end
+					-- C.printf("gravityForce: %g\n", gravityForce)
 					var numContacts = obj2contact(i).size
 					indices:resize(2*numContacts)
 					coeffs:resize(2*numContacts)
+
+					-- -- Test just set friction forces to zero
+					-- for j=0,numContacts do
+					-- 	indices(0) = frictionVarIDForContact(j)
+					-- 	coeffs(0) = 1.0
+					-- 	lpsolve.add_constraintex(lp, 1, &coeffs(0), &indices(0), lpsolve.EQ, 0.0)
+					-- end
 
 					-- Force balance gives two constraints: one for x and one for y
 					-- x constraint: sum of horizontal forces is zero
@@ -152,9 +167,11 @@ local staticsModel = probcomp(function()
 					--    min(numDOFs - 2, 1) as the number of places we should evaluate net torque
 					var numDOFs = 0
 					for j=0,obj.forces.size do numDOFs = numDOFs + obj.forces(j).dof end
-					var numTorquePoints = numDOFs - 2; if numTorquePoints == 0 then numTorquePoints = 1 end
+					-- var numTorquePoints = numDOFs - 2; if numTorquePoints == 0 then numTorquePoints = 1 end
+					-- var numTorquePoints = 1
 					var evalpoints = [Vector(Vec2)].stackAlloc()
-					obj:getCentersOfRotation(numTorquePoints, &evalpoints)
+					-- obj:getCentersOfRotation(numTorquePoints, &evalpoints)
+					evalpoints:push(obj:centerOfMass())
 					-- Evaluate net torque at every one of these points
 					for j=0,evalpoints.size do
 						var torquePoint = evalpoints(j)
@@ -162,17 +179,19 @@ local staticsModel = probcomp(function()
 						for k=0,numContacts do
 							var cid = obj2contact(i)(k)
 							var contact = [&Connections.FrictionalContact](connections(cid))
-							var v = torquePoint - contact.contactPoint
-							indices(2*j) = compressionVarIDForContact(cid)
-							indices(2*j+1) = frictionVarIDForContact(cid)
+							var v = contact.contactPoint - torquePoint
+							indices(2*k) = compressionVarIDForContact(cid)
+							indices(2*k+1) = frictionVarIDForContact(cid)
 							-- Torque is F x v, where F is sign * (compress * normal + friction * tangent)
 							-- This simplifies to the following coefficients:
-							--    compress: sign * (normal_x * v_y - normal_y * v_x)
-							--    friction: sign * (tangent_x * v_y - tangent_y * v_x)
-							coeffs(2*j) = fsign(obj, contact) * (contact.contactNormal(0)*v(1) - contact.contactNormal(1)*v(0))
-							coeffs(2*j+1) = fsign(obj, contact) * (contact.contactTangent(0)*v(1) - contact.contactTangent(1)*v(0))
+							--    compress: sign * (v x normal)
+							--    friction: sign * (v x tangent)
+							coeffs(2*k) = staticsUtils.cross(v, fsign(obj, contact) * contact.contactNormal)
+							coeffs(2*k+1) = staticsUtils.cross(v, fsign(obj, contact) * contact.contactTangent)
 						end
-						lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, 0.0)
+						-- Net internal torque must counteract torque due to gravity
+						var gravTorque = staticsUtils.cross(obj:centerOfMass() - torquePoint, Vec2.stackAlloc(0.0, -gravityForce))
+						lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, -gravTorque)
 					end
 					m.destruct(evalpoints)
 				end
@@ -180,17 +199,18 @@ local staticsModel = probcomp(function()
 
 			-- Solve LP, check for feasibility
 			var retcode = lpsolve.solve(lp)
-			var isStable : bool
+			var isStable = false
 			if retcode == lpsolve.OPTIMAL then
 				isStable = true
-			elseif retcode == lpsolve.INFEASIBLE then
-				isStable = false
-			else
-				util.fatalError("Unexpected LP_SOLVE return code: %d\n", retcode)
 			end
+			-- lpsolve.print_lp(lp)
+			-- C.printf("\nlpsolve return code: %d\n", retcode)
+			-- lpsolve.print_solution(lp, 1)
 
 			m.destruct(obj2index)
 			m.destruct(obj2contact)
+			m.destruct(indices)
+			m.destruct(coeffs)
 			lpsolve.delete_lp(lp)
 
 			return isStable
@@ -299,8 +319,8 @@ local staticsModel = probcomp(function()
 			connections(i):applyForces()
 		end
 
-		-- -- Flag the whole structure with a red color if it can't be made stable
-		-- colorIfUnstable(scene, connections)
+		-- Flag the whole structure with a red color if it can't be made stable
+		colorIfUnstable(scene, connections)
 
 		-- Calculate residuals and apply factors
 		-- (Individual residual style)
@@ -333,8 +353,8 @@ local staticsModel = probcomp(function()
 						if avgFmag > 0.0 then fres_ = fres_ / avgFmag end
 						if avgTmag > 0.0 then tres_ = tres_ / avgTmag end
 					end end)]
-					-- Visualize stable/unstable elements
-					visualizeResiduals(scene.objects(i), fres_, tres_, fresSoftness, tresSoftness)
+					-- -- Visualize residuals
+					-- visualizeResiduals(scene.objects(i), fres_, tres_, fresSoftness, tresSoftness)
 					-- Add stability factors
 					factor(softeq(fres_, 0.0, fresSoftness))
 					factor(softeq(tres_, 0.0, tresSoftness))
@@ -454,10 +474,8 @@ local function renderInitFn(samples, im)
 	end
 end
 
--- local forceScale = 0.2
-local forceScale = 0.03
--- local forceScale = 0.0
--- local forceScale = 1.0
+-- local forceScale = 0.03
+local forceScale = 0.0
 local function renderDrawFn(sample, im)
 	return quote
 		var scene = &sample.value

@@ -1442,6 +1442,7 @@ return
 	Ground = Ground,
 	RigidScene = RigidScene,
 	Connections = Connections,
+	cross = cross,
 	perp = perp
 }
 

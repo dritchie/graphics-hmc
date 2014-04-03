@@ -1050,7 +1050,9 @@ local function genExamples(gravityConstant, Connections)
 		scene.objects:push(ground)
 
 		-- Parameters
-		var numBlocks = 4
+		-- var numBlocks = 4
+		var numBlocks = 2
+		-- var numBlocks = 1
 		var blockDepth = mm(20.0)
 		var blockMinWidth = mm(20.0)
 		var blockMaxWidth = mm(80.0)
@@ -1063,6 +1065,8 @@ local function genExamples(gravityConstant, Connections)
 		-- Generate the ground block
 		var w = boundedUniform(blockMinWidth, blockMaxWidth)
 		var h = boundedUniform(blockMinHeight, blockMaxHeight)
+		-- var w = real(0.5*(blockMinWidth + blockMaxWidth))
+		-- var h = real(0.5*(blockMinHeight + blockMaxHeight))
 		blocks:push(BeamT.heapAlloc(Vec2.stackAlloc(0.5*sceneWidth, groundHeight), w, h, blockDepth))
 
 		-- Generate other blocks
@@ -1105,6 +1109,8 @@ local function genExamples(gravityConstant, Connections)
 		scene.objects:push(ground)
 
 		-- Parameters
+		-- var numBlocks = 1
+		-- var numBlocks = 2
 		var numBlocks = 4
 		-- var numBlocks = 5
 		-- var numBlocks = 6
@@ -1125,6 +1131,10 @@ local function genExamples(gravityConstant, Connections)
 		var h = boundedUniform(blockMinHeight, blockMaxHeight)
 		var baseAng = boundedUniform(blockMinAng, blockMaxAng)
 		var topAng = boundedUniform(blockMinAng, blockMaxAng)
+		-- var w = real(0.5*(blockMinWidth + blockMaxWidth))
+		-- var h = real(0.5*(blockMinHeight + blockMaxHeight))
+		-- var baseAng = real(radians(-20.0))
+		-- var topAng = real(0.0)
 		blocks:push(BeamT.createFlushConnectingBeam(ground, Vec2.stackAlloc(0.5*sceneWidth, groundHeight), baseAng, topAng, h, w, blockDepth))
 
 		-- Generate other blocks
