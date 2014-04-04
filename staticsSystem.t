@@ -134,12 +134,20 @@ local staticsModel = probcomp(function()
 					indices:resize(2*numContacts)
 					coeffs:resize(2*numContacts)
 
-					-- -- Test just set friction forces to zero
+					-- -- Test: just set friction forces to zero
 					-- for j=0,numContacts do
 					-- 	indices(0) = frictionVarIDForContact(j)
 					-- 	coeffs(0) = 1.0
 					-- 	lpsolve.add_constraintex(lp, 1, &coeffs(0), &indices(0), lpsolve.EQ, 0.0)
 					-- end
+
+					-- -- Test: Set the compressive forces directly
+					-- indices(0) = compressionVarIDForContact(0)
+					-- coeffs(0) = 1.0
+					-- lpsolve.add_constraintex(lp, 1, &coeffs(0), &indices(0), lpsolve.EQ, 0.216276)
+					-- indices(0) = compressionVarIDForContact(1)
+					-- coeffs(0) = 1.0
+					-- lpsolve.add_constraintex(lp, 1, &coeffs(0), &indices(0), lpsolve.EQ, 0.106038)
 
 					-- Force balance gives two constraints: one for x and one for y
 					-- x constraint: sum of horizontal forces is zero
@@ -165,13 +173,14 @@ local staticsModel = probcomp(function()
 
 					-- Torque balance: We sum up the DOFs of all the forces on this object, then take
 					--    min(numDOFs - 2, 1) as the number of places we should evaluate net torque
-					var numDOFs = 0
-					for j=0,obj.forces.size do numDOFs = numDOFs + obj.forces(j).dof end
+					-- var numDOFs = 0
+					-- for j=0,obj.forces.size do numDOFs = numDOFs + obj.forces(j).dof end
 					-- var numTorquePoints = numDOFs - 2; if numTorquePoints == 0 then numTorquePoints = 1 end
 					-- var numTorquePoints = 1
 					var evalpoints = [Vector(Vec2)].stackAlloc()
 					-- obj:getCentersOfRotation(numTorquePoints, &evalpoints)
 					evalpoints:push(obj:centerOfMass())
+					-- evalpoints:push(obj:centerOfMass() + Vec2.stackAlloc(0.001, 0.001))
 					-- Evaluate net torque at every one of these points
 					for j=0,evalpoints.size do
 						var torquePoint = evalpoints(j)
@@ -190,10 +199,20 @@ local staticsModel = probcomp(function()
 							coeffs(2*k+1) = staticsUtils.cross(v, fsign(obj, contact) * contact.contactTangent)
 						end
 						-- Net internal torque must counteract torque due to gravity
-						var gravTorque = staticsUtils.cross(obj:centerOfMass() - torquePoint, Vec2.stackAlloc(0.0, -gravityForce))
+						var v = obj:centerOfMass() - torquePoint
+						var gravTorque = staticsUtils.cross(v, Vec2.stackAlloc(0.0, gravityForce))
 						lpsolve.add_constraintex(lp, 2*numContacts, &coeffs(0), &indices(0), lpsolve.EQ, -gravTorque)
 					end
 					m.destruct(evalpoints)
+
+					-- -- TEST
+					-- var disp = Vec2.stackAlloc(0.001, 0.001)
+					-- var forceResidual = 0.216276 + 0.106038 + gravityForce
+					-- C.printf("force residual: %g\n", forceResidual)
+					-- var extraTorque = staticsUtils.cross(disp, Vec2.stackAlloc(0.0, 0.216276)) +
+					-- 				  staticsUtils.cross(disp, Vec2.stackAlloc(0.0, 0.106038)) +
+					-- 				  staticsUtils.cross(disp, Vec2.stackAlloc(0.0, gravityForce))
+					-- C.printf("extra torque: %g\n", extraTorque)
 				end
 			end
 
@@ -530,9 +549,12 @@ end
 -- TODO: Add a dynamics check to every sample, before we render it? Change its color if it
 --    falls down under dynamics?
 
+-- TODO: A statics check -- make a simple example with one block on top of the other, where
+--    he top block should slide off of the bottom. See if the lpsolve check catches this.
+
 ----------------------------------
 
-local numsamps = 1000
+local numsamps = 1
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
@@ -554,8 +576,8 @@ end)
 kernel = Schedule(kernel, scheduleFn)
 local model = staticsModel
 local terra doInference()
-	return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
-	-- return [forwardSample(model, numsamps)]
+	-- return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
+	return [forwardSample(model, numsamps)]
 
 	-- -- Initialization
 	-- var samples = [inf.SampleVectorType(model)].stackAlloc()
@@ -577,10 +599,10 @@ end
 
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
--- rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename)
+rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename)
 
-local dynsamples = m.gc(genDynamicsSamples(model)(samples:getPointer(800), 1.0/120.0, 1000))
-rendering.renderSamples(dynsamples, renderInitFn, renderDrawFn, moviename)
+-- local dynsamples = m.gc(genDynamicsSamples(model)(samples:getPointer(800), 1.0/120.0, 1000))
+-- rendering.renderSamples(dynsamples, renderInitFn, renderDrawFn, moviename)
 
 
 
