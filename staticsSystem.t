@@ -17,6 +17,7 @@ local HashMap = terralib.require("hashmap")
 local C = terralib.includecstring [[
 #include <stdio.h>
 #include <string.h>
+inline void flush() { fflush(stdout); }
 ]]
 
 local Vec2d = Vec(double, 2)
@@ -28,9 +29,8 @@ end)
 
 ----------------------------------
 
+local gravityConstant = 9.8
 local staticsModel = probcomp(function()
-	local gravityConstant = 9.8
-
 	local Vec2 = Vec(real, 2)
 	local ForceT = staticsUtils.Force(real)
 	local RigidObjectT = staticsUtils.RigidObject(real)
@@ -496,6 +496,42 @@ local newton = terralib.require("prob.newtonProj")
 local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")
 
+----------------------------------
+
+-- Take a starting sample scene, run dynamics on it,
+--    and output a list of samples for all the scenes
+--    in the dynamics trajectory.
+-- Kind of janky, but we do it this way to take advantage of existing infrastructure
+--    for rendering lists of samples 
+local function genDynamicsSamples(computation)
+	local staticsDynamics = terralib.require("staticsDynamics")
+	local SampType = inf.SampleType(computation)
+	local frictionCoeff = 0.5
+	return terra(sample: &SampType, timestep: double, numTimeSteps: uint)
+		C.printf("Simulating dynamics\n")
+		var scene = &sample.value
+		var newsamps = [inf.SampleVectorType(computation)].stackAlloc()
+		var sim = [staticsDynamics.RigidSceneSim].stackAlloc(scene, gravityConstant, frictionCoeff)
+		for i=0,numTimeSteps do
+			C.printf(" timestep %d/%d\r", i+1,numTimeSteps)
+			var newscene = sim:step(timestep)
+			newsamps:push([inf.SampleType(computation)].stackAlloc(newscene, sample.logprob))
+			m.destruct(newscene)
+		end
+		C.printf("\nDONE\n")
+		m.destruct(sim)
+		return newsamps
+	end
+end
+
+-- TODO: Functions to compute dynamics for a randomly-chosen stable/unstable structure
+--    from the original list of samples.
+
+-- TODO: Add a dynamics check to every sample, before we render it? Change its color if it
+--    falls down under dynamics?
+
+----------------------------------
+
 local numsamps = 1000
 local verbose = true
 local temp = 1.0
@@ -541,7 +577,10 @@ end
 
 local samples = m.gc(doInference())
 moviename = arg[1] or "movie"
-rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename)
+-- rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename)
+
+local dynsamples = m.gc(genDynamicsSamples(model)(samples:getPointer(800), 1.0/120.0, 1000))
+rendering.renderSamples(dynsamples, renderInitFn, renderDrawFn, moviename)
 
 
 

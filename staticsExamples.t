@@ -1133,7 +1133,7 @@ local function genExamples(gravityConstant, Connections)
 		var topAng = boundedUniform(blockMinAng, blockMaxAng)
 		-- var w = real(0.5*(blockMinWidth + blockMaxWidth))
 		-- var h = real(0.5*(blockMinHeight + blockMaxHeight))
-		-- var baseAng = real(radians(-20.0))
+		-- var baseAng = real(0.0)
 		-- var topAng = real(0.0)
 		blocks:push(BeamT.createFlushConnectingBeam(ground, Vec2.stackAlloc(0.5*sceneWidth, groundHeight), baseAng, topAng, h, w, blockDepth))
 

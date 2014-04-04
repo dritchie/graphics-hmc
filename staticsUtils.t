@@ -573,6 +573,19 @@ local Beam = templatize(function(real)
 	end
 	inheritance.virtual(BeamT, "mass")
 
+	-- Apply rotation + translation transform
+	terra BeamT:transform(displacement: Vec2, ang: real)
+		var com = self:centerOfMass()
+		var rb1 = self.bot1 - com
+		var rb2 = self.bot2 - com
+		var rt1 = self.top1 - com
+		var rt2 = self.top2 - com
+		self.bot1 = rot(rb1, ang) + com + displacement
+		self.bot2 = rot(rb2, ang) + com + displacement
+		self.top1 = rot(rt1, ang) + com + displacement
+		self.top2 = rot(rt2, ang) + com + displacement
+	end
+
 	-- Selecting endpoints of the beam
 	BeamT.endpoint = templatize(function(self, index)
 		if index == 0 then
