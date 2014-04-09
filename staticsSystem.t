@@ -554,7 +554,7 @@ end
 
 ----------------------------------
 
-local numsamps = 1
+local numsamps = 1000
 local verbose = true
 local temp = 1.0
 local kernel = HMC({numSteps=1000, verbosity=0,
@@ -576,8 +576,8 @@ end)
 kernel = Schedule(kernel, scheduleFn)
 local model = staticsModel
 local terra doInference()
-	-- return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]
-	return [forwardSample(model, numsamps)]
+	return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]()
+	-- return [forwardSample(model, numsamps)]
 
 	-- -- Initialization
 	-- var samples = [inf.SampleVectorType(model)].stackAlloc()
