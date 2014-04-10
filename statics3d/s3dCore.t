@@ -1,13 +1,15 @@
+terralib.require("prob")
+
 -- -- Allow us to include stuff from the parent directory
 -- package.path = "../?.t;" .. package.path 
 
-terralib.require("prob")
 local m = terralib.require("mem")
 local util = terralib.require("util")
 local inheritance = terralib.require("inheritance")
 local templatize = terralib.requrie("templatize")
 local Vec = terralib.require("linalg").Vec
 local Vector = terralib.require("vector")
+local Camera = terralib.require("glutils").Camera
 
 -- Everything is defined in a probmodule, so all of this code
 --    is safe to use in inference.
@@ -101,6 +103,7 @@ local Face = templatize(function(nverts)
 	{
 		indices: uint[nverts],
 		shape: &PrimitiveShape
+		-- TODO: Compute and store face normal?
 	}
 
 	FaceT.methods.index = macro(function(self, i)
@@ -291,14 +294,16 @@ local struct Scene
 	bodies: Vector(&Body),
 	connections: Vector(&Connection),
 	gravityConst: real,
-	upVector: Vec3
+	upVector: Vec3,
+	view: Camera
 }
 
-terra Scene:__construct(gravityConst: real, upVector: Vec3)
+terra Scene:__construct(gravityConst: real, upVector: Vec3, cam: &Camera)
 	m.init(self.bodies)
 	m.init(self.connections)
 	self.gravityConst = gravityConst
 	self.upVector = upVector
+	self.camera = @cam
 end
 
 terra Scene:__destruct()
@@ -312,10 +317,10 @@ end
 terra Scene:avgExtForceMag()
 	var avg = real(0.0)
 	var numf = 0
-	for i=0,self.objects.size do
-		var obj = self.objects(i)
-		for j=0,obj.forces.size do
-			var f = obj.forces:getPointer(j)
+	for i=0,self.bodies.size do
+		var b = self.bodies(i)
+		for j=0,b.forces.size do
+			var f = b.forces:getPointer(j)
 			if f.isExternal then
 				avg = avg + f:norm()
 				numf = numf + 1
@@ -329,8 +334,8 @@ end
 local stabilityFactor = factorfn(terra(scene: &Scene, frelTol: real, trelTol: real)
 	var f = real(0.0)
 	var normConst = scene:avgExtForceMag()
-	for i=0,scene.objects.size do
-		var fres, tres = scene.objects(i):residuals()
+	for i=0,scene.bodies.size do
+		var fres, tres = scene.bodies(i):residuals()
 		f = f + softeq(fres:norm()/normConst, 0.0, frelTol)
 		f = f + softeq(tres:norm()/normConst, 0.0, trelTol)
 	end
@@ -339,9 +344,9 @@ end)
 
 terra Scene:encourageStability(frelTol: real, trelTol: real)
 	-- Clear forces, apply gravity
-	for i=0,scene.objects.size do
-		scene.objects(i).forces:clear()
-		scene.objects(i):applyGravityForce(self.gravityConst, self.upVector)
+	for i=0,scene.bodies.size do
+		scene.bodies(i).forces:clear()
+		scene.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
 	end
 
 	-- Generate latent internal force variables
@@ -359,6 +364,7 @@ m.addConstructors(Scene)
 ----- EXPORTS
 return 
 {
+	Vec3 = Vec3,
 	Shape = Shape,
 	PrimitiveShape = PrimitiveShape,
 	AggregateShape = AggregateShape,
