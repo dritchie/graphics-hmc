@@ -4,6 +4,7 @@ terralib.require("prob")
 -- package.path = "../?.t;" .. package.path 
 
 local m = terralib.require("mem")
+local ad = terralib.require("ad")
 local util = terralib.require("util")
 local inheritance = terralib.require("inheritance")
 local templatize = terralib.requrie("templatize")
@@ -99,24 +100,63 @@ end)
 --    (Positive-oriented normal points outside the shape)
 -- Resulting polygon should be convex.
 local Face = templatize(function(nverts)
+	util.luaAssertWithTrace(nverts >= 3, "Cannot have a Face with less than 3 vertices.")
 	local struct FaceT
 	{
 		indices: uint[nverts],
 		shape: &PrimitiveShape
-		-- TODO: Compute and store face normal?
 	}
 
 	FaceT.methods.index = macro(function(self, i)
-		util.luaAssertWithTrace(i < nverts,
-			string.format("Cannot access index %u of a Face with only %u vertices", i, nverts))
-		return `self.indices[i]
+		return quote
+			util.assert(i < nverts, "Cannot access index %u of a Face with only %u vertices\n", i, nverts)
+		in
+			self.indices[i]
+		end
 	end)
 
 	FaceT.methods.vertex = macro(function(self, i)
-		util.luaAssertWithTrace(i < nverts,
-			string.format("Cannot access vertex %u of a Face with only %u vertices", i, nverts))
-		return `self.shape.vertices[self.indices[i]]
+		return quote
+			util.assert(i < nverts, "Cannot access vertex %u of a Face with only %u vertices\n", i, nverts)
+		in
+			self.shape.vertices[self.indices[i]]
+		end
 	end)
+
+	local invNverts = 1.0/nverts
+	terra FaceT:centroid()
+		return [(function()
+			local exp = `Vec3.stackAlloc(0.0, 0.0, 0.0)
+			for i=1,nverts do
+				exp = `[exp] + self:vertex([i-1])
+			end
+			return `invNverts*([exp])
+		end)()]
+	end
+
+	terra FaceT:normal()
+		-- Signed cross product between two edges of any triangle
+		var v0 = self:vertex(0)
+		var v1 = self:vertex(1)
+		var v2 = self:centroid()
+		return (v1 - v0):cross(v2 - v0)
+	end
+
+	-- Some useful stuff for quadrilaterals
+	if nverts == 4 then
+		local rectThresh = 1e-16
+		terra FaceT:isRectangular()
+			-- Need to verify that all corners are orthogonal
+			-- (But it's sufficient to just check three - the fourth follows by necessity)
+			var e1 = self:vertex(1) - self:vertex(0); e1:normalize()
+			var e2 = self:vertex(2) - self:vertex(1); e2:normalize()
+			var e3 = self:vertex(3) - self:vertex(0); e3:normalize()
+			var e4 = self:vertex(3) - self:vertex(2); e4:normalize()
+			return ad.math.fabs(e1:dot(e2)) < rectThresh and
+				   ad.math.fabs(e1:dot(e3)) < rectThresh and
+				   ad.math.fabs(e4:dot(e2)) < rectThresh
+		end
+	end
 
 	return FaceT
 end)
@@ -215,6 +255,7 @@ local struct Body
 	friction: real
 }
 
+-- A Body assumes ownership over its shape
 terra Body:__construct(shape: &Shape, density: real, friction: real)
 	self.shape = shape
 	m.init(self.forces)
@@ -226,6 +267,7 @@ end
 -- No copy constructor.
 
 terra Body:__destruct()
+	m.delete(self.shape)
 	m.destruct(self.forces)
 end
 
