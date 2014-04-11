@@ -4,6 +4,9 @@ local util = terralib.require("util")
 local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local inheritance = terralib.require("inheritance")
+local Vec = terralib.require("linalg").Vec
+local BBox = terralib.require("bbox")
+local Vector = terralib.require("vector")
 local s3dCore = terralib.require("s3dCore")
 
 
@@ -54,12 +57,12 @@ terra ContactPoint:applyForcesImpl() : {}
 		f:combineWith(tf1)
 		f:combineWith(tf2)
 	end
-	if self.body1.active then
-		self.body1:applyForce(f)
-	end
 	if self.body2.active then
-		f.force = -f.force
 		self.body2:applyForce(f)
+	end
+	if self.body1.active then
+		f.force = -f.force
+		self.body1:applyForce(f)
 	end
 end
 inheritance.virtual(ContactPoint, "applyForcesImpl")
@@ -68,23 +71,26 @@ m.addConstructors(ContactPoint)
 
 
 
--- A Contact joins two bodies at two coincident faces.
--- For ease of parameterization / ensuring fixed-dimensionality
---    and continuous-ness during inference, the two faces must be:
+
+
+local validThresh = 1e-16
+local RectContactFace = Face(4)
+
+-- A RectRectContact joins two bodies at two coincident faces.
+-- Both faces must be:
 --    * Rectangular
 --    * Co-planar
 --    * Aligned (both edge directions parallel)
--- Internally, the Contact is represented as four ContactPoints--
+-- Internally, the contact is represented as four ContactPoints--
 --    one for each vertex of the contact polygon.
-local ContactFace = Face(4)
-local struct Contact
+local struct RectRectContact
 {
 	contactPoints: ContactPoint[4]
 }
-inheritance.dynamicExtend(Connection, Contact)
+inheritance.dynamicExtend(Connection, RectRectContact)
 
-local validThresh = 1e-16
-Contact.methods.isValidContact = terra(face1: &ContactFace, face2: &ContactFace)
+
+RectRectContact.methods.isValidContact = terra(face1: &RectContactFace, face2: &RectContactFace)
 	-- Check rectangularity
 	if not face1:isRectangular() or not face2:isRectangular() then return false end
 	-- Check alignment
@@ -99,34 +105,88 @@ Contact.methods.isValidContact = terra(face1: &ContactFace, face2: &ContactFace)
 	return face1:vertex(0):inPlane(face2:vertex(0), n)
 end
 
+local Vec2 = Vec(real, 2)
+local fwdXform = macro(function(point, origin, xaxis, yaxis)
+	return quote
+		var v = point - origin
+	in
+		Vec2.stackAlloc(v:dot(xaxis), v:dot(yaxis))
+	end
+end)
+local invXform = macro(function(point, origin, xaxis, yaxis)
+	return `origin + point(0)*xaxis + point(1)*yaxis
+end)
+-- Assumes that the faces pass the validity check
+RectRectContact.methods.contactPoints = terra(face1: &RectContactFace, face2: &RectContactFace)
+	-- Pick point to be origin, pick two axes
+	var origin = face1:vertex(0)
+	var xaxis = face1:vertex(1) - face1:vertex(0); t1:normalize()
+	var yaxis = face1:vertex(3) - face1:vertex(0); t2:normalize()
+
+	-- Compute AABBs for each face in this coordinate system
+	var f1bbox = [BBox(Vec2)].stackAlloc()
+	f1bbox:expand(fwdXform(face1:vertex(0), origin, xaxis, yaxis))
+	f1bbox:expand(fwdXform(face1:vertex(1), origin, xaxis, yaxis))
+	f1bbox:expand(fwdXform(face1:vertex(2), origin, xaxis, yaxis))
+	f1bbox:expand(fwdXform(face1:vertex(3), origin, xaxis, yaxis))
+	var f2bbox = [BBox(Vec2)].stackAlloc()
+	f2bbox:expand(fwdXform(face2:vertex(0), origin, xaxis, yaxis))
+	f2bbox:expand(fwdXform(face2:vertex(1), origin, xaxis, yaxis))
+	f2bbox:expand(fwdXform(face2:vertex(2), origin, xaxis, yaxis))
+	f2bbox:expand(fwdXform(face2:vertex(3), origin, xaxis, yaxis))
+
+	-- Intersect BBoxs
+	f1bbox:intersectWith(&f2bbox)
+
+	-- Transform 2D points back into original 3D space
+	return invXform(Vec2.stackAlloc(f1bbox.mins(0), f1bbox.mins(1)), origin, xaxis, yaxis),
+		   invXform(Vec2.stackAlloc(f1bbox.maxs(0), f1bbox.mins(1)), origin, xaxis, yaxis),
+		   invXform(Vec2.stackAlloc(f1bbox.maxs(0), f1bbox.maxs(1)), origin, xaxis, yaxis),
+		   invXform(Vec2.stackAlloc(f1bbox.mins(0), f1bbox.maxs(1)), origin, xaxis, yaxis)
+
+end
+
 -- Caller can forgo valid check if the input faces are guaranteed to be valid
--- (e.g. by construction)
-terra Contact:__construct(body1: &Body, body2: &Body, face1: &ContactFace, face2: &ContactFace, validCheck: bool) : {}
+-- (i.e. by construction)
+terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContactFace, face2: &RectContactFace, validCheck: bool)
 	if validCheck then
-		util.assert(Contact.isValidContact(face1, face2),
+		util.assert(RectRectContact.isValidContact(face1, face2),
 			"Can only create Contact between two aligned, rectangular faces\n")
 	end
-	-- TODO: Compute contact polygon, create 4 contact points
+
+	-- Compute contact polygon, create 4 contact points
+	var cp1, cp2, cp3, cp4 = RectRectContact.contactPoints(face1, face2)
+	var n = face1:normal()
+	var t1 = face1:vertex(1) - face1:vertex(0); t1:normalize()
+	var t2 = face1:vertex(3) - face1:vertex(0); t2:normalize()
+	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp1, n, t1, t2)
+	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp2, n, t1, t2)
+	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp3, n, t1, t2)
+	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp4, n, t1, t2)
 end
 
--- Do the valid check by default, though
-terra Contact:__construct(body1: &Body, body2: &Body, face1: &ContactFace, face2: &ContactFace) : {}
-	self:__construct(body1, body2, face1, face2, true)
-end
-
-terra Contact:applyForcesImpl() : {}
+terra RectRectContact:applyForcesImpl() : {}
 	self.contactPoints[0]:applyForcesImpl()
 	self.contactPoints[1]:applyForcesImpl()
 	self.contactPoints[2]:applyForcesImpl()
 	self.contactPoints[3]:applyForcesImpl()
 end
-inheritance.virtual(Contact, "applyForcesImpl")
+inheritance.virtual(RectRectContact, "applyForcesImpl")
 
-m.addConstructors(Contact)
+m.addConstructors(RectRectContact)
+
+
+-- TODO: PolyRectContact (i.e. one face is rectangular and the other is not,
+--    but its oriented bbox must be contained within the rectangular face.)
 
 return
 {
-	Contact = Contact
+	RectRectContact = RectRectContact
 }
 
 end)
+
+
+
+
+

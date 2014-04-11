@@ -6,10 +6,12 @@ local inheritance = terralib.require("inheritance")
 local colors = terralib
 local s3dCore = terralib.require("s3dCore")
 local gl = terralib.require("gl")
+local Camera = terralib.require("glutils").Camera
 
 gl.exposeContants({
 	"GL_POLYGON_OFFSET_FILL"
 })
+
 
 return probmodule(function(pcomp)
 
@@ -129,12 +131,38 @@ end
 
 ----- RENDERING SCENES
 
-terra Scene:render(settings: &RenderSettings)
+-- Packages up a scene with info needed to render it
+-- (Camera, lights, etc.)
+local struct RenderableScene
+{
+	scene: Scene,
+	camera: Camera
+}
+
+-- Assumes ownership of scene and camera
+terra RenderableScene:__construct(scene: &Scene, camera: &Camera)
+	self.scene = @scene
+	self.camera = @camera
+end
+
+terra RenderableScene:__destruct()
+	m.destruct(self.scene)
+end
+
+terra RenderableScene:render(settings: &RenderSettings)
 	gl.glClearColor([Color3.elements(`settings.bgColor)])
 	gl.glClear(gl.mGL_COLOR_BUFFER_BIT() or gl.mGL_DEPTH_BUFFER_BIT())
-
+	gl.glEnable(gl.mGL_DEPTH_TEST())
 	self.camera:setupGLPerspectiveView()
+	-- TODO: Set up lights and stuff?
+	self.scene:render(settings)
+end
 
+m.addConstructors(RenderableScene)
+
+
+
+terra Scene:render(settings: &RenderSettings)
 	settings.renderPass = RenderSettings.Faces
 	gl.glColor3d([Color3.elements(`settings.faceColor)])
 	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
@@ -168,7 +196,8 @@ end
 ----- EXPORTS
 return
 {
-	RenderSettings = RenderSettings
+	RenderSettings = RenderSettings,
+	RenderableScene = RenderableScene
 }
 
 end)

@@ -107,6 +107,10 @@ local Face = templatize(function(nverts)
 		shape: &PrimitiveShape
 	}
 
+	terra FaceT:__construct(shape: &PrimitiveShape)
+		self.shape = shape
+	end
+
 	FaceT.methods.index = macro(function(self, i)
 		return quote
 			util.assert(i < nverts, "Cannot access index %u of a Face with only %u vertices\n", i, nverts)
@@ -138,7 +142,7 @@ local Face = templatize(function(nverts)
 		-- Signed cross product between two edges of any triangle
 		var v0 = self:vertex(0)
 		var v1 = self:vertex(1)
-		var v2 = self:centroid()
+		var v2 = self:vertex(2)
 		return (v1 - v0):cross(v2 - v0)
 	end
 
@@ -336,16 +340,14 @@ local struct Scene
 	bodies: Vector(&Body),
 	connections: Vector(&Connection),
 	gravityConst: real,
-	upVector: Vec3,
-	view: Camera
+	upVector: Vec3
 }
 
-terra Scene:__construct(gravityConst: real, upVector: Vec3, cam: &Camera)
+terra Scene:__construct(gravityConst: real, upVector: Vec3)
 	m.init(self.bodies)
 	m.init(self.connections)
 	self.gravityConst = gravityConst
 	self.upVector = upVector
-	self.camera = @cam
 end
 
 terra Scene:__destruct()
