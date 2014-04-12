@@ -1,8 +1,5 @@
 terralib.require("prob")
 
--- -- Allow us to include stuff from the parent directory
--- package.path = "../?.t;" .. package.path 
-
 local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local util = terralib.require("util")

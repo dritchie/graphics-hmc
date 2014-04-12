@@ -48,6 +48,26 @@ QuadHex.vBackBotRight = 5
 QuadHex.vBackTopRight = 6
 QuadHex.vBackTopLeft = 7
 
+-- Face accessors for client code
+QuadHex.methods.frontFace = macro(function(self)
+	return `self.faces[QuadHex.fFront]
+end)
+QuadHex.methods.backFace = macro(function(self)
+	return `self.faces[QuadHex.fBack]
+end)
+QuadHex.methods.topFace = macro(function(self)
+	return `self.faces[QuadHex.fTop]
+end)
+QuadHex.methods.botFace = macro(function(self)
+	return `self.faces[QuadHex.fBot]
+end)
+QuadHex.methods.leftFace = macro(function(self)
+	return `self.faces[QuadHex.fLeft]
+end)
+QuadHex.methods.rightFace = macro(function(self)
+	return `self.faces[QuadHex.fRight]
+end)
+
 terra QuadHex:__construct() : {}
 	[QuadHex.ParentClass].__construct(self)
 
@@ -70,9 +90,25 @@ terra QuadHex:__construct() : {}
 	self.verts[QuadHex.vBackTopLeft] = Vec3.stackAlloc(-0.5, 0.5, 0.5)
 end
 
+-- TODO: Switch this to use proper transformation matrices, once I write those?
+-- (Or even eliminate it entirely?)
+terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
+	var w2 = 0.5*width
+	var d2 = 0.5*depth
+	var h2 = 0.5*height
+	self.verts[QuadHex.vFrontBotLeft] = center + Vec3.stackAlloc(-w2, -d2, -h2)
+	self.verts[QuadHex.vFrontBotRight] = center + Vec3.stackAlloc(w2, -d2, -h2)
+	self.verts[QuadHex.vFrontTopRight] = center + Vec3.stackAlloc(w2, -d2, h2)
+	self.verts[QuadHex.vFrontTopLeft] = center + Vec3.stackAlloc(-w2, -d2, h2)
+	self.verts[QuadHex.vBackBotLeft] = center + Vec3.stackAlloc(-w2, d2, -h2)
+	self.verts[QuadHex.vBackBotRight] = center + Vec3.stackAlloc(w2, d2, -h2)
+	self.verts[QuadHex.vBackTopRight] = center + Vec3.stackAlloc(w2, d2, h2)
+	self.verts[QuadHex.vBackTopLeft] = center + Vec3.stackAlloc(-w2, d2, h2)
+end
+
 -- Volume of a convex hexahedron is just the sum of the volumes
 --    of the six pyramids formed by connecting each face to the centroid
--- Face areas are just one half the norm of the cross products of the diagonals
+-- Face areas are just one half the norm of the cross product of the diagonals
 terra QuadHex:volume() : real
 	var c = self:centroid()
 	return [(function()

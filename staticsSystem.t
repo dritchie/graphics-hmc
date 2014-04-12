@@ -577,7 +577,7 @@ kernel = Schedule(kernel, scheduleFn)
 local model = staticsModel
 local terra doInference()
 	return [mcmc(model, kernel, {numsamps=numsamps, verbose=verbose})]()
-	-- return [forwardSample(model, numsamps)]
+	-- return [forwardSample(model, numsamps)]()
 
 	-- -- Initialization
 	-- var samples = [inf.SampleVectorType(model)].stackAlloc()
