@@ -39,6 +39,36 @@ local struct PrimitiveShape
 inheritance.dynamicExtend(Shape, PrimitiveShape)
 
 
+-- A ConvexPrimitiveShape is just that: a primitive shape that guarantees
+--    its own convexity
+-- This is a nice class to have because (a) the centroid() method is the same
+--    for all such shapes and (b) it provides us with a centralized point to
+--    to deal with assigning the 'vertices' pointer above
+-- NOTE: THESE SHOULD NEVER BE MANAGED ON THE STACK. Moving them around on the
+--    stack will invalidate the 'vertices' pointer.
+local ConvexPrimitiveShape = templatize(function(nverts)
+	local struct ConvexPrimitiveShapeT
+	{
+		verts: Vec3[nverts]
+	}
+	inheritance.dynamicExtend(PrimitiveShape, ConvexPrimitiveShapeT)
+
+	terra ConvexPrimitiveShapeT:__construct()
+		self.vertices = &self.verts[0]
+	end
+
+	terra ConvexPrimitiveShapeT:centroid() : Vec3
+		return [(function()
+			local centroidexp = `Vec3.stackAlloc(0.0, 0.0, 0.0)
+			for i=1,nverts do centroidexp = `[centroidexp] + self.verts[ [i-1] ] end
+			return `[1.0/nverts] * [centroidexp]
+		end)()]
+	end
+	inheritance.virtual(ConvexPrimitiveShapeT, "centroid")
+
+	return ConvexPrimitiveShapeT
+end)
+
 
 -- An AggregateShape combines multiple Shapes together.
 -- Provides general-purpose computations of volume and centroid
@@ -107,8 +137,21 @@ local Face = templatize(function(nverts)
 		shape: &PrimitiveShape
 	}
 
-	terra FaceT:__construct(shape: &PrimitiveShape)
+	terra FaceT:__construct(shape: &PrimitiveShape) : {}
 		self.shape = shape
+	end
+
+	local indexsyms = {}
+	for i=1,nverts do table.insert(indexsyms, symbol(uint)) end
+	terra FaceT:__construct(shape: &PrimitiveShape, [indexsyms]) : {}
+		self:__construct(shape)
+		[(function()
+			local stmts = {}
+			for i=1,nverts do
+				table.insert(stmts, quote self.indices[ [i-1] ] = [indexsyms[i]] end)
+			end
+			return stmts
+		end)()]
 	end
 
 	FaceT.methods.index = macro(function(self, i)
@@ -411,6 +454,7 @@ return
 	Vec3 = Vec3,
 	Shape = Shape,
 	PrimitiveShape = PrimitiveShape,
+	ConvexPrimitiveShape = ConvexPrimitiveShape,
 	AggregateShape = AggregateShape,
 	Face = Face,
 	Force = Force,
