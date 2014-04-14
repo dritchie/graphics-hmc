@@ -120,8 +120,8 @@ end)
 RectRectContact.methods.contactPoints = terra(face1: &RectContactFace, face2: &RectContactFace)
 	-- Pick point to be origin, pick two axes
 	var origin = face1:vertex(0)
-	var xaxis = face1:vertex(1) - face1:vertex(0); t1:normalize()
-	var yaxis = face1:vertex(3) - face1:vertex(0); t2:normalize()
+	var xaxis = face1:vertex(1) - face1:vertex(0); xaxis:normalize()
+	var yaxis = face1:vertex(3) - face1:vertex(0); yaxis:normalize()
 
 	-- Compute AABBs for each face in this coordinate system
 	var f1bbox = [BBox(Vec2)].stackAlloc()

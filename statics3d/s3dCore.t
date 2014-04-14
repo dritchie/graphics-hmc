@@ -4,7 +4,7 @@ local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local util = terralib.require("util")
 local inheritance = terralib.require("inheritance")
-local templatize = terralib.requrie("templatize")
+local templatize = terralib.require("templatize")
 local Vec = terralib.require("linalg").Vec
 local Vector = terralib.require("vector")
 local Camera = terralib.require("glutils").Camera
@@ -82,7 +82,7 @@ local AggregateShape = templatize(function(numParts)
 	terra AggregateShapeT:__construct([ctorSyms])
 		[(function()
 			local stmts = {}
-			for i=1,numParts do table.insert(stmts, quote self.shapes[ [i-1] ] = [ctorSyms[i]] end)
+			for i=1,numParts do table.insert(stmts, quote self.shapes[ [i-1] ] = [ctorSyms[i]] end) end
 			return stmts
 		end)()]
 	end
@@ -202,6 +202,7 @@ local Face = templatize(function(nverts)
 		end
 	end
 
+	m.addConstructors(FaceT)
 	return FaceT
 end)
 
@@ -428,14 +429,14 @@ end)
 
 terra Scene:encourageStability(frelTol: real, trelTol: real)
 	-- Clear forces, apply gravity
-	for i=0,scene.bodies.size do
-		scene.bodies(i).forces:clear()
-		scene.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
+	for i=0,self.bodies.size do
+		self.bodies(i).forces:clear()
+		self.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
 	end
 
 	-- Generate latent internal force variables
-	for i=0,scene.connections.size do
-		scene.connections:applyForces()
+	for i=0,self.connections.size do
+		self.connections:applyForces()
 	end
 
 	-- Add stability factor

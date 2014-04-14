@@ -73,21 +73,21 @@ terra QuadHex:__construct() : {}
 
 	-- We default to a unit cube at the origin in a z-up coordinate system.
 
-	self.faces[QuadHex.fFront] = QuadFace.stackAlloc(self, QuadHex.vFrontBotLeft, QuadHex.vFrontBotRight, QuadHex.vFrontTopRight, QuadHex.vFrontTopLeft)
-	self.faces[QuadHex.fBack] = QuadFace.stackAlloc(self, QuadHex.vBackBotRight, QuadHex.vBackBotLeft, QuadHex.vBackTopLeft, QuadHex.vBackTopRight)
-	self.faces[QuadHex.fTop] = QuadFace.stackAlloc(self, QuadHex.vFrontTopLeft, QuadHex.vFrontTopRight, QuadHex.vBackTopRight, QuadHex.vBackTopLeft)
-	self.faces[QuadHex.fBot] = QuadFace.stackAlloc(self, QuadHex.vFrontBotRight, QuadHex.vFrontBotLeft, QuadHex.vBackBotLeft, QuadHex.vBackBotRight)
-	self.faces[QuadHex.fLeft] = QuadFace.stackAlloc(self, QuadHex.vBackBotLeft, QuadHex.vFrontBotLeft, QuadHex.vFrontTopLeft, QuadHex.vBackTopLeft)
-	self.faces[QuadHex.fRight] = QuadFace.stackAlloc(self, QuadHex.vFrontBotRight, QuadHex.vBackBotRight, QuadHex.vBackTopRight, QuadHex.vFrontTopRight)
+	self.faces[ [QuadHex.fFront] ] = QuadFace.stackAlloc(self, [QuadHex.vFrontBotLeft], [QuadHex.vFrontBotRight], [QuadHex.vFrontTopRight], [QuadHex.vFrontTopLeft])
+	self.faces[ [QuadHex.fBack] ] = QuadFace.stackAlloc(self, [QuadHex.vBackBotRight], [QuadHex.vBackBotLeft], [QuadHex.vBackTopLeft], [QuadHex.vBackTopRight])
+	self.faces[ [QuadHex.fTop] ] = QuadFace.stackAlloc(self, [QuadHex.vFrontTopLeft], [QuadHex.vFrontTopRight], [QuadHex.vBackTopRight], [QuadHex.vBackTopLeft])
+	self.faces[ [QuadHex.fBot] ] = QuadFace.stackAlloc(self, [QuadHex.vFrontBotRight], [QuadHex.vFrontBotLeft], [QuadHex.vBackBotLeft], [QuadHex.vBackBotRight])
+	self.faces[ [QuadHex.fLeft] ] = QuadFace.stackAlloc(self, [QuadHex.vBackBotLeft], [QuadHex.vFrontBotLeft], [QuadHex.vFrontTopLeft], [QuadHex.vBackTopLeft])
+	self.faces[ [QuadHex.fRight] ] = QuadFace.stackAlloc(self, [QuadHex.vFrontBotRight], [QuadHex.vBackBotRight], [QuadHex.vBackTopRight], [QuadHex.vFrontTopRight])
 
-	self.verts[QuadHex.vFrontBotLeft] = Vec3.stackAlloc(-0.5, -0.5, -0.5)
-	self.verts[QuadHex.vFrontBotRight] = Vec3.stackAlloc(0.5, -0.5, -0.5)
-	self.verts[QuadHex.vFrontTopRight] = Vec3.stackAlloc(0.5, -0.5, 0.5)
-	self.verts[QuadHex.vFrontTopLeft] = Vec3.stackAlloc(-0.5, -0.5, 0.5)
-	self.verts[QuadHex.vBackBotLeft] = Vec3.stackAlloc(-0.5, 0.5, -0.5)
-	self.verts[QuadHex.vBackBotRight] = Vec3.stackAlloc(0.5, 0.5, -0.5)
-	self.verts[QuadHex.vBackTopRight] = Vec3.stackAlloc(0.5, 0.5, 0.5)
-	self.verts[QuadHex.vBackTopLeft] = Vec3.stackAlloc(-0.5, 0.5, 0.5)
+	self.verts[ [QuadHex.vFrontBotLeft] ] = Vec3.stackAlloc(-0.5, -0.5, -0.5)
+	self.verts[ [QuadHex.vFrontBotRight] ] = Vec3.stackAlloc(0.5, -0.5, -0.5)
+	self.verts[ [QuadHex.vFrontTopRight] ] = Vec3.stackAlloc(0.5, -0.5, 0.5)
+	self.verts[ [QuadHex.vFrontTopLeft] ] = Vec3.stackAlloc(-0.5, -0.5, 0.5)
+	self.verts[ [QuadHex.vBackBotLeft] ] = Vec3.stackAlloc(-0.5, 0.5, -0.5)
+	self.verts[ [QuadHex.vBackBotRight] ] = Vec3.stackAlloc(0.5, 0.5, -0.5)
+	self.verts[ [QuadHex.vBackTopRight] ] = Vec3.stackAlloc(0.5, 0.5, 0.5)
+	self.verts[ [QuadHex.vBackTopLeft] ] = Vec3.stackAlloc(-0.5, 0.5, 0.5)
 end
 
 -- TODO: Switch this to use proper transformation matrices, once I write those?
@@ -96,14 +96,14 @@ terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
 	var w2 = 0.5*width
 	var d2 = 0.5*depth
 	var h2 = 0.5*height
-	self.verts[QuadHex.vFrontBotLeft] = center + Vec3.stackAlloc(-w2, -d2, -h2)
-	self.verts[QuadHex.vFrontBotRight] = center + Vec3.stackAlloc(w2, -d2, -h2)
-	self.verts[QuadHex.vFrontTopRight] = center + Vec3.stackAlloc(w2, -d2, h2)
-	self.verts[QuadHex.vFrontTopLeft] = center + Vec3.stackAlloc(-w2, -d2, h2)
-	self.verts[QuadHex.vBackBotLeft] = center + Vec3.stackAlloc(-w2, d2, -h2)
-	self.verts[QuadHex.vBackBotRight] = center + Vec3.stackAlloc(w2, d2, -h2)
-	self.verts[QuadHex.vBackTopRight] = center + Vec3.stackAlloc(w2, d2, h2)
-	self.verts[QuadHex.vBackTopLeft] = center + Vec3.stackAlloc(-w2, d2, h2)
+	self.verts[ [QuadHex.vFrontBotLeft] ] = center + Vec3.stackAlloc(-w2, -d2, -h2)
+	self.verts[ [QuadHex.vFrontBotRight] ] = center + Vec3.stackAlloc(w2, -d2, -h2)
+	self.verts[ [QuadHex.vFrontTopRight] ] = center + Vec3.stackAlloc(w2, -d2, h2)
+	self.verts[ [QuadHex.vFrontTopLeft] ] = center + Vec3.stackAlloc(-w2, -d2, h2)
+	self.verts[ [QuadHex.vBackBotLeft] ] = center + Vec3.stackAlloc(-w2, d2, -h2)
+	self.verts[ [QuadHex.vBackBotRight] ] = center + Vec3.stackAlloc(w2, d2, -h2)
+	self.verts[ [QuadHex.vBackTopRight] ] = center + Vec3.stackAlloc(w2, d2, h2)
+	self.verts[ [QuadHex.vBackTopLeft] ] = center + Vec3.stackAlloc(-w2, d2, h2)
 end
 
 -- Volume of a convex hexahedron is just the sum of the volumes
@@ -154,9 +154,9 @@ inheritance.dynamicExtend(QuadHex, Box)
 
 terra Box:volume() : real
 	-- Multiply the length of three mututally orthogonal edges
-	return (self.verts[QuadHex.vFrontTopLeft] - self.verts[QuadHex.vFrontBotLeft]):norm() *
-		   (self.verts[QuadHex.vFrontBotRight] - self.verts[QuadHex.vFrontBotLeft]):norm() *
-		   (self.verts[QuadHex.vBackBotLeft] - self.verts[QuadHex.vFrontBotLeft]):norm()
+	return (self.verts[ [QuadHex.vFrontTopLeft] ] - self.verts[ [QuadHex.vFrontBotLeft] ]):norm() *
+		   (self.verts[ [QuadHex.vFrontBotRight] ] - self.verts[ [QuadHex.vFrontBotLeft] ]):norm() *
+		   (self.verts[ [QuadHex.vBackBotLeft] ] - self.verts[ [QuadHex.vFrontBotLeft] ]):norm()
 end
 inheritance.virtual(Box, "volume")
 

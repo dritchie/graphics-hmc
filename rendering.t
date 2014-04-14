@@ -10,10 +10,11 @@ local RGBImage = image.Image(uint8, 3)
 
 
 -- drawFn should take a single sample and generate the code to render that sample
-local function renderSamples(samples, initFn, drawFn, moviename)
-	local moviefilename = string.format("renders/%s.mp4", moviename)
-	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
-	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
+local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
+	local rendersDir = rendersDir or "renders"
+	local moviefilename = string.format("%s/%s.mp4", rendersDir, moviename)
+	local movieframebasename = string.format("%s/%s", rendersDir, moviename) .. "_%06d.png"
+	local movieframewildcard = string.format("%s/%s", rendersDir, moviename) .. "_*.png"
 	io.write("Rendering video...")
 	io.flush()
 	local numsamps = samples.size

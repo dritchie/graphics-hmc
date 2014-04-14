@@ -1,14 +1,15 @@
 terralib.require("prob")
 
+local m = terralib.require("mem")
 local util = terralib.require("util")
 local templatize = terralib.require("templatize")
 local inheritance = terralib.require("inheritance")
-local colors = terralib
+local colors = terralib.require("colors")
 local s3dCore = terralib.require("s3dCore")
 local gl = terralib.require("gl")
 local Camera = terralib.require("glutils").Camera
 
-gl.exposeContants({
+gl.exposeConstants({
 	"GL_POLYGON_OFFSET_FILL"
 })
 
@@ -72,7 +73,7 @@ core.Face = templatize(function(nsides)
 		[(function()
 			local stmts = {}
 			for i=1,nsides do
-				table.insert(stmts, quote gl.glVertex3d([Vec.elements(`self:vertex([i-1])]) end)
+				table.insert(stmts, quote gl.glVertex3d([Vec3.elements(`self:vertex([i-1]))]) end)
 			end
 			return stmts
 		end)()]
@@ -99,7 +100,7 @@ core.AggregateShape = templatize(function(numParts)
 				table.insert(stmts, quote self.shapes[ [i-1] ]:render(settings) end)
 			end
 			return stmts
-		end))()]
+		end)()]
 	end
 	inheritance.virtual(AggregateShapeT, "render")
 
@@ -125,7 +126,7 @@ end
 ----- RENDERING BODIES
 
 terra Body:render(settings: &RenderSettings)
-	self:shape:render(settings)
+	self.shape:render(settings)
 end
 
 
@@ -140,9 +141,9 @@ local struct RenderableScene
 }
 
 -- Assumes ownership of scene and camera
-terra RenderableScene:__construct(scene: &Scene, camera: &Camera)
-	self.scene = @scene
-	self.camera = @camera
+terra RenderableScene:__construct(scene: Scene, camera: Camera)
+	self.scene = scene
+	self.camera = camera
 end
 
 terra RenderableScene:__destruct()
@@ -150,7 +151,7 @@ terra RenderableScene:__destruct()
 end
 
 terra RenderableScene:render(settings: &RenderSettings)
-	gl.glClearColor([Color3.elements(`settings.bgColor)])
+	gl.glClearColor([Color3.elements(`settings.bgColor)], 1.0)
 	gl.glClear(gl.mGL_COLOR_BUFFER_BIT() or gl.mGL_DEPTH_BUFFER_BIT())
 	gl.glEnable(gl.mGL_DEPTH_TEST())
 	self.camera:setupGLPerspectiveView()
@@ -163,7 +164,7 @@ m.addConstructors(RenderableScene)
 
 
 terra Scene:render(settings: &RenderSettings)
-	settings.renderPass = RenderSettings.Faces
+	settings.renderPass = [RenderSettings.Faces]
 	gl.glColor3d([Color3.elements(`settings.faceColor)])
 	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
 	-- Offset solid face pass so that we can render lines on top
@@ -174,7 +175,7 @@ terra Scene:render(settings: &RenderSettings)
 	end
 	gl.glDisable(gl.mGL_POLYGON_OFFSET_FILL())
 
-	settings.renderPass = RenderSettings.Edges
+	settings.renderPass = [RenderSettings.Edges]
 	gl.glColor3d([Color3.elements(`settings.edgeColor)])
 	gl.glLineWidth(settings.edgeWidth)
 	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
