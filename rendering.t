@@ -34,7 +34,7 @@ local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
 	end
 	renderFrames()
 	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
-	util.wait(string.format("rm -f %s", movieframewildcard))
+	-- util.wait(string.format("rm -f %s", movieframewildcard))
 	print("done.")
 end
 

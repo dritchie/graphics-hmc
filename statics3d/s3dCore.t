@@ -183,7 +183,8 @@ local Face = templatize(function(nverts)
 		var v0 = self:vertex(0)
 		var v1 = self:vertex(1)
 		var v2 = self:vertex(2)
-		return (v1 - v0):cross(v2 - v0)
+		var n = (v1 - v0):cross(v2 - v0); n:normalize()
+		return n
 	end
 
 	-- Some useful stuff for quadrilaterals

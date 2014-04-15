@@ -10,7 +10,9 @@ local gl = terralib.require("gl")
 local rendering = terralib.require("rendering")
 local AutoPtr = terralib.require("autopointer")
 local Vec = terralib.require("linalg").Vec
-local Camera = terralib.require("glutils").Camera
+
+local glutils = terralib.require("glutils")
+util.importEntries(glutils, "Camera", "Light")
 
 local Vec3d = Vec(double, 3)
 
@@ -26,17 +28,17 @@ local testcomp = probcomp(function()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
-		camera.eye = Vec3d.stackAlloc(0.0, 0.0, 0.0)
-		camera.target = Vec3d.stackAlloc(0.0, 1.0, 0.0)
+		camera.eye = Vec3d.stackAlloc(1.0, -1.0, 1.0)
+		camera.target = Vec3d.stackAlloc(0.0, 0.0, 0.0)
 		camera.up = upVector
-		camera.fovy = 45.0
-		camera.aspect = 1.0
 		camera.znear = 0.01
 		camera.zfar = 10.0
 		var renderScene = AutoPtr.wrap(RenderableScene.heapAlloc(scene, camera))
+		var light = Light.stackAlloc()
+		renderScene:addLight(light)
 
 		-- Set up stuff in the scene
-		var boxShape = Box.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 1.0, 0.0), 0.25, 0.25, 0.25)
+		var boxShape = Box.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), 0.25, 0.25, 0.25)
 		var boxBody = Body.oak(boxShape)
 		renderScene.scene.bodies:push(boxBody)
 
