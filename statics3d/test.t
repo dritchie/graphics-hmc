@@ -100,6 +100,7 @@ local function renderDrawFn(sample, im)
 		renderSettings.renderForces = renderForces
 		var renderScene = &sample.value
 		renderScene:render(&renderSettings)
+		[rendering.displayLogprob("BottomLeft")](sample.logprob)
 		gl.glFlush()
 		gl.glReadPixels(0, 0, im.width, im.height,
 			gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
