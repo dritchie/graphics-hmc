@@ -49,6 +49,10 @@ terra ContactPoint:__construct(body1: &Body, body2: &Body, point: Vec3, normal: 
 	self.normal = normal
 	self.tangent1 = tangent1
 	self.tangent2 = tangent2
+
+	-- Important: add this connection to each body's internal list
+	body1:addConnection(self)
+	body2:addConnection(self)
 end
 
 ContactPoint.methods.fsign = macro(function(self, body)
@@ -180,7 +184,7 @@ local RectContactFace = Face(4)
 --    one for each vertex of the contact polygon.
 local struct RectRectContact
 {
-	contactPoints: ContactPoint[4]
+	contactPoints: (&ContactPoint)[4]
 }
 inheritance.dynamicExtend(Connection, RectRectContact)
 
@@ -254,10 +258,17 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	var n = face1:normal()
 	var t1 = face1:vertex(1) - face1:vertex(0); t1:normalize()
 	var t2 = face1:vertex(3) - face1:vertex(0); t2:normalize()
-	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp1, n, t1, t2)
-	self.contactPoints[1] = ContactPoint.stackAlloc(body1, body2, cp2, n, t1, t2)
-	self.contactPoints[2] = ContactPoint.stackAlloc(body1, body2, cp3, n, t1, t2)
-	self.contactPoints[3] = ContactPoint.stackAlloc(body1, body2, cp4, n, t1, t2)
+	self.contactPoints[0] = ContactPoint.heapAlloc(body1, body2, cp1, n, t1, t2)
+	self.contactPoints[1] = ContactPoint.heapAlloc(body1, body2, cp2, n, t1, t2)
+	self.contactPoints[2] = ContactPoint.heapAlloc(body1, body2, cp3, n, t1, t2)
+	self.contactPoints[3] = ContactPoint.heapAlloc(body1, body2, cp4, n, t1, t2)
+end
+
+terra RectRectContact:__destruct()
+	m.delete(self.contactPoints[0])
+	m.delete(self.contactPoints[1])
+	m.delete(self.contactPoints[2])
+	m.delete(self.contactPoints[3])
 end
 
 terra RectRectContact:applyForcesImpl() : {}
@@ -270,6 +281,18 @@ inheritance.virtual(RectRectContact, "applyForcesImpl")
 
 -- LP stability stuff
 if real == double then
+
+	terra RectRectContact:setFirstLPVarID(id: int): {}
+		var nextid = id
+		self.contactPoints[0]:setFirstLPVarID(nextid)
+		nextid = nextid + self.contactPoints[0]:numLPVars()
+		self.contactPoints[1]:setFirstLPVarID(nextid)
+		nextid = nextid + self.contactPoints[1]:numLPVars()
+		self.contactPoints[2]:setFirstLPVarID(nextid)
+		nextid = nextid + self.contactPoints[2]:numLPVars()
+		self.contactPoints[3]:setFirstLPVarID(nextid)
+	end
+	inheritance.virtual(RectRectContact, "setFirstLPVarID")
 
 	terra RectRectContact:numLPVars() : int
 		return self.contactPoints[0]:numLPVars() +
@@ -302,7 +325,7 @@ if real == double then
 		self.contactPoints[3]:torqueCoeffsForBody(body, indices, coeffs)
 	end
 	inheritance.virtual(RectRectContact, "torqueCoeffsForBody")
-	
+
 end
 
 
@@ -314,6 +337,7 @@ m.addConstructors(RectRectContact)
 
 return
 {
+	ContactPoint = ContactPoint,
 	RectRectContact = RectRectContact
 }
 

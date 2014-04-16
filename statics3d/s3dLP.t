@@ -12,6 +12,11 @@ local lpsolve = terralib.require("lpsolve")
 local Vec3d = Vec(double, 3)
 
 
+local C = terralib.includecstring [[
+#include "stdio.h"
+]]
+
+
 return probmodule(function(pcomp)
 
 local core = s3dCore(pcomp)
@@ -28,9 +33,12 @@ if real ~= double then return {} end
 -- Every connection needs to know the indices of its force variables in the LP
 Connection.entries:insert({field="firstLPVarID", type=int})
 
-terra Connection:setFirstLPVarID(id: int)
+-- Needs to be virtual because Connections may be composed of sub-Connections, which should
+--    react differently to this method.
+terra Connection:setFirstLPVarID(id: int) : {}
 	self.firstLPVarID = id
 end
+inheritance.virtual(Connection, "setFirstLPVarID")
 
 inheritance.purevirtual(Connection, "numLPVars", {}->{int})
 inheritance.purevirtual(Connection, "addStabilityLPConstraints", {&lpsolve._lprec}->{})
@@ -44,6 +52,11 @@ terra Body:addStabilityLPConstraints(lp: &lpsolve._lprec)
 	var indices = [Vector(int)].stackAlloc()
 	var coeffs = [Vector(Vec3d)].stackAlloc()
 	var scalarCoeffs = [Vector(double)].stackAlloc()
+
+	-- Sanity check: this body is involved in at least one connection (otherwise
+	--    there's no way we could hope to cancel out the external forces)
+	util.assert(self.connections.size > 0,
+		"Body cannot possibly be stable if it has zero connections. Did you forget to call Body:addConnection somewhere?\n")
 
 	-- Forces: 3 constraints, one for x, y, z
 	var extForce = Vec3.stackAlloc(0.0, 0.0, 0.0)
@@ -115,7 +128,7 @@ terra Scene:isStable()
 	--    for each connection
 	var numVars = 0
 	for i=0,self.connections.size do
-		self.connections(i):setFirstLPVarID(numVars)
+		self.connections(i):setFirstLPVarID(numVars+1)	-- lpsolve uses one-based indexing
 		numVars = numVars + self.connections(i):numLPVars()
 	end
 
@@ -130,11 +143,14 @@ terra Scene:isStable()
 
 	-- Add constraints imposed by bodies (force & torque balance)
 	for i=0,self.bodies.size do
-		self.bodies(i):addStabilityLPConstraints(lp)
+		if self.bodies(i).active then
+			self.bodies(i):addStabilityLPConstraints(lp)
+		end
 	end
 
 	-- Solve LP, check for stability
 	var isstable = (lpsolve.solve(lp) == lpsolve.OPTIMAL)
+	-- lpsolve.print_lp(lp)
 	lpsolve.delete_lp(lp)
 	return isstable
 end
