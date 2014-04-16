@@ -291,6 +291,20 @@ end)
 
 
 
+----- CONNECTIONS
+
+-- A Connection is a (surprise!) connection between multiple bodies that's responsible
+--    for computing some internal forces between those bodies
+local struct Connection {}
+inheritance.purevirtual(Connection, "applyForcesImpl", {}->{})
+-- This indirection is needed because we don't (yet?) have a way to support virtual pmethods.
+terra Connection:applyForces()
+	self:applyForcesImpl()
+end
+Connection.methods.applyForces = pmethod(Connection.methods.applyForces)
+
+
+
 ----- BODIES
 
 -- A Body is a rigid body (duh)
@@ -298,8 +312,8 @@ end)
 local struct Body
 {
 	shape: &Shape,
-	-- TODO: Maybe have Body record a list of Connections it's involved in?
 	forces: Vector(Force),
+	connections: Vector(&Connection),
 	active: bool,
 	density: real,
 	friction: real
@@ -309,6 +323,7 @@ local struct Body
 terra Body:__construct(shape: &Shape, density: real, friction: real)
 	self.shape = shape
 	m.init(self.forces)
+	m.init(self.connections)
 	self.active = true
 	self.density = density
 	self.friction = friction
@@ -319,6 +334,7 @@ end
 terra Body:__destruct()
 	m.delete(self.shape)
 	m.destruct(self.forces)
+	m.destruct(self.connections)
 end
 
 terra Body:mass()
@@ -346,6 +362,11 @@ terra Body:applyGravityForce(gravityConst: real, upVector: Vec3)
 	self:applyForce(&gravForce)
 end
 
+-- Connections are responsible for calling this on any bodies they involve.
+terra Body:addConnection(conn: &Connection)
+	self.connections:push(conn)
+end
+
 -- Calculate residual net force and torque
 terra Body:residuals()
 	var fres = Vec3.stackAlloc(0.0, 0.0, 0.0)
@@ -363,19 +384,6 @@ end
 
 m.addConstructors(Body)
 
-
-
------ CONNECTIONS
-
--- A Connection is a (surprise!) connection between multiple bodies that's responsible
---    for computing some internal forces between those bodies
-local struct Connection {}
-inheritance.purevirtual(Connection, "applyForcesImpl", {}->{})
--- This indirection is needed because we don't (yet?) have a way to support virtual pmethods.
-terra Connection:applyForces()
-	self:applyForcesImpl()
-end
-Connection.methods.applyForces = pmethod(Connection.methods.applyForces)
 
 
 

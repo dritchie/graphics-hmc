@@ -7,17 +7,20 @@ local inheritance = terralib.require("inheritance")
 local Vec = terralib.require("linalg").Vec
 local BBox = terralib.require("bbox")
 local Vector = terralib.require("vector")
+local lpsolve = terralib.require("lpsolve")
 local s3dCore = terralib.require("s3dCore")
 
 local C = terralib.includecstring [[
 #include "stdio.h"
 ]]
 
+local Vec3d = Vec(double, 3)
+
+
 return probmodule(function(pcomp)
 
 local core = s3dCore(pcomp)
 util.importAll(core)
-
 
 
 
@@ -48,6 +51,15 @@ terra ContactPoint:__construct(body1: &Body, body2: &Body, point: Vec3, normal: 
 	self.tangent2 = tangent2
 end
 
+ContactPoint.methods.fsign = macro(function(self, body)
+	return quote
+		var sign = 1.0
+		if body == self.body1 then sign = -1.0 end
+	in
+		sign
+	end
+end)
+
 terra ContactPoint:applyForcesImpl() : {}
 	var friction = self.body1.friction * self.body2.friction
 	var f : Force
@@ -60,15 +72,95 @@ terra ContactPoint:applyForcesImpl() : {}
 		f:combineWith(&tf1)
 		f:combineWith(&tf2)
 	end
+	var fforce = f.force
 	if self.body2.active then
+		f.force = self:fsign(self.body2)*fforce
 		self.body2:applyForce(&f)
 	end
 	if self.body1.active then
-		f.force = -f.force
+		f.force = self:fsign(self.body1)*fforce
 		self.body1:applyForce(&f)
 	end
 end
 inheritance.virtual(ContactPoint, "applyForcesImpl")
+
+-- LP stability stuff
+if real == double then
+
+	terra ContactPoint:numLPVars() : int
+		-- Normal force and two tangent forces
+		return 3
+	end
+	inheritance.virtual(ContactPoint, "numLPVars")
+
+	ContactPoint.methods.normalForceID = macro(function(self)
+		return `self.firstLPVarID
+	end)
+	ContactPoint.methods.tangentForce1ID = macro(function(self)
+		return `self.firstLPVarID + 1
+	end)
+	ContactPoint.methods.tangentForce2ID = macro(function(self)
+		return `self.firstLPVarID + 2
+	end)
+
+	terra ContactPoint:addStabilityLPConstraints(lp: &lpsolve._lprec) : {}
+		-- Variables default to a lower bound of zero, so we need to
+		--    explicitly make the tangent forces unbounded
+		lpsolve.set_unbounded(lp, self:tangentForce1ID())
+		lpsolve.set_unbounded(lp, self:tangentForce2ID())
+
+		-- Now introduce the friction bound constraints
+		-- (one lower bound, one upper bound for each tangent force)
+		var friction = self.body1.friction * self.body2.friction
+		var indices : int[2]
+		var coeffs : double[2]
+		-- Bounds for tangent force 1
+		indices[0] = self:tangentForce1ID()
+		indices[1] = self:normalForceID()
+		coeffs[0] = 1.0
+		coeffs[1] = friction
+		lpsolve.add_constraintex(lp, 2, &coeffs[0], &indices[0], lpsolve.GE, 0.0)
+		indices[0] = self:tangentForce1ID()
+		indices[1] = self:normalForceID()
+		coeffs[0] = 1.0
+		coeffs[1] = -friction
+		lpsolve.add_constraintex(lp, 2, &coeffs[0], &indices[0], lpsolve.LE, 0.0)
+		-- Bounds for tangent force 2
+		indices[0] = self:tangentForce2ID()
+		indices[1] = self:normalForceID()
+		coeffs[0] = 1.0
+		coeffs[1] = friction
+		lpsolve.add_constraintex(lp, 2, &coeffs[0], &indices[0], lpsolve.GE, 0.0)
+		indices[0] = self:tangentForce2ID()
+		indices[1] = self:normalForceID()
+		coeffs[0] = 1.0
+		coeffs[1] = -friction
+		lpsolve.add_constraintex(lp, 2, &coeffs[0], &indices[0], lpsolve.LE, 0.0)
+	end
+	inheritance.virtual(ContactPoint, "addStabilityLPConstraints")
+
+	terra ContactPoint:forceCoeffsForBody(body: &Body, indices: &Vector(int), coeffs: &Vector(Vec3d)) : {}
+		indices:push(self:normalForceID())
+		indices:push(self:tangentForce1ID())
+		indices:push(self:tangentForce2ID())
+		coeffs:push(self:fsign(body) * self.normal)
+		coeffs:push(self:fsign(body) * self.tangent1)
+		coeffs:push(self:fsign(body) * self.tangent2)
+	end
+	inheritance.virtual(ContactPoint, "forceCoeffsForBody")
+
+	terra ContactPoint:torqueCoeffsForBody(body: &Body, indices: &Vector(int), coeffs: &Vector(Vec3d)) : {}
+		indices:push(self:normalForceID())
+		indices:push(self:tangentForce1ID())
+		indices:push(self:tangentForce2ID())
+		var v = self.point - body:centerOfMass()
+		coeffs:push(v:cross(self:fsign(body) * self.normal))
+		coeffs:push(v:cross(self:fsign(body) * self.tangent1))
+		coeffs:push(v:cross(self:fsign(body) * self.tangent2))
+	end
+	inheritance.virtual(ContactPoint, "torqueCoeffsForBody")
+
+end
 
 m.addConstructors(ContactPoint)
 
@@ -175,6 +267,44 @@ terra RectRectContact:applyForcesImpl() : {}
 	self.contactPoints[3]:applyForcesImpl()
 end
 inheritance.virtual(RectRectContact, "applyForcesImpl")
+
+-- LP stability stuff
+if real == double then
+
+	terra RectRectContact:numLPVars() : int
+		return self.contactPoints[0]:numLPVars() +
+			   self.contactPoints[1]:numLPVars() +
+			   self.contactPoints[2]:numLPVars() +
+			   self.contactPoints[3]:numLPVars() 
+	end
+	inheritance.virtual(RectRectContact, "numLPVars")
+
+	terra RectRectContact:addStabilityLPConstraints(lp: &lpsolve._lprec) : {}
+		self.contactPoints[0]:addStabilityLPConstraints(lp)
+		self.contactPoints[1]:addStabilityLPConstraints(lp)
+		self.contactPoints[2]:addStabilityLPConstraints(lp)
+		self.contactPoints[3]:addStabilityLPConstraints(lp)
+	end
+	inheritance.virtual(RectRectContact, "addStabilityLPConstraints")
+
+	terra RectRectContact:forceCoeffsForBody(body: &Body, indices: &Vector(int), coeffs: &Vector(Vec3d)) : {}
+		self.contactPoints[0]:forceCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[1]:forceCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[2]:forceCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[3]:forceCoeffsForBody(body, indices, coeffs)
+	end
+	inheritance.virtual(RectRectContact, "forceCoeffsForBody")
+
+	terra RectRectContact:torqueCoeffsForBody(body: &Body, indices: &Vector(int), coeffs: &Vector(Vec3d)) : {}
+		self.contactPoints[0]:torqueCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[1]:torqueCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[2]:torqueCoeffsForBody(body, indices, coeffs)
+		self.contactPoints[3]:torqueCoeffsForBody(body, indices, coeffs)
+	end
+	inheritance.virtual(RectRectContact, "torqueCoeffsForBody")
+	
+end
+
 
 m.addConstructors(RectRectContact)
 

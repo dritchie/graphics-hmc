@@ -10,6 +10,7 @@ local gl = terralib.require("gl")
 local rendering = terralib.require("rendering")
 local AutoPtr = terralib.require("autopointer")
 local Vec = terralib.require("linalg").Vec
+local colors = terralib.require("colors")
 
 local glutils = terralib.require("glutils")
 util.importEntries(glutils, "Camera", "Light")
@@ -94,11 +95,15 @@ end
 
 local renderForces = true
 local RenderSettings = s3dLib(testcomp).RenderSettings
+local unstableColor = colors.Tableau10.Red
 local function renderDrawFn(sample, im)
 	return quote
 		var renderSettings = RenderSettings.stackAlloc()
 		renderSettings.renderForces = renderForces
 		var renderScene = &sample.value
+		if not renderScene.scene:isStable() then
+			renderSettings.activeBodyColor = [Vec(double, 4)].stackAlloc([unstableColor], 1.0)
+		end
 		renderScene:render(&renderSettings)
 		[rendering.displayLogprob("BottomLeft")](sample.logprob)
 		gl.glFlush()
