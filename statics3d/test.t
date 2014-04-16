@@ -24,11 +24,19 @@ local testcomp = probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
+	local frelTol = 0.01
+	local trelTol = 0.005
+
+	local mm = macro(function(x)
+		return `0.001*x
+	end)
+
 	return terra()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
-		camera.eye = Vec3d.stackAlloc(1.0, -1.0, 1.0)
+		var camdist = mm(200.0)
+		camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
 		camera.target = Vec3d.stackAlloc(0.0, 0.0, 0.0)
 		camera.up = upVector
 		camera.znear = 0.01
@@ -37,10 +45,21 @@ local testcomp = probcomp(function()
 		var light = Light.stackAlloc()
 		renderScene:addLight(light)
 
-		-- Set up stuff in the scene
-		var boxShape = Box.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), 0.25, 0.25, 0.25)
+		-- Set up stuff in the scene --
+
+		-- Bodies
+		var groundShape = Box.heapAlloc(); groundShape:makeBox(Vec3.stackAlloc(0.0, 0.0, -mm(35.0)), mm(1000.0), mm(1000.0), mm(10.0))
+		var groundBody = Body.oak(groundShape); groundBody.active = false
+		renderScene.scene.bodies:push(groundBody)
+		var boxShape = Box.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), mm(60.0), mm(60.0), mm(60.0))
 		var boxBody = Body.oak(boxShape)
 		renderScene.scene.bodies:push(boxBody)
+
+		-- Connections
+		renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, groundBody, boxShape:botFace(), groundShape:topFace(), false))
+
+		-- Stablity
+		renderScene.scene:encourageStability(frelTol, trelTol)
 
 		return renderScene
 	end
@@ -73,9 +92,12 @@ local function renderInitFn(samples, im)
 	end
 end
 
+local renderForces = true
+local RenderSettings = s3dLib(testcomp).RenderSettings
 local function renderDrawFn(sample, im)
 	return quote
 		var renderSettings = RenderSettings.stackAlloc()
+		renderSettings.renderForces = renderForces
 		var renderScene = &sample.value
 		renderScene:render(&renderSettings)
 		gl.glFlush()
@@ -86,9 +108,15 @@ end
 
 -------------------------------------------------------
 
-local samples = m.gc(forwardSample(testcomp, 1)())
+local numsamps = 100
+-- local go = forwardSample(testcomp, 1)
+local go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
+-- local go = mcmc(testcomp, GaussianDrift({bandwidth=0.07}), {numsamps=numsamps, verbose=true})
+local samples = go()
 moviename = arg[1] or "movie"
 rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, "../renders")
+
+
 
 
 

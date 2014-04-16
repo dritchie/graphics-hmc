@@ -18,15 +18,13 @@ gl.exposeConstants({
 })
 
 
+local Color4d = Vec(double, 4)
+
+
 return probmodule(function(pcomp)
 
 local core = s3dCore(pcomp)
 util.importAll(core)
-
--- Rendering stuff only needs to exist for real == double
-if real ~= double then return {} end
-
-local Color4 = Vec(real, 4)
 
 
 ----- RENDER SETTINGS
@@ -39,10 +37,11 @@ local struct RenderSettings
 {
 	renderPass: RenderPass,
 	renderForces: bool,
-	bgColor: Color4,
-	faceColor: Color4,
-	edgeColor: Color4,
-	forceColor: Color4,
+	bgColor: Color4d,
+	activeBodyColor: Color4d,
+	passiveBodyColor: Color4d,
+	edgeColor: Color4d,
+	forceColor: Color4d,
 	edgeWidth: real,
 	forceWidth: real,
 	forceScale: real
@@ -54,10 +53,11 @@ RenderSettings.Edges = Edges
 terra RenderSettings:__construct()
 	self.renderPass = Faces
 	self.renderForces = false
-	self.bgColor = Color4.stackAlloc([colors.White], 1.0)
-	self.faceColor = Color4.stackAlloc([colors.Tableau10.Blue], 1.0)
-	self.edgeColor = Color4.stackAlloc([colors.Black], 1.0)
-	self.forceColor = Color4.stackAlloc([colors.Tableau10.Gray], 1.0)
+	self.bgColor = Color4d.stackAlloc([colors.White], 1.0)
+	self.activeBodyColor = Color4d.stackAlloc([colors.Tableau10.Blue], 1.0)
+	self.passiveBodyColor = Color4d.stackAlloc([colors.Tableau10.Brown], 1.0)
+	self.edgeColor = Color4d.stackAlloc([colors.Black], 1.0)
+	self.forceColor = Color4d.stackAlloc([colors.Tableau10.Gray], 1.0)
 	self.edgeWidth = 2.0
 	self.forceWidth = 3.0
 	self.forceScale = 0.03
@@ -125,7 +125,7 @@ AggregateShape = core.AggregateShape
 
 terra Force:render(settings: &RenderSettings)
 	gl.glLineWidth(settings.forceWidth)
-	gl.glColor4d([Color4.elements(`settings.forceColor)])
+	gl.glColor4d([Color4d.elements(`settings.forceColor)])
 	gl.glBegin(gl.mGL_LINES())
 	var bot = self.appPoint
 	var top = self.appPoint + settings.forceScale*self.force
@@ -138,11 +138,53 @@ end
 ----- RENDERING BODIES
 
 terra Body:render(settings: &RenderSettings)
+	var mycolor: Color4d
+	if self.active then
+		mycolor = settings.activeBodyColor
+	else
+		mycolor = settings.passiveBodyColor
+	end
+	var material = Material.stackAlloc(mycolor, Color4d.stackAlloc(0.0, 0.0, 0.0, 1.0), 0.0)
+	material:setupGLMaterial()
 	self.shape:render(settings)
 end
 
 
 ----- RENDERING SCENES
+
+terra Scene:render(settings: &RenderSettings)
+
+	settings.renderPass = [RenderSettings.Faces]
+	gl.glEnable(gl.mGL_LIGHTING())
+	gl.glShadeModel(gl.mGL_FLAT())
+	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
+	-- Offset solid face pass so that we can render lines on top
+	gl.glEnable(gl.mGL_POLYGON_OFFSET_FILL())
+	gl.glPolygonOffset(1.0, 1.0)	-- are these good numbers? maybe use camera zmin/zmax?
+	for i=0,self.bodies.size do
+		self.bodies(i):render(settings)
+	end
+	gl.glDisable(gl.mGL_POLYGON_OFFSET_FILL())
+	gl.glDisable(gl.mGL_LIGHTING())
+
+	settings.renderPass = [RenderSettings.Edges]
+	gl.glColor4d([Color4d.elements(`settings.edgeColor)])
+	gl.glLineWidth(settings.edgeWidth)
+	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
+	for i=0,self.bodies.size do
+		self.bodies(i):render(settings)
+	end
+
+	if settings.renderForces then
+		for i=0,self.bodies.size do
+			var b = self.bodies(i)
+			for j=0,b.forces.size do
+				b.forces(j):render(settings)
+			end
+		end
+	end
+end
+
 
 -- Packages up a scene with info needed to render it
 -- (Camera, lights, etc.)
@@ -170,7 +212,7 @@ terra RenderableScene:addLight(light: Light)
 end
 
 terra RenderableScene:render(settings: &RenderSettings)
-	gl.glClearColor([Color4.elements(`settings.bgColor)])
+	gl.glClearColor([Color4d.elements(`settings.bgColor)])
 	gl.glClear(gl.mGL_COLOR_BUFFER_BIT() or gl.mGL_DEPTH_BUFFER_BIT())
 	gl.glEnable(gl.mGL_DEPTH_TEST())
 	gl.glEnable(gl.mGL_CULL_FACE())
@@ -189,42 +231,6 @@ end
 
 m.addConstructors(RenderableScene)
 
-
-
-terra Scene:render(settings: &RenderSettings)
-
-	settings.renderPass = [RenderSettings.Faces]
-	gl.glEnable(gl.mGL_LIGHTING())
-	gl.glShadeModel(gl.mGL_FLAT())
-	var material = Material.stackAlloc(settings.faceColor, Color4.stackAlloc(0.0, 0.0, 0.0, 1.0), 0.0)
-	material:setupGLMaterial()
-	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
-	-- Offset solid face pass so that we can render lines on top
-	gl.glEnable(gl.mGL_POLYGON_OFFSET_FILL())
-	gl.glPolygonOffset(1.0, 1.0)	-- are these good numbers? maybe use camera zmin/zmax?
-	for i=0,self.bodies.size do
-		self.bodies(i):render(settings)
-	end
-	gl.glDisable(gl.mGL_POLYGON_OFFSET_FILL())
-	gl.glDisable(gl.mGL_LIGHTING())
-
-	settings.renderPass = [RenderSettings.Edges]
-	gl.glColor4d([Color4.elements(`settings.edgeColor)])
-	gl.glLineWidth(settings.edgeWidth)
-	gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
-	for i=0,self.bodies.size do
-		self.bodies(i):render(settings)
-	end
-
-	if settings.renderForces then
-		for i=0,self.bodies.size do
-			var b = self.bodies(i)
-			for j=0,b.forces.size do
-				b.forces(j):render(settings)
-			end
-		end
-	end
-end
 
 
 ----- EXPORTS

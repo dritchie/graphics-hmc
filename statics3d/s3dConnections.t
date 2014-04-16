@@ -9,6 +9,9 @@ local BBox = terralib.require("bbox")
 local Vector = terralib.require("vector")
 local s3dCore = terralib.require("s3dCore")
 
+local C = terralib.includecstring [[
+#include "stdio.h"
+]]
 
 return probmodule(function(pcomp)
 
@@ -50,19 +53,19 @@ terra ContactPoint:applyForcesImpl() : {}
 	var f : Force
 	-- Only generate forces if one or more bodies is active
 	if self.body1.active or self.body2.active then
-		f = Force.lowerBoundedRandomLineForce(self.point, self.normal, 1e-15)
-		var frictionBound = friction*f:norm()
+		f = Force.lowerBoundedRandomLineForce(self.point, self.normal, 1e-14)
+		var frictionBound = friction*f.force:norm()
 		var tf1 = Force.boundedRandomLineForce(self.point, self.tangent1, -frictionBound, frictionBound)
 		var tf2 = Force.boundedRandomLineForce(self.point, self.tangent2, -frictionBound, frictionBound)
-		f:combineWith(tf1)
-		f:combineWith(tf2)
+		f:combineWith(&tf1)
+		f:combineWith(&tf2)
 	end
 	if self.body2.active then
-		self.body2:applyForce(f)
+		self.body2:applyForce(&f)
 	end
 	if self.body1.active then
 		f.force = -f.force
-		self.body1:applyForce(f)
+		self.body1:applyForce(&f)
 	end
 end
 inheritance.virtual(ContactPoint, "applyForcesImpl")
@@ -160,9 +163,9 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	var t1 = face1:vertex(1) - face1:vertex(0); t1:normalize()
 	var t2 = face1:vertex(3) - face1:vertex(0); t2:normalize()
 	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp1, n, t1, t2)
-	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp2, n, t1, t2)
-	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp3, n, t1, t2)
-	self.contactPoints[0] = ContactPoint.stackAlloc(body1, body2, cp4, n, t1, t2)
+	self.contactPoints[1] = ContactPoint.stackAlloc(body1, body2, cp2, n, t1, t2)
+	self.contactPoints[2] = ContactPoint.stackAlloc(body1, body2, cp3, n, t1, t2)
+	self.contactPoints[3] = ContactPoint.stackAlloc(body1, body2, cp4, n, t1, t2)
 end
 
 terra RectRectContact:applyForcesImpl() : {}

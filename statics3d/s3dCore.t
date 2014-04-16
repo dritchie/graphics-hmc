@@ -9,6 +9,10 @@ local Vec = terralib.require("linalg").Vec
 local Vector = terralib.require("vector")
 local Camera = terralib.require("glutils").Camera
 
+local C = terralib.includecstring [[
+#include "stdio.h"
+]]
+
 -- Everything is defined in a probmodule, so all of this code
 --    is safe to use in inference.
 return probmodule(function(pcomp)
@@ -334,7 +338,7 @@ terra Body:applyForce(f: &Force)
 			return
 		end
 	end
-	self.forces:push(f)
+	self.forces:push(@f)
 end
 
 terra Body:applyGravityForce(gravityConst: real, upVector: Vec3)
@@ -347,10 +351,12 @@ terra Body:residuals()
 	var fres = Vec3.stackAlloc(0.0, 0.0, 0.0)
 	var tres = Vec3.stackAlloc(0.0, 0.0, 0.0)
 	var com = self:centerOfMass()
+	-- C.printf("-------------\n")
 	for i=0,self.forces.size do
 		var f = self.forces:getPointer(i)
 		fres = fres + f.force
 		tres = tres + f:torque(com)
+		-- C.printf("fres: "); fres:print(); C.printf(" | tres: "); tres:print(); C.printf("          \n")
 	end
 	return fres, tres
 end
@@ -408,7 +414,7 @@ terra Scene:avgExtForceMag()
 		for j=0,b.forces.size do
 			var f = b.forces:getPointer(j)
 			if f.isExternal then
-				avg = avg + f:norm()
+				avg = avg + f.force:norm()
 				numf = numf + 1
 			end
 		end
@@ -421,10 +427,14 @@ local stabilityFactor = factorfn(terra(scene: &Scene, frelTol: real, trelTol: re
 	var f = real(0.0)
 	var normConst = scene:avgExtForceMag()
 	for i=0,scene.bodies.size do
-		var fres, tres = scene.bodies(i):residuals()
-		f = f + softeq(fres:norm()/normConst, 0.0, frelTol)
-		f = f + softeq(tres:norm()/normConst, 0.0, trelTol)
+		if scene.bodies(i).active then
+			var fres, tres = scene.bodies(i):residuals()
+			-- C.printf("fres: "); fres:print(); C.printf(" | tres: "); tres:print(); C.printf("          \n")
+			f = f + softeq(fres:norm()/normConst, 0.0, frelTol)
+			f = f + softeq(tres:norm()/normConst, 0.0, trelTol)
+		end
 	end
+	-- C.printf("stabilityFactor: %g                 \n", ad.val(f))
 	return f
 end)
 
@@ -432,12 +442,14 @@ terra Scene:encourageStability(frelTol: real, trelTol: real)
 	-- Clear forces, apply gravity
 	for i=0,self.bodies.size do
 		self.bodies(i).forces:clear()
-		self.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
+		if self.bodies(i).active then
+			self.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
+		end
 	end
 
 	-- Generate latent internal force variables
 	for i=0,self.connections.size do
-		self.connections:applyForces()
+		self.connections(i):applyForces()
 	end
 
 	-- Add stability factor

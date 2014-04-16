@@ -50,22 +50,22 @@ QuadHex.vBackTopLeft = 7
 
 -- Face accessors for client code
 QuadHex.methods.frontFace = macro(function(self)
-	return `self.faces[QuadHex.fFront]
+	return `&self.faces[ [QuadHex.fFront] ]
 end)
 QuadHex.methods.backFace = macro(function(self)
-	return `self.faces[QuadHex.fBack]
+	return `&self.faces[ [QuadHex.fBack] ]
 end)
 QuadHex.methods.topFace = macro(function(self)
-	return `self.faces[QuadHex.fTop]
+	return `&self.faces[ [QuadHex.fTop] ]
 end)
 QuadHex.methods.botFace = macro(function(self)
-	return `self.faces[QuadHex.fBot]
+	return `&self.faces[ [QuadHex.fBot] ]
 end)
 QuadHex.methods.leftFace = macro(function(self)
-	return `self.faces[QuadHex.fLeft]
+	return `&self.faces[ [QuadHex.fLeft] ]
 end)
 QuadHex.methods.rightFace = macro(function(self)
-	return `self.faces[QuadHex.fRight]
+	return `&self.faces[ [QuadHex.fRight] ]
 end)
 
 terra QuadHex:__construct() : {}
@@ -131,15 +131,17 @@ terra QuadHex:volume() : real
 end
 inheritance.virtual(QuadHex, "volume")
 
-terra QuadHex:render(settings: &RenderSettings) : {}
-	self.faces[0]:render(settings)
-	self.faces[1]:render(settings)
-	self.faces[2]:render(settings)
-	self.faces[3]:render(settings)
-	self.faces[4]:render(settings)
-	self.faces[5]:render(settings)
+if real == double then
+	terra QuadHex:render(settings: &RenderSettings) : {}
+		self.faces[0]:render(settings)
+		self.faces[1]:render(settings)
+		self.faces[2]:render(settings)
+		self.faces[3]:render(settings)
+		self.faces[4]:render(settings)
+		self.faces[5]:render(settings)
+	end
+	inheritance.virtual(QuadHex, "render")
 end
-inheritance.virtual(QuadHex, "render")
 
 m.addConstructors(QuadHex)
 
