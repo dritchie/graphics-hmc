@@ -90,8 +90,6 @@ terra QuadHex:__construct() : {}
 	self.verts[ [QuadHex.vBackTopLeft] ] = Vec3.stackAlloc(-0.5, 0.5, 0.5)
 end
 
--- TODO: Switch this to use proper transformation matrices, once I write those?
--- (Or even eliminate it entirely?)
 terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
 	var w2 = 0.5*width
 	var d2 = 0.5*depth
@@ -141,6 +139,33 @@ if real == double then
 		self.faces[5]:render(settings)
 	end
 	inheritance.virtual(QuadHex, "render")
+end
+
+-- Transform self such that its bottom face sits on the top face of box,
+--    and the centroid of its bottom face is located at point.
+terra QuadHex:stack(box: &QuadHex, point: Vec3) : {}
+	var myBotFace = self:botFace()
+	var targetTopFace = box:topFace()
+	var xform = Mat4.translate(point - myBotFace:centroid()) *
+				Mat4.face(-myBotFace:normal(), targetTopFace:normal())
+	self:transform(&xform)
+end
+
+-- Transform self such that its bottom face sits on the top face of box,
+--    and the centroid of its bottom face is located at the (xcoord, ycoord)
+--    in the local coordinate system of box's top face
+-- If relativeCoords is true, then xcoord,ycoord are interpreted as percentages along
+--    their respective edges. Otherwise, they are interpreted as absolute physical unites
+terra QuadHex:stack(box: &QuadHex, xcoord: real, ycoord: real, relativeCoords: bool) : {}
+	var origin = box.verts[ [QuadHex.vFrontTopLeft] ]
+	var xedge = box.verts[ [QuadHex.vFrontTopRight] ] - origin
+	var yedge = box.verts[ [QuadHex.vBackTopLeft] ] - origin
+	if not relativeCoords then
+		xedge:normalize()
+		yedge:normalize()
+	end
+	var point = origin + xcoord*xedge + ycoord*yedge
+	self:stack(box, point)
 end
 
 m.addConstructors(QuadHex)

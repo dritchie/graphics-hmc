@@ -55,9 +55,14 @@ local testcomp = probcomp(function()
 		var boxShape = Box.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), mm(60.0), mm(60.0), mm(60.0))
 		var boxBody = Body.oak(boxShape)
 		renderScene.scene.bodies:push(boxBody)
+		var boxShape2 = Box.heapAlloc(); boxShape2:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), mm(60.0), mm(60.0), mm(60.0))
+		boxShape2:stack(boxShape, 0.5, 0.5, true)
+		var boxBody2 = Body.oak(boxShape2)
+		renderScene.scene.bodies:push(boxBody2)
 
 		-- Connections
 		renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, groundBody, boxShape:botFace(), groundShape:topFace(), false))
+		renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody2, boxBody, boxShape2:botFace(), boxShape:topFace(), false))
 
 		-- Stablity
 		renderScene.scene:encourageStability(frelTol, trelTol)
@@ -115,8 +120,8 @@ end
 -------------------------------------------------------
 
 local numsamps = 100
--- local go = forwardSample(testcomp, 1)
-local go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
+local go = forwardSample(testcomp, 1)
+-- local go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
 -- local go = mcmc(testcomp, GaussianDrift({bandwidth=0.07}), {numsamps=numsamps, verbose=true})
 local samples = go()
 moviename = arg[1] or "movie"

@@ -6,6 +6,7 @@ local util = terralib.require("util")
 local inheritance = terralib.require("inheritance")
 local templatize = terralib.require("templatize")
 local Vec = terralib.require("linalg").Vec
+local Mat = terralib.require("linalg").Mat
 local Vector = terralib.require("vector")
 local Camera = terralib.require("glutils").Camera
 
@@ -19,6 +20,7 @@ return probmodule(function(pcomp)
 
 
 local Vec3 = Vec(real, 3)
+local Mat4 = Mat(real, 4, 4)
 
 
 ----- SHAPES
@@ -28,6 +30,7 @@ local Vec3 = Vec(real, 3)
 local struct Shape {}
 inheritance.purevirtual(Shape, "volume", {}->{real})
 inheritance.purevirtual(Shape, "centroid", {}->{Vec3})
+inheritance.purevirtual(Shape, "transform", {&Mat4}->{})
 
 
 -- A PrimitiveShape stores the raw geometry to represent a shape.
@@ -35,9 +38,17 @@ local struct PrimitiveShape
 {
 	-- Concrete subtypes should ensure that this points to something
 	-- (Typically to a fixed-sized vertex array member)
-	vertices: &Vec3
+	vertices: &Vec3,
+	numverts: uint
 }
 inheritance.dynamicExtend(Shape, PrimitiveShape)
+
+terra PrimitiveShape:transform(mat: &Mat4) : {}
+	for i=0,self.numverts do
+		self.vertices[i] = mat:transformPoint(self.vertices[i])
+	end
+end
+inheritance.virtual(PrimitiveShape, "transform")
 
 
 -- A ConvexPrimitiveShape is just that: a primitive shape that guarantees
@@ -56,6 +67,7 @@ local ConvexPrimitiveShape = templatize(function(nverts)
 
 	terra ConvexPrimitiveShapeT:__construct()
 		self.vertices = &self.verts[0]
+		self.numverts = nverts
 	end
 
 	terra ConvexPrimitiveShapeT:centroid() : Vec3
@@ -120,6 +132,17 @@ local AggregateShape = templatize(function(numParts)
 		end)()]
 	end
 	inheritance.virtual(AggregateShapeT, "centroid")
+
+	terra AggregateShapeT:transform(mat: &Mat4) : {}
+		[(function()
+			local t = {}
+			for i=0,numParts-1 do
+				table.insert(t, quote self.shapes[i]:transform(mat) end)
+			end
+			return t
+		end)()]
+	end
+	inheritance.virtual(AggregateShapeT, "transform")
 
 	m.addConstructors(AggregateShapeT)
 	return AggregateShapeT
@@ -471,6 +494,7 @@ m.addConstructors(Scene)
 return 
 {
 	Vec3 = Vec3,
+	Mat4 = Mat4,
 	Shape = Shape,
 	PrimitiveShape = PrimitiveShape,
 	ConvexPrimitiveShape = ConvexPrimitiveShape,
