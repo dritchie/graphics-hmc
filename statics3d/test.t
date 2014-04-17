@@ -56,7 +56,8 @@ local testcomp = probcomp(function()
 		var boxBody = Body.oak(boxShape)
 		renderScene.scene.bodies:push(boxBody)
 		var boxShape2 = Box.heapAlloc(); boxShape2:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), mm(60.0), mm(60.0), mm(60.0))
-		boxShape2:stack(boxShape, 0.5, 0.5, true)
+		-- boxShape2:stack(boxShape, 0.5, 0.5, true)
+		boxShape2:stackRandom(boxShape, mm(3.0), false)
 		var boxBody2 = Body.oak(boxShape2)
 		renderScene.scene.bodies:push(boxBody2)
 
@@ -120,8 +121,8 @@ end
 -------------------------------------------------------
 
 local numsamps = 100
-local go = forwardSample(testcomp, 1)
--- local go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
+-- local go = forwardSample(testcomp, 1)
+local go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
 -- local go = mcmc(testcomp, GaussianDrift({bandwidth=0.07}), {numsamps=numsamps, verbose=true})
 local samples = go()
 moviename = arg[1] or "movie"

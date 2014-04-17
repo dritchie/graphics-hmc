@@ -6,6 +6,7 @@ local ad = terralib.require("ad")
 local inheritance = terralib.require("inheritance")
 local s3dCore = terralib.require("s3dCore")
 local s3dRendering = terralib.require("s3dRendering")
+local s3dConnections = terralib.require("s3dConnections")
 
 
 return probmodule(function(pcomp)
@@ -14,7 +15,8 @@ local core = s3dCore(pcomp)
 util.importAll(core)
 local rendering = s3dRendering(pcomp)
 util.importAll(rendering)
-
+local connections = s3dConnections(pcomp)
+util.importAll(connections)
 
 
 
@@ -167,6 +169,46 @@ terra QuadHex:stack(box: &QuadHex, xcoord: real, ycoord: real, relativeCoords: b
 	var point = origin + xcoord*xedge + ycoord*yedge
 	self:stack(box, point)
 end
+
+-- Transform self such that its bottom face sits on the top face of box,
+--    and the centroid of its bottom face is located somewhere such that
+--    there is at least 'margin' overlap between the two contacting faces.
+-- Only valid between coplanar, aligned, rectangular faces. If checkValidity
+--    is true, we check this condition before proceeding.
+terra QuadHex:stackRandom(box: &QuadHex, margin: real, checkValidity: bool)
+	-- Setup by getting us stacked at the centroid, and check validity if requested.
+	var topFaceCentroid = box:topFace():centroid()
+	self:stack(box, topFaceCentroid)
+	if checkValidity then
+		util.assert(RectRectContact.isValidContact(box:topFace(), self:botFace()))
+	end
+
+	-- Figure out which edge pairs correspond between the two faces so we can
+	--    compute uniform variable bounds
+	var myorigin = self.verts[ [QuadHex.vFrontBotLeft] ]
+	var myxedge = self.verts[ [QuadHex.vFrontBotRight] ] - myorigin
+	var myyedge = self.verts[ [QuadHex.vBackBotLeft] ] - myorigin
+	var boxorigin = box.verts[ [QuadHex.vFrontTopLeft] ]
+	var boxxedge = box.verts[ [QuadHex.vFrontTopRight] ] - boxorigin
+	var boxyedge = box.verts[ [QuadHex.vBackTopLeft] ] - boxorigin
+	if myxedge:dot(boxxedge) == 0.0 then
+		var tmp = myxedge
+		myxedge = myyedge
+		myyedge = tmp
+	end
+
+	-- Compute bounds, draw uniform variables, do stacking
+	var oneSidedXrange = 0.5*boxxedge:norm() + 0.5*myxedge:norm() - margin
+	var oneSidedYrange = 0.5*boxyedge:norm() + 0.5*myyedge:norm() - margin
+	var xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange)
+	var yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange)
+	boxxedge:normalize()
+	boxyedge:normalize()
+	var point = topFaceCentroid + xperturb*boxxedge + yperturb*boxyedge
+	self:stack(box, point)
+end
+QuadHex.methods.stackRandom = pmethod(QuadHex.methods.stackRandom)
+
 
 m.addConstructors(QuadHex)
 
