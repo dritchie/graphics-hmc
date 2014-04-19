@@ -172,12 +172,12 @@ m.addConstructors(ContactPoint)
 
 
 
-local validThresh = 1e-16
+local alignThresh = 1e-12
 local RectContactFace = Face(4)
 
 -- A RectRectContact joins two bodies at two coincident faces.
 -- Both faces must be:
---    * Rectangular
+--    * Parallelograms
 --    * Co-planar
 --    * Aligned (both edge directions parallel)
 -- Internally, the contact is represented as four ContactPoints--
@@ -190,18 +190,19 @@ inheritance.dynamicExtend(Connection, RectRectContact)
 
 
 RectRectContact.methods.isValidContact = terra(face1: &RectContactFace, face2: &RectContactFace)
-	-- Check rectangularity
-	if not face1:isRectangular() or not face2:isRectangular() then return false end
+	-- Check parallelogram-ness
+	if not face1:isParallelogram() or not face2:isParallelogram() then return false end
 	-- Check alignment
 	var e1 = face1:vertex(1) - face1:vertex(0); e1:normalize()
 	var e2a = face2:vertex(1) - face2:vertex(0); e2a:normalize()
 	var e2b = face2:vertex(2) - face2:vertex(1); e2b:normalize()
-	var aligned = ad.math.fabs(e1:dot(e2a)) < validThresh or
-		   		  ad.math.fabs(e1:dot(e2b)) < validThresh
+	var aligned = ad.math.fabs(e1:dot(e2a)) < alignThresh or
+		   		  ad.math.fabs(e1:dot(e2b)) < alignThresh
 	if not aligned then return false end
 	-- Check coplanarity
 	var n = e2a:cross(e2b)
-	return face1:vertex(0):inPlane(face2:vertex(0), n)
+	if not face1:vertex(0):inPlane(face2:vertex(0), n) then return false end
+	return true
 end
 
 local Vec2 = Vec(real, 2)
@@ -250,7 +251,7 @@ end
 terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContactFace, face2: &RectContactFace, validCheck: bool)
 	if validCheck then
 		util.assert(RectRectContact.isValidContact(face1, face2),
-			"Can only create Contact between two aligned, rectangular faces\n")
+			"Can only create Contact between two coplanar, aligned, parallelogram faces\n")
 	end
 
 	-- Compute contact polygon, create 4 contact points

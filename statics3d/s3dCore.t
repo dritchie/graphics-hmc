@@ -214,9 +214,37 @@ local Face = templatize(function(nverts)
 		return n
 	end
 
+	terra FaceT:transform(mat: &Mat4)
+		[(function()
+			local t = {}
+			for i=0,nverts-1 do
+				table.insert(t, quote self:vertex(i) = mat:transformPoint(self:vertex(i)) end)
+			end
+			return t
+		end)()]
+	end
+
+	terra FaceT:isPlanar()
+		var v0 = self:vertex(0)
+		var v1 = self:vertex(1)
+		var v2 = self:vertex(2)
+		[(function()
+			local t = {}
+			for i=3,nverts-1 do
+				table.insert(t, quote
+					if not self:vertex(i):inPlane(v0, v1, v2) then
+						return false
+					end
+				end)
+			end
+			return t
+		end)()]
+		return true
+	end
+
 	-- Some useful stuff for quadrilaterals
 	if nverts == 4 then
-		local rectThresh = 1e-16
+		local rectThresh = 1e-12
 		terra FaceT:isRectangular()
 			-- Need to verify that all corners are orthogonal
 			-- (But it's sufficient to just check three - the fourth follows by necessity)
@@ -227,6 +255,17 @@ local Face = templatize(function(nverts)
 			return ad.math.fabs(e1:dot(e2)) < rectThresh and
 				   ad.math.fabs(e1:dot(e3)) < rectThresh and
 				   ad.math.fabs(e4:dot(e2)) < rectThresh
+		end
+
+		local parThresh = 1 - 1e-12
+		terra FaceT:isParallelogram()
+			-- Verify that opposite edge pairs are parallel
+			var e1a = self:vertex(1) - self:vertex(0); e1a:normalize()
+			var e1b = self:vertex(2) - self:vertex(3); e1b:normalize()
+			if e1a:dot(e1b) < parThresh then return false end
+			var e2a = self:vertex(2) - self:vertex(1); e2a:normalize()
+			var e2b = self:vertex(3) - self:vertex(0); e2b:normalize()
+			return e2a:dot(e2b) >= parThresh
 		end
 	end
 
@@ -436,33 +475,50 @@ terra Scene:__destruct()
 	m.destruct(self.connections)
 end
 
--- Used as a normalizing factor for force residuals
+-- Used to calculate normalizing factor for force residuals
 terra Scene:avgExtForceMag()
 	var avg = real(0.0)
-	var numf = 0
+	var num = 0
 	for i=0,self.bodies.size do
 		var b = self.bodies(i)
 		for j=0,b.forces.size do
 			var f = b.forces:getPointer(j)
 			if f.isExternal then
 				avg = avg + f.force:norm()
-				numf = numf + 1
+				num = num + 1
 			end
 		end
 	end
-	return (1.0/numf) * avg
+	return (1.0/num) * avg
+end
+
+-- Used to calculate normalizing factor for torque residuals
+terra Scene:avgVolume()
+	var avg = real(0.0)
+	var num = 0
+	for i=0,self.bodies.size do
+		var b = self.bodies(i)
+		if b.active then
+			avg = avg + b.shape:volume()
+			num = num + 1
+		end
+	end
+	return (1.0/num) * avg
 end
 
 -- frelTol and trelTol are gaussian bandwidths, in "% of avg external force" units
 local stabilityFactor = factorfn(terra(scene: &Scene, frelTol: real, trelTol: real)
 	var f = real(0.0)
-	var normConst = scene:avgExtForceMag()
+	var avgExtFmag = scene:avgExtForceMag()
+	var avgVol = scene:avgVolume()
+	var fNormConst = avgExtFmag
+	var tNormConst = avgExtFmag * ad.math.pow(avgVol, 0.33) -- Approximate average torque using 'average' lever arm length
 	for i=0,scene.bodies.size do
 		if scene.bodies(i).active then
 			var fres, tres = scene.bodies(i):residuals()
 			-- C.printf("fres: "); fres:print(); C.printf(" | tres: "); tres:print(); C.printf("          \n")
-			f = f + softeq(fres:norm()/normConst, 0.0, frelTol)
-			f = f + softeq(tres:norm()/normConst, 0.0, trelTol)
+			f = f + softeq(fres:norm()/fNormConst, 0.0, frelTol)
+			f = f + softeq(tres:norm()/tNormConst, 0.0, trelTol)
 		end
 	end
 	-- C.printf("stabilityFactor: %g                 \n", ad.val(f))
