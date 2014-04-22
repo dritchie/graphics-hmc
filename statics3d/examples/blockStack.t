@@ -11,6 +11,10 @@ local glutils = terralib.require("glutils")
 util.importEntries(glutils, "Camera", "Light")
 
 
+local C = terralib.includecstring [[
+#include "stdio.h"
+]]
+
 
 return probcomp(function()
 	local s3d = s3dLib()
@@ -20,8 +24,8 @@ return probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
-	local frelTol = 0.01
-	local trelTol = 0.01
+	local frelTol = 0.015
+	local trelTol = 0.015
 
 	local mm = macro(function(x)
 		return `0.001*x
@@ -95,17 +99,29 @@ return probcomp(function()
 		-- Stablity
 		renderScene.scene:encourageStability(frelTol, trelTol)
 
-		-- Encourage desired shape (leaning)
-		var shapeFactorSoftness = mm(10.0)
-		var leanTheta = radians(-20.0)
-		var leanPhi = radians(45.0)
-		var lineLen = mm(1000000.0)
-		var lineStart = boxShape:botFace():centroid()
-		var lineEnd = lineStart + Vec3.fromSpherical(lineLen, leanTheta, leanPhi)
-		for i=1,renderScene.scene.bodies.size do
-			var dist = ad.math.sqrt(renderScene.scene.bodies(i):centerOfMass():distSqToLineSeg(lineStart, lineEnd))
-			factor(softeq(dist, 0.0, shapeFactorSoftness))
-		end
+		-- -- Encourage desired shape (leaning)
+		-- var shapeFactorSoftness = mm(10.0)
+		-- var leanTheta = radians(-20.0)
+		-- var leanPhi = radians(45.0)
+		-- var lineLen = mm(1000000.0)
+		-- var lineStart = boxShape:botFace():centroid()
+		-- var lineEnd = lineStart + Vec3.fromSpherical(lineLen, leanTheta, leanPhi)
+		-- for i=1,renderScene.scene.bodies.size do
+		-- 	var dist = ad.math.sqrt(renderScene.scene.bodies(i):centerOfMass():distSqToLineSeg(lineStart, lineEnd))
+		-- 	factor(softeq(dist, 0.0, shapeFactorSoftness))
+		-- end
+
+		-- 'Conditioning on downstream evidence' by constraining the position of the top block
+		var posFactorSoftness = mm(5.0)
+		var targetPos = Vec3.stackAlloc(0.0, 0.0, 0.24)
+		var topBlockPos = renderScene.scene.bodies:back():centerOfMass()
+		factor(softeq(topBlockPos(0), targetPos(0), posFactorSoftness))
+		factor(softeq(topBlockPos(1), targetPos(1), posFactorSoftness))
+		factor(softeq(topBlockPos(2), targetPos(2), posFactorSoftness))
+		-- [util.optionally(real == double, quote
+		-- 	C.printf("%g                  \n", renderScene.scene.bodies:back():centerOfMass()(2))
+		-- end)]
+
 
 		return renderScene
 	end

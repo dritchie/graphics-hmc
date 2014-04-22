@@ -4,6 +4,7 @@ local util = terralib.require("util")
 local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local inheritance = terralib.require("inheritance")
+local templatize = terralib.require("templatize")
 local s3dCore = terralib.require("s3dCore")
 local s3dRendering = terralib.require("s3dRendering")
 local s3dConnections = terralib.require("s3dConnections")
@@ -17,6 +18,44 @@ local rendering = s3dRendering(pcomp)
 util.importAll(rendering)
 local connections = s3dConnections(pcomp)
 util.importAll(connections)
+
+
+
+----- ADDITIONAL USEFUL OPERATIONS ON RECTANGULAR FACES
+
+local coreFace = Face
+core.Face = templatize(function(nverts)
+	local FaceT = coreFace(nverts)
+	if nverts == 4 then
+		
+		-- Stitch this face to another face so that they are aligned and coplanar
+		--    and the centroid of self is at point
+		terra FaceT:weld(face: &FaceT, point: Vec3, validCheck: bool) : {}
+			-- Transforms to apply:
+			--  * Move self:centroid to origin
+			--  * Rotate so -self:normal faces face:normal (coplanarity)
+			--  (* Assume that tangent directions align...)
+			--  * Move origin to point
+			var mat = Mat4.translate(point) * Mat4.face(-self:normal(), face:normal()) * Mat4.translate(-self:centroid())
+			self:transform(&mat)
+			if validCheck then
+				util.assert(RectRectContact.isValidContact(self, face),
+					"Cannot stitch non-aligned rectangular faces\n")
+			end
+		end
+
+		terra FaceT:weld(face: &FaceT, xcoord: real, ycoord: real, validCheck: bool) : {}
+			var point = face:vertex(0) +
+						xcoord*(face:vertex(1) - face:vertex(0)) +
+						ycoord*(face:vertex(2) - face:vertex(1))
+			self:weld(face, point, validCheck)
+		end
+
+	end
+	return FaceT
+end)
+Face = core.Face
+
 
 
 
@@ -129,6 +168,19 @@ terra QuadHex:__construct() : {}
 	self.verts[ [QuadHex.vBackBotRight] ] = Vec3.stackAlloc(0.5, 0.5, -0.5)
 	self.verts[ [QuadHex.vBackTopRight] ] = Vec3.stackAlloc(0.5, 0.5, 0.5)
 	self.verts[ [QuadHex.vBackTopLeft] ] = Vec3.stackAlloc(-0.5, 0.5, 0.5)
+end
+
+terra QuadHex:__construct(fbl: Vec3, fbr: Vec3, ftl: Vec3, ftr: Vec3, bbl: Vec3, bbr: Vec3, btl: Vec3, btr: Vec3) : {}
+	self:__construct()
+
+	self.verts[ [QuadHex.vFrontBotLeft] ] = fbl
+	self.verts[ [QuadHex.vFrontBotRight] ] = fbr
+	self.verts[ [QuadHex.vFrontTopRight] ] = ftr
+	self.verts[ [QuadHex.vFrontTopLeft] ] = ftl
+	self.verts[ [QuadHex.vBackBotLeft] ] = bbl
+	self.verts[ [QuadHex.vBackBotRight] ] = bbr
+	self.verts[ [QuadHex.vBackTopRight] ] = btr
+	self.verts[ [QuadHex.vBackTopLeft] ] = btl
 end
 
 terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
@@ -397,6 +449,9 @@ end
 inheritance.virtual(Box, "volume")
 
 m.addConstructors(Box)
+
+
+
 
 
 return

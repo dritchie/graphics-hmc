@@ -10,7 +10,8 @@ local rendering = terralib.require("rendering")
 local Vec = terralib.require("linalg").Vec
 local colors = terralib.require("colors")
 
-local testcomp = terralib.require("examples.blockStack")
+-- local testcomp = terralib.require("examples.blockStack")
+local testcomp = terralib.require("examples.arch")
 
 
 -------------------------------------------------------
@@ -65,7 +66,7 @@ local numsamps = 400
 local doHMC = true
 local numHMCSteps = 1000
 if not doHMC then numsamps = 2*numsamps*numHMCSteps end
-local go = forwardSample(testcomp, numsamps)
+local go = forwardSample(testcomp, 100)
 if doHMC then
 	go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
 else
