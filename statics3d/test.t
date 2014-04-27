@@ -12,10 +12,15 @@ local colors = terralib.require("colors")
 
 -- local testcomp = terralib.require("examples.blockStack")
 -- local testcomp = terralib.require("examples.arch")
-local testcomp = terralib.require("examples.archTower")
+-- local testcomp = terralib.require("examples.archTower")
+local testcomp = terralib.require("examples.multiStack")
 
 
 -------------------------------------------------------
+
+local lerp = macro(function(a, b, t)
+	return `(1.0-t)*a + t*b
+end)
 
 local ensureEven = macro(function(x)
 	return quote
@@ -63,17 +68,34 @@ end
 
 -------------------------------------------------------
 
--- local numsamps = 400
-local numsamps = 1000
+local numsamps = 400
+-- local numsamps = 1000
 local doHMC = true
 local numHMCSteps = 1000
 if not doHMC then numsamps = 2*numsamps*numHMCSteps end
-local go = forwardSample(testcomp, 100)
+local kernel = nil
 if doHMC then
-	go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
+	kernel = HMC({numSteps=1000})
 else
-	go = mcmc(testcomp, GaussianDrift({bandwidth=0.003}), {numsamps=numsamps, verbose=true})
+	kernel = GaussianDrift({bandwidth=0.003})
 end
+
+-- Annealed burn-in
+local scheduleFn = macro(function(iter, currTrace)
+	local numAnnealSteps = numsamps/4
+	local maxtemp = 100.0
+	return quote
+		if iter < numAnnealSteps then
+			currTrace.temperature = lerp(maxtemp, 1.0, iter/numAnnealSteps)
+		else
+			currTrace.temperature = 1.0
+		end
+	end
+end)
+kernel = Schedule(kernel, scheduleFn)
+
+-- local go = forwardSample(testcomp, 100)
+local go = mcmc(testcomp, kernel, {numsamps=numsamps, verbose=true})
 local samples = go()
 moviename = arg[1] or "movie"
 rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, "../renders")

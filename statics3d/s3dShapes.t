@@ -151,7 +151,7 @@ end)
 terra QuadHex:__construct() : {}
 	[QuadHex.ParentClass].__construct(self)
 
-	-- We default to a unit cube at the origin in a z-up coordinate system.
+	-- We initial to a unit cube at the origin in a z-up coordinate system.
 
 	self.faces[ [QuadHex.fFront] ] = QuadFace.stackAlloc(self, [QuadHex.vFrontBotLeft], [QuadHex.vFrontBotRight], [QuadHex.vFrontTopRight], [QuadHex.vFrontTopLeft])
 	self.faces[ [QuadHex.fBack] ] = QuadFace.stackAlloc(self, [QuadHex.vBackBotRight], [QuadHex.vBackBotLeft], [QuadHex.vBackTopLeft], [QuadHex.vBackTopRight])
@@ -267,7 +267,7 @@ end
 --    there is at least 'margin' overlap between the two contacting faces.
 -- Only valid between coplanar, aligned, rectangular faces. If checkValidity
 --    is true, we check this condition before proceeding.
-terra QuadHex:stackRandom(box: &QuadHex, margin: real, checkValidity: bool)
+terra QuadHex:stackRandom(box: &QuadHex, margin: real, checkValidity: bool, initialToZero: bool) : {}
 	-- Setup by getting us stacked at the centroid, and check validity if requested.
 	var topFaceCentroid = box:topFace():centroid()
 	self:stack(box, topFaceCentroid)
@@ -299,13 +299,119 @@ terra QuadHex:stackRandom(box: &QuadHex, margin: real, checkValidity: bool)
 	-- Compute bounds, draw uniform variables, do stacking
 	var oneSidedXrange = 0.5*boxxnorm + 0.5*myxnorm - margin
 	var oneSidedYrange = 0.5*boxynorm + 0.5*myynorm - margin
-	var xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange)
-	var yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange)
+	var xperturb : real
+	var yperturb : real
+	if initialToZero then
+		xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange, {initialVal=0.0})
+		yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange, {initialVal=0.0})
+	else
+		xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange)
+		yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange)
+	end
 	var disp = xperturb*boxxedge + yperturb*boxyedge
 	var mat = Mat4.translate(disp)
 	self:transform(&mat)
 end
+terra QuadHex:stackRandom(box: &QuadHex, margin: real, checkValidity: bool) : {}
+	self:stackRandom(box, margin, checkValidity, false)
+end
 QuadHex.methods.stackRandom = pmethod(QuadHex.methods.stackRandom)
+
+
+
+terra QuadHex:stackRandomX(box: &QuadHex, margin: real, checkValidity: bool, initialToZero: bool) : {}
+	-- Setup by getting us stacked at the centroid, and check validity if requested.
+	var topFaceCentroid = box:topFace():centroid()
+	self:stack(box, topFaceCentroid)
+	if checkValidity then
+		util.assert(RectRectContact.isValidContact(box:topFace(), self:botFace()))
+	end
+
+	-- Figure out which edge pairs correspond between the two faces so we can
+	--    compute uniform variable bounds
+	var myorigin = self.verts[ [QuadHex.vFrontBotLeft] ]
+	var myxedge = self.verts[ [QuadHex.vFrontBotRight] ] - myorigin
+	var myyedge = self.verts[ [QuadHex.vBackBotLeft] ] - myorigin
+	var boxorigin = box.verts[ [QuadHex.vFrontTopLeft] ]
+	var boxxedge = box.verts[ [QuadHex.vFrontTopRight] ] - boxorigin
+	var boxyedge = box.verts[ [QuadHex.vBackTopLeft] ] - boxorigin
+	var myxnorm = myxedge:norm()
+	var myynorm = myyedge:norm()
+	var boxxnorm = boxxedge:norm()
+	var boxynorm = boxyedge:norm()
+	myxedge = myxedge / myxnorm
+	myyedge = myyedge / myynorm
+	boxxedge = boxxedge / boxxnorm
+	boxyedge = boxyedge / boxynorm
+	if myxedge:dot(boxxedge) < myxedge:dot(boxyedge) then
+		util.swap(myxedge, myyedge)
+		util.swap(myxnorm, myynorm)
+	end
+
+	-- Compute bounds, draw uniform variables, do stacking
+	var oneSidedXrange = 0.5*boxxnorm + 0.5*myxnorm - margin
+	var xperturb : real
+	if initialToZero then
+		xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange, {initialVal=0.0})
+	else
+		xperturb = boundedUniform(-oneSidedXrange, oneSidedXrange)
+	end
+	var disp = xperturb*boxxedge
+	var mat = Mat4.translate(disp)
+	self:transform(&mat)
+end
+terra QuadHex:stackRandomX(box: &QuadHex, margin: real, checkValidity: bool) : {}
+	self:stackRandomX(box, margin, checkValidity, false)
+end
+QuadHex.methods.stackRandomX = pmethod(QuadHex.methods.stackRandomX)
+
+
+
+terra QuadHex:stackRandomY(box: &QuadHex, margin: real, checkValidity: bool, initialToZero: bool) : {}
+	-- Setup by getting us stacked at the centroid, and check validity if requested.
+	var topFaceCentroid = box:topFace():centroid()
+	self:stack(box, topFaceCentroid)
+	if checkValidity then
+		util.assert(RectRectContact.isValidContact(box:topFace(), self:botFace()))
+	end
+
+	-- Figure out which edge pairs correspond between the two faces so we can
+	--    compute uniform variable bounds
+	var myorigin = self.verts[ [QuadHex.vFrontBotLeft] ]
+	var myxedge = self.verts[ [QuadHex.vFrontBotRight] ] - myorigin
+	var myyedge = self.verts[ [QuadHex.vBackBotLeft] ] - myorigin
+	var boxorigin = box.verts[ [QuadHex.vFrontTopLeft] ]
+	var boxxedge = box.verts[ [QuadHex.vFrontTopRight] ] - boxorigin
+	var boxyedge = box.verts[ [QuadHex.vBackTopLeft] ] - boxorigin
+	var myxnorm = myxedge:norm()
+	var myynorm = myyedge:norm()
+	var boxxnorm = boxxedge:norm()
+	var boxynorm = boxyedge:norm()
+	myxedge = myxedge / myxnorm
+	myyedge = myyedge / myynorm
+	boxxedge = boxxedge / boxxnorm
+	boxyedge = boxyedge / boxynorm
+	if myxedge:dot(boxxedge) < myxedge:dot(boxyedge) then
+		util.swap(myxedge, myyedge)
+		util.swap(myxnorm, myynorm)
+	end
+
+	-- Compute bounds, draw uniform variables, do stacking
+	var oneSidedYrange = 0.5*boxynorm + 0.5*myynorm - margin
+	var yperturb : real
+	if initialToZero then
+		yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange, {initialVal=0.0})
+	else
+		yperturb = boundedUniform(-oneSidedYrange, oneSidedYrange)
+	end
+	var disp = yperturb*boxyedge
+	var mat = Mat4.translate(disp)
+	self:transform(&mat)
+end
+terra QuadHex:stackRandomY(box: &QuadHex, margin: real, checkValidity: bool) : {}
+	self:stackRandomY(box, margin, checkValidity, false)
+end
+QuadHex.methods.stackRandomY = pmethod(QuadHex.methods.stackRandomY)
 
 
 ---- The following methods assume that self is still in its original object space
@@ -421,7 +527,7 @@ terra QuadHex:assertFacePlanarity()
 		local t = {}
 		for i=0,5 do
 			table.insert(t, quote
-				util.assert(self.faces[i]:isPlanar(), "QuadHex had non-planar face\n")
+				util.assert(self.faces[i]:isPlanar(), "QuadHex had non-planar face %d\n", i)
 			end)
 		end
 		return t
