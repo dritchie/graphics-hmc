@@ -267,6 +267,29 @@ local Face = templatize(function(nverts)
 			var e2b = self:vertex(3) - self:vertex(0); e2b:normalize()
 			return e2a:dot(e2b) >= parThresh
 		end
+
+		terra FaceT:interp(xpercent: real, ypercent: real)
+			return self:vertex(0) + xpercent * (self:vertex(1) - self:vertex(0)) +
+									ypercent * (self:vertex(2) - self:vertex(1)) 
+		end
+
+		local Vec2 = Vec(real, 2)
+		terra FaceT:coords(point: Vec3, relCoords: bool)
+			var vec = point - self:vertex(0)
+			var xedge = self:vertex(1) - self:vertex(0)
+			var yedge = self:vertex(2) - self:vertex(1)
+			var xnorm = xedge:norm()
+			var ynorm = yedge:norm()
+			xedge = xedge / xnorm
+			yedge = yedge / ynorm
+			var xdot = vec:dot(xedge)
+			var ydot = vec:dot(yedge)
+			if relCoords then
+				xdot = xdot / xnorm
+				ydot = ydot / ynorm
+			end
+			return Vec2.stackAlloc(xdot, ydot)
+		end
 	end
 
 	m.addConstructors(FaceT)

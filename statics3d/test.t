@@ -4,6 +4,7 @@ terralib.require("prob")
 package.path = "../?.t;" .. package.path 
 
 local s3dLib = terralib.require("s3dLib")
+local m = terralib.require("mem")
 local util = terralib.require("util")
 local gl = terralib.require("gl")
 local rendering = terralib.require("rendering")
@@ -12,10 +13,15 @@ local colors = terralib.require("colors")
 
 -- local testcomp = terralib.require("examples.blockStack")
 -- local testcomp = terralib.require("examples.arch")
-local testcomp = terralib.require("examples.archTower")
+-- local testcomp = terralib.require("examples.archTower")
+local testcomp = terralib.require("examples.multiStack")
 
 
 -------------------------------------------------------
+
+local lerp = macro(function(a, b, t)
+	return `(1.0-t)*a + t*b
+end)
 
 local ensureEven = macro(function(x)
 	return quote
@@ -63,17 +69,57 @@ end
 
 -------------------------------------------------------
 
--- local numsamps = 400
-local numsamps = 1000
+local numsamps = 400
+-- local numsamps = 1000
 local doHMC = true
 local numHMCSteps = 1000
-if not doHMC then numsamps = 2*numsamps*numHMCSteps end
-local go = forwardSample(testcomp, 100)
+
+local ssmhKernel = GaussianDrift({bandwidth=0.005})
+local hmcKernel = HMC({numSteps=numHMCSteps})
+local kernel = nil
 if doHMC then
-	go = mcmc(testcomp, HMC({numSteps=1000}), {numsamps=numsamps, verbose=true})
+	kernel = hmcKernel
 else
-	go = mcmc(testcomp, GaussianDrift({bandwidth=0.003}), {numsamps=numsamps, verbose=true})
+	kernel = ssmhKernel
 end
+local lag = 1
+if not doHMC then lag = 2*numHMCSteps end
+
+-- -- Annealed burn-in
+-- local scheduleFn = macro(function(iter, currTrace)
+-- 	local numAnnealSteps = numsamps/4
+-- 	local maxtemp = 100.0
+-- 	return quote
+-- 		if iter < numAnnealSteps then
+-- 			currTrace.temperature = lerp(maxtemp, 1.0, iter/numAnnealSteps)
+-- 		else
+-- 			currTrace.temperature = 1.0
+-- 		end
+-- 	end
+-- end)
+-- kernel = Schedule(kernel, scheduleFn)
+
+local go = forwardSample(testcomp, 100)
+-- local go = mcmc(testcomp, kernel, {numsamps=numsamps, verbose=true, lag=lag})
+
+-- local inf = terralib.require("prob.inference")
+-- local trace = terralib.require("prob.trace")
+-- local percentBurnIn = 0.1
+-- local go = terra()
+-- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
+-- 	var samps = [SampleVectorType(testcomp)].stackAlloc()
+-- 	-- Burn in using SSMH
+-- 	var burnInKern = [ssmhKernel()]
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=percentBurnIn*numsamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
+-- 	m.delete(burnInKern)
+-- 	-- Continue mixing using whatever kernel we asked for
+-- 	var mixKern = [kernel()]
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=(1.0-percentBurnIn)*numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
+-- 	m.delete(mixKern)
+-- 	m.delete(currTrace)
+-- 	return samps
+-- end
+
 local samples = go()
 moviename = arg[1] or "movie"
 rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, "../renders")

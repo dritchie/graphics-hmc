@@ -26,8 +26,8 @@ return probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
-	local frelTol = 0.01
-	local trelTol = 0.01
+	local frelTol = 0.02
+	local trelTol = 0.02
 
 	local mm = macro(function(x)
 		return `0.001*x
