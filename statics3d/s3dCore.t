@@ -274,16 +274,21 @@ local Face = templatize(function(nverts)
 		end
 
 		local Vec2 = Vec(real, 2)
-		terra FaceT:coords(point: Vec3)
+		terra FaceT:coords(point: Vec3, relCoords: bool)
 			var vec = point - self:vertex(0)
 			var xedge = self:vertex(1) - self:vertex(0)
 			var yedge = self:vertex(2) - self:vertex(1)
 			var xnorm = xedge:norm()
 			var ynorm = yedge:norm()
 			xedge = xedge / xnorm
-			yedge = yedge / ynorm 
-			return Vec2.stackAlloc(vec:dot(xedge) / xnorm,
-				   				   vec:dot(yedge) / ynorm)
+			yedge = yedge / ynorm
+			var xdot = vec:dot(xedge)
+			var ydot = vec:dot(yedge)
+			if relCoords then
+				xdot = xdot / xnorm
+				ydot = ydot / ynorm
+			end
+			return Vec2.stackAlloc(xdot, ydot)
 		end
 	end
 

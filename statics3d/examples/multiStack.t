@@ -84,7 +84,7 @@ return probcomp(function()
 			-- currShape:stackRandom(prevShape, margin, false, true)
 			-- currShape:stack(prevShape, 0.5, 0.5, true)
 			currShape:stackRandomX(prevShape, margin, false, true)
-			coords(i) = prevShape:topFace():coords(currShape:botFace():centroid())
+			coords(i) = prevShape:topFace():coords(currShape:botFace():centroid(), false)
 		end
 
 		-- Weld top block
@@ -106,7 +106,7 @@ return probcomp(function()
 			-- shape:shearY(boundedUniform(-maxAng, maxAng, {initialVal=0.0}))
 			var nextShape = shapes(i+1)
 			var nextCoords = coords(i+1)
-			nextShape:botFace():weld(shape:topFace(), nextCoords(0), nextCoords(1), false)
+			nextShape:botFace():weld(shape:topFace(), nextCoords(0), nextCoords(1), false, false)
 		end
 
 		m.destruct(coords)
@@ -167,6 +167,51 @@ return probcomp(function()
 
 
 
+	local struct Arch
+	{
+		botBody1: &Body,
+		botBody2: &Body,
+		stack1: Stack,
+		stack2: Stack,
+		topBody: &Body
+	}
+
+	terra Arch:__construct(bodyGen: {&Shape}->{&Body},
+						   topCenter: Vec3, topw: real, topd: real, toph: real,
+						   bb1: &Body, nblocks1: uint, lox1: real, loy1: real, hix1: real, hiy1: real,
+						   bb2: &Body, nblocks2: uint, lox2: real, loy2: real, hix2: real, hiy2: real)
+		-- Create the top bar
+		var topShape = Box.heapAlloc(); topShape:makeBox(topCenter, topw, topd, toph)
+		var rotAngle = boundedUniform(-maxAng, maxAng, {initialVal=0.0})
+		var rotmat = Mat4.rotate(Vec3.stackAlloc(0.0, 1.0, 0.0), rotAngle, topShape:centroid())
+		topShape:transform(&rotmat)
+		self.topBody = bodyGen(topShape)
+
+		-- Stack 1
+		self.botBody1 = bb1
+		self.stack1 = Stack.stackAlloc(self.botBody1, lox1, loy1, self.topBody, hix1, hiy1, nblocks1, bodyGen)
+
+		-- Stack 2
+		self.botBody2 = bb2
+		self.stack2 = Stack.stackAlloc(self.botBody2, lox2, loy2, self.topBody, hix2, hiy2, nblocks2, bodyGen)
+	end
+	Arch.methods.__construct = pmethod(Arch.methods.__construct)
+
+	terra Arch:__destruct()
+		m.destruct(self.stack1)
+		m.destruct(self.stack2)
+	end
+
+	terra Arch:addToScene(scene: &Scene)
+		scene.bodies:push(self.topBody)
+		self.stack1:addToScene(scene)
+		self.stack2:addToScene(scene)
+	end
+
+	m.addConstructors(Arch)
+
+
+
 	return terra()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
@@ -190,23 +235,17 @@ return probcomp(function()
 
 		----- Stacks 'n stuff -----
 
-		-- Top body
-		var topShape = Box.heapAlloc(); topShape:makeBox(Vec3.stackAlloc(0.0, 0.0, mm(200.0)), mm(300.0), mm(100.0), mm(10.0))
-		var topBody = Body.oak(topShape)
-		-- var rotAngle = boundedUniform(-maxAng, maxAng, {initialVal=0.0})
-		-- var rotmat = Mat4.rotate(Vec3.stackAlloc(0.0, 1.0, 0.0), rotAngle, topShape:centroid())
-		-- topShape:transform(&rotmat)
-		renderScene.scene.bodies:push(topBody)
+		var loContactx1 = boundedUniform(0.3, 0.4, {initialVal=0.35})
+		var hiContactx1 = boundedUniform(0.75, 0.95, {initialVal=0.9})
+		var loContactx2 = boundedUniform(0.6, 0.7, {initialVal=0.65})
+		var hiContactx2 = boundedUniform(0.05, 0.25, {initialVal=0.1})
+		var arch1 = Arch.stackAlloc(Body.oak,
+									Vec3.stackAlloc(0.0, 0.0, mm(200.0)), mm(300.0), mm(100.0), mm(10.0),
+									groundBody, 4, loContactx1, 0.5, hiContactx1, 0.5,
+									groundBody, 4, loContactx2, 0.5, hiContactx2, 0.5)
+		arch1:addToScene(&renderScene.scene)
+		m.destruct(arch1)
 
-		-- Stack 1
-		var stack1 = Stack.stackAlloc(groundBody, 0.35, 0.5, topBody, 0.9, 0.5, 4, Body.oak)
-		stack1:addToScene(&renderScene.scene)
-		m.destruct(stack1)
-
-		-- Stack 2
-		var stack2 = Stack.stackAlloc(groundBody, 0.65, 0.5, topBody, 0.1, 0.5, 4, Body.oak)
-		stack2:addToScene(&renderScene.scene)
-		m.destruct(stack2)
 
 		-- Stablity
 		renderScene.scene:encourageStability(frelTol, trelTol)

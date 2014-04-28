@@ -44,11 +44,19 @@ core.Face = templatize(function(nverts)
 			end
 		end
 
-		terra FaceT:weld(face: &FaceT, xcoord: real, ycoord: real, validCheck: bool) : {}
-			var point = face:vertex(0) +
-						xcoord*(face:vertex(1) - face:vertex(0)) +
-						ycoord*(face:vertex(2) - face:vertex(1))
+		terra FaceT:weld(face: &FaceT, xcoord: real, ycoord: real, validCheck: bool, relCoords: bool) : {}
+			var xedge = face:vertex(1) - face:vertex(0)
+			var yedge = face:vertex(2) - face:vertex(1)
+			if not relCoords then
+				xedge:normalize()
+				yedge:normalize()
+			end
+			var point = face:vertex(0) + xcoord*xedge + ycoord*yedge
 			self:weld(face, point, validCheck)
+		end
+
+		terra FaceT:weld(face: &FaceT, xcoord: real, ycoord: real, validCheck: bool) : {}
+			self:weld(face, xcoord, ycoord, validCheck, true)
 		end
 
 	end
