@@ -99,26 +99,25 @@ if not doHMC then lag = 2*numHMCSteps end
 -- end)
 -- kernel = Schedule(kernel, scheduleFn)
 
-local go = forwardSample(testcomp, 100)
--- local go = mcmc(testcomp, kernel, {numsamps=numsamps, verbose=true, lag=lag})
+-- local go = forwardSample(testcomp, 100)
 
--- local inf = terralib.require("prob.inference")
--- local trace = terralib.require("prob.trace")
--- local percentBurnIn = 0.1
--- local go = terra()
--- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
--- 	var samps = [SampleVectorType(testcomp)].stackAlloc()
--- 	-- Burn in using SSMH
--- 	var burnInKern = [ssmhKernel()]
--- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=percentBurnIn*numsamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
--- 	m.delete(burnInKern)
--- 	-- Continue mixing using whatever kernel we asked for
--- 	var mixKern = [kernel()]
--- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=(1.0-percentBurnIn)*numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
--- 	m.delete(mixKern)
--- 	m.delete(currTrace)
--- 	return samps
--- end
+local inf = terralib.require("prob.inference")
+local trace = terralib.require("prob.trace")
+local percentBurnIn = 0.1
+local go = terra()
+	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
+	var samps = [SampleVectorType(testcomp)].stackAlloc()
+	-- Burn in using SSMH
+	var burnInKern = [ssmhKernel()]
+	currTrace = [inf.mcmcSample(testcomp, {numsamps=percentBurnIn*numsamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
+	m.delete(burnInKern)
+	-- Continue mixing using whatever kernel we asked for
+	var mixKern = [kernel()]
+	currTrace = [inf.mcmcSample(testcomp, {numsamps=(1.0-percentBurnIn)*numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
+	m.delete(mixKern)
+	m.delete(currTrace)
+	return samps
+end
 
 local samples = go()
 moviename = arg[1] or "movie"
