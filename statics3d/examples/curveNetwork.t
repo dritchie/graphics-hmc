@@ -504,16 +504,17 @@ return probcomp(function()
 	-- Parameters
 	local groundDepth = `mm(1000.0)
 	local groundThickness = `mm(10.0)
-	local minDim = `mm(39.0)
-	local maxDim = `mm(41.0)
-	local maxHeightChange = `0.01
-	local margin = `mm(40.0)
-	local maxAng = `radians(1.0)
-	-- local minDim = `mm(20.0)
-	-- local maxDim = `mm(60.0)
-	-- local maxHeightChange = `0.3
-	-- local margin = `mm(8.0)
-	-- local maxAng = `radians(30.0)
+	-- local minDim = `mm(39.0)
+	-- local maxDim = `mm(41.0)
+	-- local maxHeightChange = `0.01
+	-- local margin = `mm(40.0)
+	-- local maxAng = `radians(1.0)
+	local minDim = `mm(20.0)
+	local maxDim = `mm(60.0)
+	local maxHeightChange = `0.3
+	local margin = `mm(10.0)
+	local maxAng = `radians(30.0)
+
 
 
 
