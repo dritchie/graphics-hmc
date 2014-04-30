@@ -385,6 +385,7 @@ end)
 -- A Connection is a (surprise!) connection between multiple bodies that's responsible
 --    for computing some internal forces between those bodies
 local struct Connection {}
+inheritance.purevirtual(Connection, "__destruct", {}->{})
 inheritance.purevirtual(Connection, "applyForcesImpl", {}->{})
 -- This indirection is needed because we don't (yet?) have a way to support virtual pmethods.
 terra Connection:applyForces()
