@@ -242,6 +242,10 @@ local Face = templatize(function(nverts)
 		return true
 	end
 
+	terra FaceT:projectToPlane(p: Vec3)
+		return p:projectToPlane(self:vertex(0), self:vertex(1), self:vertex(2))
+	end
+
 	-- Some useful stuff for quadrilaterals
 	if nverts == 4 then
 		local rectThresh = 1e-12

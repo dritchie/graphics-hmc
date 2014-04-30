@@ -70,12 +70,13 @@ end
 
 -------------------------------------------------------
 
-local numsamps = 400
--- local numsamps = 1000
+local numsamps = 200
+local numBurnInSamps = 200
 local doHMC = true
 local numHMCSteps = 1000
+local gaussianBandwidth = 0.005
 
-local ssmhKernel = GaussianDrift({bandwidth=0.005})
+local ssmhKernel = GaussianDrift({bandwidth=gaussianBandwidth})
 local hmcKernel = HMC({numSteps=numHMCSteps})
 local kernel = nil
 if doHMC then
@@ -100,7 +101,7 @@ if not doHMC then lag = 2*numHMCSteps end
 -- end)
 -- kernel = Schedule(kernel, scheduleFn)
 
-local go = forwardSample(testcomp, 100)
+local go = forwardSample(testcomp, 1)
 
 -- local inf = terralib.require("prob.inference")
 -- local trace = terralib.require("prob.trace")
@@ -110,11 +111,11 @@ local go = forwardSample(testcomp, 100)
 -- 	var samps = [SampleVectorType(testcomp)].stackAlloc()
 -- 	-- Burn in using SSMH
 -- 	var burnInKern = [ssmhKernel()]
--- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=percentBurnIn*numsamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=numBurnInSamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
 -- 	m.delete(burnInKern)
 -- 	-- Continue mixing using whatever kernel we asked for
 -- 	var mixKern = [kernel()]
--- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=(1.0-percentBurnIn)*numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
 -- 	m.delete(mixKern)
 -- 	m.delete(currTrace)
 -- 	return samps
