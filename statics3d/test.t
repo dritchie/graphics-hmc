@@ -92,7 +92,7 @@ local lag = 1
 if not doHMC then lag = 2*numHMCSteps end
 
 
--- local go = forwardSample(testcomp, 10000000)
+-- local go = forwardSample(testcomp, 1)
 
 local inf = terralib.require("prob.inference")
 local trace = terralib.require("prob.trace")

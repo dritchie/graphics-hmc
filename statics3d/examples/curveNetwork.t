@@ -116,7 +116,11 @@ local struct CurveConnection
 	whereFrom: uint,			-- Which endpoint on the curve?
 	to: &BezCurve,				-- Which curve?
 	toIndex: int,				-- (Can be -1 if ground)
-	whereTo: double				-- How far along the curve?
+	connectToEnd: bool,			-- Should we connect to the end of the curve?
+	union {
+		toEndpoint: uint,		-- Which endpoint to connect to?
+		whereTo: double			-- How far along the curve to connect?
+	}		
 }
 
 
@@ -172,7 +176,20 @@ terra CurveNetwork:addConnectionToCurve(fromIndex: int, whereFrom: uint, toIndex
 	conn.whereFrom = whereFrom
 	conn.to = self.curves(toIndex)
 	conn.toIndex = toIndex
+	conn.connectToEnd = false
 	conn.whereTo = whereTo
+	self:addConnection(conn)
+end
+
+terra CurveNetwork:addConnectionToCurveEndpoint(fromIndex: int, whereFrom: uint, toIndex: int, whichEndpoint: uint)
+	var conn : CurveConnection
+	conn.from = self.curves(fromIndex)
+	conn.fromIndex = fromIndex
+	conn.whereFrom = whereFrom
+	conn.to = self.curves(toIndex)
+	conn.toIndex = toIndex
+	conn.connectToEnd = true
+	conn.toEndpoint = whichEndpoint
 	self:addConnection(conn)
 end
 
@@ -184,6 +201,7 @@ terra CurveNetwork:addConnectionToGround(fromIndex: int, whereFrom: uint, whereT
 	conn.to = self.ground
 	conn.toIndex = -1
 	conn.whereTo = whereTo
+	conn.connectToEnd = false
 	self:addConnection(conn)
 end
 
@@ -195,8 +213,12 @@ terra CurveNetwork:fixEndpoints()
 			var connIndex = conns(j)
 			var conn = self.connections(connIndex)
 			if curve == conn.from then
-				var point, tangent = conn.to:eval(conn.whereTo)
-				curve.points[conn.whereFrom] = point
+				if conn.connectToEnd then
+					curve.points[conn.whereFrom] = conn.to.points[conn.toEndpoint]
+				else
+					var point, tangent = conn.to:eval(conn.whereTo)
+					curve.points[conn.whereFrom] = point
+				end
 			end
 		end
 	end
@@ -211,43 +233,128 @@ m.addConstructors(CurveNetwork)
 local curvenet = global(CurveNetwork)
 local terra initGlobalCurveNet()
 	curvenet = CurveNetwork.stackAlloc(0.0, mm(1000.0))
-	-- 0: A 'curve' that's actually a line pointing up
-	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(300.0)),
-										 Vec2d.stackAlloc(0.0, mm(100.0)),
-										 Vec2d.stackAlloc(0.0, mm(-100.0))),
-					  5)
-	curvenet:addConnectionToGround(0, 0, 0.8)
 
-	-- 1: A half-arch
-	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(300.0)),
-										 Vec2d.stackAlloc(0.0, mm(100.0)),
-										 Vec2d.stackAlloc(mm(-100.0), 0.0)),
-					  8)
-	curvenet:addConnectionToGround(1, 0, 0.2)
+	-- 0: A small arch
+	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(300.0)),
+										 Vec2d.stackAlloc(0.0, mm(300.0))),
+					  9)
+	curvenet:addConnectionToGround(0, 0, 0.2)
+	curvenet:addConnectionToGround(0, 1, 0.8)
 
-	-- Connecting these first two
-	curvenet:addConnectionToCurve(0, 1, 1, 0.95)
+	-- 1: A bigger arch over the first one
+	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(600.0)),
+										 Vec2d.stackAlloc(0.0, mm(600.0))),
+					  17)
+	curvenet:addConnectionToGround(1, 0, 0.1)
+	curvenet:addConnectionToGround(1, 1, 0.9)
 
-	-- 2: Another half-arch (larger, outside)
-	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(500.0)),
-										 Vec2d.stackAlloc(0.0, mm(200.0)),
-										 Vec2d.stackAlloc(mm(-200.0), 0.0)),
-					  12)
-	curvenet:addConnectionToGround(2, 0, 0.05)
-
-	-- 3: Vertical support between the two arches
+	-- 2: A vertical spoke between the two arches
 	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
 										 Vec2d.stackAlloc(0.0, mm(-100.0))),
 					  4)
-	curvenet:addConnectionToCurve(3, 0, 1, 0.95)
-	curvenet:addConnectionToCurve(3, 1, 2, 0.95)
+	curvenet:addConnectionToCurve(2, 0, 0, 0.5)
+	curvenet:addConnectionToCurve(2, 1, 1, 0.5)
 
-	-- 4: Diagonal support between the two arches
-	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(-50.0), mm(50.0)),
-										 Vec2d.stackAlloc(mm(50.0), mm(-50.0))),
-					  3)
-	curvenet:addConnectionToCurve(4, 0, 1, 0.6)
-	curvenet:addConnectionToCurve(4, 1, 2, 0.6)
+	-- -- 3: A diagonal spoke between the two arches
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(-50.0), mm(100.0)),
+	-- 									 Vec2d.stackAlloc(mm(50.0), mm(-100.0))),
+	-- 				  4)
+	-- curvenet:addConnectionToCurve(3, 0, 0, 0.25)
+	-- curvenet:addConnectionToCurve(3, 1, 1, 0.25)
+
+	-- -- 4: Another diagonal spoke between the two arches
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(50.0), mm(100.0)),
+	-- 									 Vec2d.stackAlloc(mm(-50.0), mm(-100.0))),
+	-- 				  4)
+	-- curvenet:addConnectionToCurve(4, 0, 0, 0.75)
+	-- curvenet:addConnectionToCurve(4, 1, 1, 0.75)
+
+	--------------------------------------------------------------------
+
+	-- -- 0: A half-arch
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(500.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(150.0)),
+	-- 									 Vec2d.stackAlloc(mm(-150.0), 0.0)),
+	-- 				  8)
+	-- curvenet:addConnectionToGround(0, 0, 0.2)
+
+	-- -- 1: A skinnier half arch connected to the first one
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(500.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(150.0)),
+	-- 									 Vec2d.stackAlloc(mm(150.0), 0.0)),
+	-- 				  8)
+	-- curvenet:addConnectionToGround(1, 0, 0.93)
+	-- curvenet:addConnectionToCurveEndpoint(1, 1, 0, 1)
+
+	--------------------------------------------------------------------
+
+	-- -- 0: A 'curve' that's actually a line pointing up
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(-100.0))),
+	-- 				  5)
+	-- curvenet:addConnectionToGround(0, 0, 0.2)
+
+	-- -- 1: A 'curve' that's actually a line pointing up
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(-100.0))),
+	-- 				  5)
+	-- curvenet:addConnectionToGround(1, 0, 0.8)
+
+	-- -- 2: A single plank resting on the first two columns
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(-200.0), mm(300.0)),
+	-- 									 Vec2d.stackAlloc(mm(200.0), mm(300.0)),
+	-- 									 Vec2d.stackAlloc(mm(100.0), 0.0),
+	-- 									 Vec2d.stackAlloc(mm(-100.0), 0.0)),
+	-- 				  1)
+	-- curvenet:addConnectionToCurve(0, 1, 2, 0.1)
+	-- curvenet:addConnectionToCurve(1, 1, 2, 0.9)
+
+	--------------------------------------------------------------------
+
+	-- -- 0: A 'curve' that's actually a line pointing up
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(300.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(100.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(-100.0))),
+	-- 				  5)
+	-- curvenet:addConnectionToGround(0, 0, 0.8)
+
+	-- -- 1: A half-arch
+	-- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(300.0)),
+	-- 									 Vec2d.stackAlloc(0.0, mm(150.0)),
+	-- 									 Vec2d.stackAlloc(mm(-150.0), 0.0)),
+	-- 				  8)
+	-- curvenet:addConnectionToGround(1, 0, 0.2)
+
+	-- -- Connecting these first two
+	-- curvenet:addConnectionToCurve(0, 1, 1, 0.95)
+
+	-- -- -- 2: Another support for the half-arch
+	-- -- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
+	-- -- 									 Vec2d.stackAlloc(0.0, mm(-100.0))),
+	-- -- 				  4)
+	-- -- curvenet:addConnectionToGround(2, 0, 0.5)
+	-- -- curvenet:addConnectionToCurve(2, 1, 1, 0.7)
+
+	-- -- -- 2: Another half-arch (larger, outside)
+	-- -- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(150.0), mm(500.0)),
+	-- -- 									 Vec2d.stackAlloc(0.0, mm(200.0)),
+	-- -- 									 Vec2d.stackAlloc(mm(-200.0), 0.0)),
+	-- -- 				  12)
+	-- -- curvenet:addConnectionToGround(2, 0, 0.05)
+
+	-- -- -- 3: Vertical support between the two arches
+	-- -- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
+	-- -- 									 Vec2d.stackAlloc(0.0, mm(-100.0))),
+	-- -- 				  4)
+	-- -- curvenet:addConnectionToCurve(3, 0, 1, 0.95)
+	-- -- curvenet:addConnectionToCurve(3, 1, 2, 0.95)
+
+	-- -- -- 4: Diagonal support between the two arches
+	-- -- curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(mm(-50.0), mm(50.0)),
+	-- -- 									 Vec2d.stackAlloc(mm(50.0), mm(-50.0))),
+	-- -- 				  3)
+	-- -- curvenet:addConnectionToCurve(4, 0, 1, 0.6)
+	-- -- curvenet:addConnectionToCurve(4, 1, 2, 0.6)
 end
 initGlobalCurveNet()
 
@@ -451,23 +558,45 @@ return probcomp(function()
 				blockConn.whereToPos = groundShape:topFace():projectToPlane(connPointPoint3)
 			-- Otherwise, it's a little more involved
 			else
-				-- We first need to figure out which block in the 'to' curve we're connecting to.
 				var toBlockCurve = self.blockCurves(conn.toIndex)
-				var n = cnet.nblocks(conn.toIndex)
-				var whichBlock = int(conn.whereTo*n)
-				blockConn.to = toBlockCurve.blocks(whichBlock)
-				-- We're either connecting to this block's front or back face.
-				--    To determine which, we check which way our endpoint tangent is facing
-				var normal = conn.to:normal(conn.whereTo)
-				var endTang = conn.from.tangents[conn.whereFrom]; endTang:normalize()
-				if normal:dot(endTang) > 0.0 then
-					blockConn.whereTo = [&QuadHex](blockConn.to.shape):backFace()
+				-- Check if we're connecting to an endpoint, b/c that's easy
+				if conn.connectToEnd then
+					-- Which face we connect to depends on which endpoint, just like in the 'from' stuff
+					if conn.toEndpoint == 0 then
+						blockConn.to = toBlockCurve:botBlock()
+						blockConn.whereTo = toBlockCurve:botFace()
+					else
+						blockConn.to = toBlockCurve:topBlock()
+						blockConn.whereTo = toBlockCurve:topFace()
+					end
+					-- We just connect in the middle of the face, for endpoint connections
+					blockConn.whereToPos = blockConn.whereTo:centroid()
 				else
-					blockConn.whereTo = [&QuadHex](blockConn.to.shape):frontFace()
+					-- We first need to figure out which block in the 'to' curve we're connecting to.
+					var n = cnet.nblocks(conn.toIndex)
+					var whichBlock = int(conn.whereTo*n)
+					blockConn.to = toBlockCurve.blocks(whichBlock)
+					-- We're either connecting to this block's front or back face.
+					--    To determine which, we check which way our endpoint tangent is facing
+					var normal = conn.to:normal(conn.whereTo)
+					var endTang = conn.from.tangents[conn.whereFrom]; endTang:normalize()
+					if normal:dot(endTang) > 0.0 then
+						blockConn.whereTo = [&QuadHex](blockConn.to.shape):backFace()
+					else
+						blockConn.whereTo = [&QuadHex](blockConn.to.shape):frontFace()
+					end
+					-- Take the initial configuration 2d connection point, project it onto the line
+					--    between the endpoints of this curve segment, then figure out how far along
+					--    that line it is. Use that value to interpolate along the actual 3D connecting
+					--    face.
+					var tlo = double(whichBlock)/n
+					var thi = double(whichBlock+1)/n
+					var loPoint2, loTangent2 = conn.to:eval(tlo)
+					var hiPoint2, hiTangent2 = conn.to:eval(thi)
+					var projPoint2 = connPointPoint2:projectToLineSeg(loPoint2, hiPoint2)
+					var linearT = projPoint2:inverseLerp(loPoint2, hiPoint2)
+					blockConn.whereToPos = blockConn.whereTo:interp(0.5, linearT)
 				end
-				-- Now just figure out where on the block we're connecting to
-				blockConn.whereToPos = blockConn.whereTo:projectToPlane(connPointPoint3)
-
 			end
 			-- Finally, weld the connecting face into place
 			blockConn.whereFrom:weld(blockConn.whereTo, blockConn.whereToPos, false)
