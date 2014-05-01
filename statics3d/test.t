@@ -75,7 +75,7 @@ end
 -------------------------------------------------------
 
 local numsamps = 200
-local numBurnInSamps = 200
+local numBurnInSamps = 100
 local doHMC = true
 local numHMCSteps = 1000
 local gaussianBandwidth = 0.005
@@ -158,6 +158,18 @@ end
 -- 	end
 -- 	return [Vector(double)].stackAlloc()
 -- end
+
+-- local s3d = s3dLib(testcomp)
+-- local terra derp()
+-- 	var hex = [s3d.QuadHex].heapAlloc()
+-- 	C.printf("original volume: %g\n", hex:volume())
+-- 	var mat = [s3d.Mat4].translate([s3d.Vec3].stackAlloc(0.0, 0.0, -2.0))
+-- 	hex:topFace():transform(&mat)
+-- 	C.printf("transformed volume: %g\n", hex:volume())
+-- 	m.delete(hex)
+-- end
+-- derp()
+-- os.exit()
 
 local samples = go()
 

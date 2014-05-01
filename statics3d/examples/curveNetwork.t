@@ -251,7 +251,7 @@ local terra initGlobalCurveNet()
 	-- 2: A vertical spoke between the two arches
 	curvenet:addCurve(BezCurve.heapAlloc(Vec2d.stackAlloc(0.0, mm(100.0)),
 										 Vec2d.stackAlloc(0.0, mm(-100.0))),
-					  4)
+					  3)
 	curvenet:addConnectionToCurve(2, 0, 0, 0.5)
 	curvenet:addConnectionToCurve(2, 1, 1, 0.5)
 
@@ -373,6 +373,12 @@ return probcomp(function()
 	local trelTol = 0.01
 
 
+	local lowerBarrier = macro(function(val, lowerBound, shape)
+		return quote
+			if val < lowerBound then factor([-math.huge])
+			else factor(-1.0/(shape*(val-lowerBound))) end
+		end
+	end)
 
 
 	-- Treat 2d points as lying in the xz plane centered at y = 0
@@ -457,6 +463,9 @@ return probcomp(function()
 				var nextShape = [&QuadHex](nextBlock.shape)
 				nextShape:botFace():weld(currShape:topFace(), currShape:topFace():centroid(), false)
 			end
+			-- Try to prevent this block from inverting (having negative volume)
+			var slendev = mm(0.5)
+			lowerBarrier(currShape:volume(), 0.0, 1.0/(slendev*slendev*slendev))
 		end
 	end
 	BlockCurve.methods.__construct = pmethod(BlockCurve.methods.__construct)
