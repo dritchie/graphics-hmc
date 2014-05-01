@@ -55,6 +55,12 @@ terra ContactPoint:__construct(body1: &Body, body2: &Body, point: Vec3, normal: 
 	body2:addConnection(self)
 end
 
+terra ContactPoint:__destruct() : {}
+	-- Can do nothing, but we need to implement it since
+	--    the base class destructor is pure virtual.
+end
+inheritance.virtual(ContactPoint, "__destruct")
+
 ContactPoint.methods.fsign = macro(function(self, body)
 	return quote
 		var sign = 1.0
@@ -265,12 +271,13 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	self.contactPoints[3] = ContactPoint.heapAlloc(body1, body2, cp4, n, t1, t2)
 end
 
-terra RectRectContact:__destruct()
+terra RectRectContact:__destruct() : {}
 	m.delete(self.contactPoints[0])
 	m.delete(self.contactPoints[1])
 	m.delete(self.contactPoints[2])
 	m.delete(self.contactPoints[3])
 end
+inheritance.virtual(RectRectContact, "__destruct")
 
 terra RectRectContact:applyForcesImpl() : {}
 	self.contactPoints[0]:applyForcesImpl()

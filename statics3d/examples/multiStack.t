@@ -216,9 +216,12 @@ return probcomp(function()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
-		var camdist = mm(350.0)
-		camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
-		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
+		-- var camdist = mm(350.0)
+		-- camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
+		-- camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
+		var camdist = mm(750.0)
+		camera.eye = Vec3d.stackAlloc(0.5*camdist, -camdist, 0.5*camdist)
+		camera.target = Vec3d.stackAlloc(mm(100.0), 0.0, mm(120.0))
 		camera.up = upVector
 		camera.znear = 0.01
 		camera.zfar = 10.0
@@ -244,7 +247,19 @@ return probcomp(function()
 									groundBody, 4, loContactx1, 0.5, hiContactx1, 0.5,
 									groundBody, 4, loContactx2, 0.5, hiContactx2, 0.5)
 		arch1:addToScene(&renderScene.scene)
+
+		loContactx1 = boundedUniform(0.4, 0.6, {initialVal=0.5})
+		hiContactx1 = boundedUniform(0.75, 0.95, {initialVal=0.9})
+		loContactx2 = boundedUniform(0.83, 0.9, {initialVal=0.85})
+		hiContactx2 = boundedUniform(0.05, 0.25, {initialVal=0.1})
+		var arch2 = Arch.stackAlloc(Body.oak,
+									Vec3.stackAlloc(mm(150.0), 0.0, mm(300.0)), mm(350.0), mm(100.0), mm(10.0),
+									arch1.topBody, 2, loContactx1, 0.5, hiContactx1, 0.5,
+									groundBody, 6, loContactx2, 0.5, hiContactx2, 0.5)
+		arch2:addToScene(&renderScene.scene)
+
 		m.destruct(arch1)
+		m.destruct(arch2)
 
 
 		-- Stablity
