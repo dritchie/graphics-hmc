@@ -19,7 +19,8 @@ local C = terralib.includecstring [[
 -- local testcomp = terralib.require("examples.arch")
 -- local testcomp = terralib.require("examples.archTower")
 -- local testcomp = terralib.require("examples.multiStack")
-local testcomp = terralib.require("examples.curveNetwork")
+-- local testcomp = terralib.require("examples.curveNetwork")
+local testcomp = terralib.require("examples.multiStack_fab")
 
 
 -------------------------------------------------------
@@ -92,98 +93,39 @@ local lag = 1
 if not doHMC then lag = 2*numHMCSteps end
 
 
--- local go = forwardSample(testcomp, 1)
+local go = forwardSample(testcomp, 1)
 
-local inf = terralib.require("prob.inference")
-local trace = terralib.require("prob.trace")
-local percentBurnIn = 0.1
-local go = terra()
-	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
-	var samps = [SampleVectorType(testcomp)].stackAlloc()
-	-- Burn in using SSMH
-	var burnInKern = [ssmhKernel()]
-	currTrace = [inf.mcmcSample(testcomp, {numsamps=numBurnInSamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
-	m.delete(burnInKern)
-	-- Continue mixing using whatever kernel we asked for
-	var mixKern = [kernel()]
-	currTrace = [inf.mcmcSample(testcomp, {numsamps=numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
-	m.delete(mixKern)
-	m.delete(currTrace)
-	return samps
-end
-
--- local s3d = s3dLib(testcomp)
--- local AutoPtr = terralib.require("autopointer")
--- local Vector = terralib.require("vector")
--- local struct Foo { x: double }
--- terra Foo:__construct() self.x = 0.0 end
--- terra Foo:__construct(x: double) self.x = x end
--- m.addConstructors(Foo)
--- go = terra()
--- 	var samps = [Vector(AutoPtr(s3d.Scene))].stackAlloc()
--- 	-- var samps = [Vector(AutoPtr(s3d.Body))].stackAlloc()
--- 	-- var samps = [Vector(AutoPtr(Foo))].stackAlloc()
--- 	-- var samps = [Vector(double)].stackAlloc()
--- 	-- var samps = [Vector(Foo)].stackAlloc()
--- 	for s=0,10000 do
--- 		var scene = AutoPtr.wrap([s3d.Scene].heapAlloc(9.8, [s3d.Vec3].stackAlloc(0.0, 0.0, 1.0)))
--- 		for i=0,1000 do
--- 			var shape = [s3d.Box].heapAlloc()
--- 			var body = [s3d.Body].oak(shape)
--- 			scene.bodies:push(body)
--- 			-- var ab = AutoPtr.wrap(body); samps:push(ab); m.destruct(ab)
--- 			-- var af = AutoPtr.wrap(Foo.heapAlloc(0.0)); samps:push(af); m.destruct(af)
--- 			-- samps:push(0.0)
--- 			-- samps:push(Foo.stackAlloc(0.0))
--- 		end
--- 		samps:push(scene)
--- 		m.destruct(scene)
--- 	end
+-- local inf = terralib.require("prob.inference")
+-- local trace = terralib.require("prob.trace")
+-- local percentBurnIn = 0.1
+-- local go = terra()
+-- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
+-- 	var samps = [SampleVectorType(testcomp)].stackAlloc()
+-- 	-- Burn in using SSMH
+-- 	var burnInKern = [ssmhKernel()]
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=numBurnInSamps, verbose=true, lag=2*numHMCSteps})](currTrace, burnInKern, &samps)
+-- 	m.delete(burnInKern)
+-- 	-- Continue mixing using whatever kernel we asked for
+-- 	var mixKern = [kernel()]
+-- 	currTrace = [inf.mcmcSample(testcomp, {numsamps=numsamps, verbose=true, lag=lag})](currTrace, mixKern, &samps)
+-- 	m.delete(mixKern)
+-- 	m.delete(currTrace)
 -- 	return samps
 -- end
 
--- local trace = terralib.require("prob.trace")
--- local Vector = terralib.require("vector")
--- local simplecomp = probcomp(function() return terra() return gaussian(0.0, 1.0, {structural=false}) end end)
--- go = terra()
--- 	-- var currTrace : &trace.BaseTrace(double) = [trace.newTrace(simplecomp)]
--- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
--- 	for i=0,10000000 do
--- 		var nextTrace = currTrace:deepcopy()
--- 		m.delete(currTrace)
--- 		currTrace = nextTrace
--- 		[trace.traceUpdate({structureChange=false})](currTrace)
--- 		-- m.delete(currTrace)
--- 		-- currTrace = [trace.newTrace(simplecomp)]
--- 	end
--- 	return [Vector(double)].stackAlloc()
--- end
-
--- local s3d = s3dLib(testcomp)
--- local terra derp()
--- 	var hex = [s3d.QuadHex].heapAlloc()
--- 	C.printf("original volume: %g\n", hex:volume())
--- 	var mat = [s3d.Mat4].translate([s3d.Vec3].stackAlloc(0.0, 0.0, -2.0))
--- 	hex:topFace():transform(&mat)
--- 	C.printf("transformed volume: %g\n", hex:volume())
--- 	m.delete(hex)
--- end
--- derp()
--- os.exit()
 
 local samples = go()
 
--- C.printf("waiting...\n")
--- util.wait("sleep 4s")
--- C.printf("destructing...\n")
--- samples:__destruct()
--- C.printf("done destructing\n")
--- while true do
--- 	--
--- end
+-- moviename = arg[1] or "movie"
+-- rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, "../renders")
 
-moviename = arg[1] or "movie"
-rendering.renderSamples(samples, renderInitFn, renderDrawFn, moviename, "../renders")
+local fab = terralib.require("fabrication")
+local ppi = 300
+local terra saveBlueprints()
+	[fab.saveBlueprints(testcomp)](&samples(0).value.scene, "../renders/blueprints", ppi)
+end
+saveBlueprints()
+
 
 
 
