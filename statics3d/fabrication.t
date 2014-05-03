@@ -77,20 +77,20 @@ local function saveBlueprints(pcomp)
 
 	-- Get the depth of a block
 	local terra getDepth(shape: &QuadHex) : double
-		-- Find face whose normal points along +z, check the length of
+		-- Find face whose normal is perpendicular to y, check the length of
 		--    the edge of that face that points along y
 		var y = Vec3.stackAlloc(0.0, 1.0, 0.0)
 		for i=0,6 do
-			if shape.faces[i]:normal()(2) > 0.999 then
+			if C.fabs(shape.faces[i]:normal()(1)) < 0.0001 then
 				var f = &shape.faces[i]
 				var e1 = f:vertex(1) - f:vertex(0)
 				if e1:collinear(y) then return e1:norm() end
 				var e2 = f:vertex(2) - f:vertex(1)
-				util.assert(e2:collinear(y), "getDepth - no edge on the z-aligned face was collinear with y\n")
+				util.assert(e2:collinear(y), "getDepth - no edge on the y-perp face was collinear with y\n")
 				return e2:norm()
 			end
 		end
-		util.fatalError("getDepth - no face aligned with z\n")
+		util.fatalError("getDepth - no face aligned with normal perpendicular to y\n")
 	end
 
 	-- Get the block depth being used for the scene. Throws an error if
@@ -240,8 +240,6 @@ local function saveBlueprints(pcomp)
 		util.systemf("mkdir %s_depth=%g_ppi=%u", directory, depth, ppi)
 
 		-- Init OpenGL stuff
-		var argc = 0
-		gl.glutInit(&argc, nil)
 		var maxXres, maxYres = getFramebufferRes(scene, ppi)
 		gl.glutInitWindowSize(maxXres, maxYres)
 		gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())

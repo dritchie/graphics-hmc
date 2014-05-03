@@ -30,7 +30,7 @@ local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
 			C.sprintf(framename, movieframebasename, framenumber)
 			framenumber = framenumber + 1
 			var samp = samples:getPointer(i)
-			[drawFn(samp, im)]
+			[drawFn(samp, im, i)]
 			[RGBImage.save()](&im, image.Format.PNG, framename)
 		end
 	end
@@ -55,10 +55,10 @@ end
 
 local lpfont = gl.mGLUT_BITMAP_HELVETICA_18()
 local lpcolor = colors.Black
-local function displayLogprob(location)
+local function displaySampleInfo(location)
 	util.luaAssertWithTrace(location == "TopLeft" or location == "BottomLeft",
 		"displayLogprob location must be either 'TopLeft' or 'BottomLeft'")
-	return terra(lp: double)
+	return terra(sampleindex: uint, lp: double)
 		gl.glMatrixMode(gl.mGL_PROJECTION())
 		gl.glLoadIdentity()
 		var viewport : int[4]
@@ -67,7 +67,7 @@ local function displayLogprob(location)
 		gl.glMatrixMode(gl.mGL_MODELVIEW())
 		gl.glLoadIdentity()
 		var str : int8[64]
-		C.sprintf(str, "lp: %g", lp)
+		C.sprintf(str, "[%u] lp: %g", sampleindex, lp)
 		gl.glColor3f([lpcolor])
 		[util.optionally(location == "TopLeft", function() return quote
 			gl.glRasterPos2f(viewport[0] + 0.02*viewport[2], viewport[1] + 0.9*viewport[3])
@@ -82,5 +82,5 @@ end
 return
 {
 	renderSamples = renderSamples,
-	displayLogprob = displayLogprob
+	displaySampleInfo = displaySampleInfo
 }
