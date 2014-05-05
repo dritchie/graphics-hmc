@@ -34,5 +34,9 @@ drawAutocorrPlot('hmc_difficult_autocorr.csv');
 saveas(gcf, 'hmc_difficult_autocorr.pdf');
 close;
 
+% Note: to trim the whitespace on these, use pdfcrop on the command line.
+% e.g. find . -exec pdfcrop {} {} \; in a directory containing only the
+%    pdfs we want to crop
+
 end
 
