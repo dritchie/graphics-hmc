@@ -10,3 +10,5 @@ superpixelExamples_400/
 superpixelExamples_4000/
 renders/
 stateSpaceViz/
+*.csv
+*.pdf

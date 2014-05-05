@@ -25,30 +25,26 @@ local xmax = 1.5
 local ymin = -1.5
 local ymax = 1.5
 local targetIsoval = 0.25
--- local softness = 0.075
-local softness = 0.005
-local function figureEightModel()
-	
-	local Vec2 = Vec(real, 2)
+local function genFigureEightModel(softness)
+	return probcomp(function()
+		
+		local Vec2 = Vec(real, 2)
 
-	local softEq = macro(function(x, target, softness)
-		return `[rand.gaussian_logprob(real)](x, target, softness)
+		return terra()
+			-- Sample random dot uniformly
+			var x = uniform(xmin, xmax, {structural=false, lowerBound=xmin, upperBound=xmax})
+			var y = uniform(ymin, ymax, {structural=false, lowerBound=ymin, upperBound=ymax})
+
+			-- Constrain to be on a figure eight
+			var x2 = x * x
+			var y2 = y * y
+			var y4 = y2 * y2
+			var isoval = y4 - y2 + x2
+			factor(softeq(isoval, targetIsoval, softness))
+
+			return Vec2.stackAlloc(x, y)
+		end
 	end)
-
-	return terra()
-		-- Sample random dot uniformly
-		var x = uniform(xmin, xmax, {structural=false, lowerBound=xmin, upperBound=xmax})
-		var y = uniform(ymin, ymax, {structural=false, lowerBound=ymin, upperBound=ymax})
-
-		-- Constrain to be on a figure eight
-		var x2 = x * x
-		var y2 = y * y
-		var y4 = y2 * y2
-		var isoval = y4 - y2 + x2
-		factor(softEq(isoval, targetIsoval, softness))
-
-		return Vec2.stackAlloc(x, y)
-	end
 end
 
 
@@ -71,9 +67,9 @@ terra drawCircle(pos: Vec2d, rad: double, color: Color3d) : {}
 end
 
 local function renderSamples(samples, moviename, imageWidth, imageHeight)
-	local moviefilename = string.format("renders/%s.mp4", moviename)
-	local movieframebasename = string.format("renders/%s", moviename) .. "_%06d.png"
-	local movieframewildcard = string.format("renders/%s", moviename) .. "_*.png"
+	local moviefilename = string.format("%s.mp4", moviename)
+	local movieframebasename = string.format("%s", moviename) .. "_%06d.png"
+	local movieframewildcard = string.format("%s", moviename) .. "_*.png"
 	io.write("Rendering video...")
 	io.flush()
 	local numsamps = samples.size
@@ -103,7 +99,7 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 			drawCircle(dotPos, 0.1, dotColor)
 			gl.glFlush()
 			gl.glReadPixels(0, 0, imageWidth, imageHeight,
-				gl.mGL_BGR(), gl.mGL_UNSIGNED_BYTE(), im.data)
+				gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
 			[RGBImage.save()](&im, image.Format.PNG, framename)
 		end
 	end
@@ -111,19 +107,6 @@ local function renderSamples(samples, moviename, imageWidth, imageHeight)
 	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
 	util.wait(string.format("rm -f %s", movieframewildcard))
 	print("done.")
-end
-
-local function subsample(samples, numToTake)
-	local SamplesType = terralib.typeof(samples)
-	local skip = samples.size / numToTake
-	local terra dosubsample()
-		var reducedSamps = SamplesType.stackAlloc()
-		for i=0,samples.size,skip do
-			reducedSamps:push(samples(i))
-		end
-		return reducedSamps
-	end
-	return m.gc(dosubsample())
 end
 
 local function writeSamplesToCSV(samples, filename)
@@ -142,28 +125,68 @@ local function writeSamplesToCSV(samples, filename)
 end
 
 ----------------------------------
--- local numsamps = 2000
-local numsamps = 200000
-local verbose = true
-local temp = 1.0
-local imageWidth = 500
-local imageHeight = 500
--- local kernel = HMC({numSteps=100})
-local kernel = GaussianDrift({bandwidth=0.075})
-local scheduleFn = macro(function(iter, currTrace)
-	return quote
-		currTrace.temperature = temp
-	end
-end)
-kernel = Schedule(kernel, scheduleFn)
-local terra doInference()
-	return [mcmc(figureEightModel, kernel, {numsamps=numsamps, verbose=verbose})]
+
+local easy_softness = 0.1
+local difficult_softness = 0.005
+local easy_bandwidth = 1.2
+local difficult_bandwidth = 0.04
+
+local hasTrueStats = global(bool, false)
+local trueMean = global(Vec2d)
+local trueVar = global(double)
+
+local function nameOfRun(difficulty, doHMC)
+	local base = doHMC and "hmc" or "random"
+	return string.format("%s_%s", base, difficulty)
 end
-local samples = m.gc(doInference())
-local moviename = arg[1] or "movie"
-renderSamples(samples, moviename, imageWidth, imageHeight)
-local filename = arg[1] or "samples"
-writeSamplesToCSV(subsample(samples, 2000), filename)
+
+-- MUST RUN HMC VERSION FIRST to fill in the 'true' stats
+local function doInference(difficulty, doHMC)
+	local numsamps = 2000
+	local numHMCsteps = 100
+	local imageWidth = 500
+	local imageHeight = 500
+	local kernel = nil
+	local lag = 1
+	if doHMC then
+		kernel = HMC({numSteps=numHMCsteps})
+	else
+		lag = 2*numHMCsteps
+		kernel = GaussianDrift({bandwidth=(difficulty == "easy" and easy_bandwidth or difficult_bandwidth)})
+	end
+	local model = genFigureEightModel(difficulty == "easy" and easy_softness or difficult_softness)
+	local terra doInference()
+		return [mcmc(model, kernel, {numsamps=numsamps, lag=lag, verbose=true})]()
+	end
+	local samples = m.gc(doInference())
+	local basename = nameOfRun(difficulty, doHMC)
+	writeSamplesToCSV(samples, basename)
+	local autocorrname = string.format("%s_autocorr.csv", basename)
+	local terra writeAutocorrToCSV()
+		var vals = sampleValues(samples)
+		if not hasTrueStats then
+			if doHMC then
+				trueMean = expectation(vals)
+				trueVar = variance(vals, trueMean)
+				hasTrueStats = true
+			else
+				util.fatalError("Attempted to compute autocorrrelation of a non-HMC run without first computing a 'ground truth' mean and variance\n")
+			end
+		end
+		var autocorr = autocorrelation(vals, trueMean, trueVar)
+		saveAutocorrelation(&autocorr, autocorrname)
+		m.destruct(autocorr)
+		m.destruct(vals)
+	end
+	writeAutocorrToCSV()
+	-- renderSamples(samples, basename, imageWidth, imageHeight)
+end
+
+-- Actually do the runs
+doInference("difficult", true)
+doInference("difficult", false)
+doInference("easy", false)
+
 
 
 

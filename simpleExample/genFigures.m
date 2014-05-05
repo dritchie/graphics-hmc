@@ -11,17 +11,27 @@ xrange = xmin:xstep:xmax;
 yrange = ymin:ystep:ymax;
 axisBounds = [xmin, xmax, ymin, ymax];
 targetIsoval = 0.25;
-softness = 0.005;
+easy_softness = 0.1;
+difficult_softness = 0.005;
 
 % Render and save everything
-drawIsoline(@figureEightFieldFunction, xrange, yrange, targetIsoval);
-saveas(gcf, 'isoline.pdf');
-drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, softness);
-saveas(gcf, 'isoridge.pdf');
-drawSamplingTrace('random.csv', axisBounds);
-saveas(gcf, 'randomSamps.pdf');
-drawSamplingTrace('hmc.csv', axisBounds);
-saveas(gcf, 'hmcSamps.pdf');
+% drawIsoline(@figureEightFieldFunction, xrange, yrange, targetIsoval);
+% saveas(gcf, 'isoline.pdf');
+
+% drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, easy_softness);
+% saveas(gcf, 'isoridge_easy.pdf');
+% drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, difficult_softness);
+% saveas(gcf, 'isoridge_difficult.pdf');
+drawSamplingTrace('random_easy.csv', axisBounds);
+saveas(gcf, 'randomSamps_easy.pdf');
+drawSamplingTrace('random_difficult.csv', axisBounds);
+saveas(gcf, 'randomSamps_difficult.pdf');
+drawSamplingTrace('hmc_difficult.csv', axisBounds);
+saveas(gcf, 'hmcSamps_difficult.pdf');
+drawAutocorrPlot('random_difficult_autocorr.csv');
+saveas(gcf, 'random_difficult_autocorr.pdf');
+drawAutocorrPlot('hmc_difficult_autocorr.csv');
+saveas(gcf, 'hmc_difficult_autocorr.pdf');
 close;
 
 end
