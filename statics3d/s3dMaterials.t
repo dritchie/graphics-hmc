@@ -15,7 +15,7 @@ util.importAll(core)
 -- Convenience methods for defining bodies with typical material properties
 
 local oakDensity = `700.0	-- kg/m^3
-local oakFriction = math.sqrt(0.54)
+local oakFriction = math.sqrt(0.5)
 Body.methods.oak = terra(shape: &Shape)
 	return Body.heapAlloc(shape, oakDensity, oakFriction)
 end

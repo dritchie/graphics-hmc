@@ -24,8 +24,8 @@ return probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
-	local frelTol = 0.015
-	local trelTol = 0.015
+	local frelTol = 0.005
+	local trelTol = 0.005
 
 	local mm = macro(function(x)
 		return `0.001*x
@@ -48,14 +48,14 @@ return probcomp(function()
 		return boxShape
 	end)
 
-	local numBlocks = 5
+	local numBlocks = 6
 	return terra()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
-		var camdist = mm(350.0)
-		camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
-		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
+		var camdist = mm(450.0)
+		camera.eye = Vec3d.stackAlloc(0.75*camdist, -camdist, 0.5*camdist)
+		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(150.0))
 		camera.up = upVector
 		camera.znear = 0.01
 		camera.zfar = 10.0
@@ -68,7 +68,7 @@ return probcomp(function()
 		var maxDim = mm(80.0)
 		var minAng = -radians(30.0)
 		var maxAng = radians(30.0)
-		var margin = mm(3.0)
+		var margin = mm(10.0)
 
 		-- Set up stuff in the scene --
 
