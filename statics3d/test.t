@@ -173,9 +173,40 @@ local function doRun(params)
 
 	-- Generate average image
 	if params.genAverageImg then
-
+		local RGBImage = image.Image(uint8, 3)
+		local RGBImageD = image.Image(double, 3)
+		local Color3d = Vec(double, 3)
+		local numimgs = params.numSamps
+		if params.saveBurnIn then numimgs = numimgs + params.numBurnInSamps end
 		local terra makeAverageImage()
-			--
+			var avgImg = RGBImageD.stackAlloc()
+			var buf : int8[1024]
+			for i=0,numimgs do
+				C.sprintf(buf, "%s/%s_%06d.png", params.outputdir, params.name, i)
+				-- Individual images are loaded as 8-bit RGB
+				var img = RGBImage.load(image.Format.PNG, buf)
+				-- Size the output image, if we haven't yet
+				if i==0 then avgImg:resize(img.width, img.height) end
+				-- Iterate over pixels, convert to double, add in
+				for y=0,img.height do
+					for x=0,img.width do
+						var bytePixel = img(x,y)
+						var floatPixel = Color3d.stackAlloc(bytePixel(0)/255.0, bytePixel(1)/255.0, bytePixel(2)/255.0)
+						avgImg(x,y) = avgImg(x,y) + floatPixel
+					end
+				end
+				m.destruct(img)
+			end
+			-- Normalize
+			for y=0,avgImg.height do
+				for x=0,avgImg.width do
+					avgImg(x,y) = avgImg(x,y) / double(numimgs)
+				end
+			end
+			-- Save (quantize in the process)
+			C.sprintf(buf, "%s/%s_average.png", params.outputdir, params.name)
+			[RGBImageD.save(uint8)](&avgImg, image.Format.PNG, buf)
+			m.destruct(avgImg)
 		end
 		print("Making average image...")
 		makeAverageImage()
