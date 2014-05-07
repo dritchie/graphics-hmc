@@ -31,6 +31,7 @@ local struct Shape {}
 inheritance.purevirtual(Shape, "volume", {}->{real})
 inheritance.purevirtual(Shape, "centroid", {}->{Vec3})
 inheritance.purevirtual(Shape, "transform", {&Mat4}->{})
+inheritance.purevirtual(Shape, "getVertices", {&Vector(Vec3)}->{})
 
 
 -- A PrimitiveShape stores the raw geometry to represent a shape.
@@ -49,6 +50,13 @@ terra PrimitiveShape:transform(mat: &Mat4) : {}
 	end
 end
 inheritance.virtual(PrimitiveShape, "transform")
+
+terra PrimitiveShape:getVertices(outvec: &Vector(Vec3)) : {}
+	for i=0,self.numverts do
+		outvec:push(self.vertices[i])
+	end
+end
+inheritance.virtual(PrimitiveShape, "getVertices")
 
 
 -- A ConvexPrimitiveShape is just that: a primitive shape that guarantees
@@ -143,6 +151,17 @@ local AggregateShape = templatize(function(numParts)
 		end)()]
 	end
 	inheritance.virtual(AggregateShapeT, "transform")
+
+	terra AggregateShapeT:getVertices(outvec: &Vector(Vec3)) : {}
+		[(function()
+			local t = {}
+			for i=0,numParts-1 do
+				table.insert(t, quote self.shapes[i]:getVertices(outvec) end)
+			end
+			return t
+		end)()]
+	end
+	inheritance.virtual(AggregateShapeT, "getVertices")
 
 	m.addConstructors(AggregateShapeT)
 	return AggregateShapeT
@@ -569,6 +588,23 @@ terra Scene:encourageStability(frelTol: real, trelTol: real)
 
 	-- Add stability factor
 	stabilityFactor(self, frelTol, trelTol)
+end
+
+-- Convert to a vector of real numbers which store the vertex coordinates of all body shapes
+-- Useful for e.g. computing autocorrelations
+terra Scene:toVector()
+	var v = [Vector(Vec3)].stackAlloc()
+	for i=0,self.bodies.size do
+		self.bodies(i).shape:getVertices(&v)
+	end
+	var vc = [Vector(real)].stackAlloc(3*v.size)
+	for i=0,v.size do
+		vc(3*i) = v(i)(0)
+		vc(3*i+1) = v(i)(1)
+		vc(3*i+2) = v(i)(2)
+	end
+	m.destruct(v)
+	return vc
 end
 
 m.addConstructors(Scene)

@@ -12,7 +12,8 @@ local RGBImage = image.Image(uint8, 3)
 
 
 -- drawFn should take a single sample and generate the code to render that sample
-local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
+local function renderSamples(samples, initFn, drawFn, moviename, rendersDir, doDeleteImages)
+	doDeleteImages = (doDeleteImages == nil) and true or doDeleteImages
 	local rendersDir = rendersDir or "renders"
 	local moviefilename = string.format("%s/%s.mp4", rendersDir, moviename)
 	local movieframebasename = string.format("%s/%s", rendersDir, moviename) .. "_%06d.png"
@@ -36,7 +37,11 @@ local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
 	end
 	renderFrames()
 	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
-	util.wait(string.format("rm -f %s", movieframewildcard))
+	-- Use this line instead for higher video quality (hasn't been very necessary in my experiments thus far)
+	-- util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p -b:v 20M %s 2>&1", movieframebasename, moviefilename))
+	if doDeleteImages then
+		util.wait(string.format("rm -f %s", movieframewildcard))
+	end
 	print("done.")
 end
 
