@@ -93,7 +93,7 @@ local function doRun(params)
 
 	local testcomp = terralib.require(params.exampleToRun)
 
-	local ssmhKernel = GaussianDrift({bandwidth=params.gaussianBandwidth})
+	local ssmhKernel = GaussianDrift({bandwidth=params.gaussianBandwidth, bandwidthAdapt=true})
 	local hmcKernel = HMC({numSteps=params.numHMCSteps})
 	local kernel = nil
 	if params.doHMC then
