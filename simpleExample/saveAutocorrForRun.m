@@ -5,7 +5,7 @@ csv2 = sprintf('%s/svmh_autocorr.csv', dirname);
 % outname2 = sprintf('%s/svmh_autocorr.pdf', dirname);
 % saveAutocorrPair(csv1, csv2, outname1, outname2);
 drawMergedAutocorrPair(csv1, csv2);
-legend('HMC', 'SVMH', 'Location', 'SouthEast');
+legend('HMC', 'SVMH', 'Location', 'SouthWest');
 set(gcf, 'PaperPositionMode', 'manual');
 set(gcf, 'PaperUnits', 'inches');
 set(gcf, 'PaperSize', [3, 3]);
