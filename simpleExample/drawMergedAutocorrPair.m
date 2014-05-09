@@ -22,4 +22,5 @@ ylim([absmin absmax]);
 pbaspect([1 1 1]);
 xlabel('Lag');
 ylabel('Autocorrelation');
+legend('HMC', 'SVMH', 'Location', 'SouthWest');
 end

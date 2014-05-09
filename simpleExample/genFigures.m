@@ -28,10 +28,13 @@ drawSamplingTrace('random_difficult.csv', axisBounds);
 saveas(gcf, 'randomSamps_difficult.pdf');
 drawSamplingTrace('hmc_difficult.csv', axisBounds);
 saveas(gcf, 'hmcSamps_difficult.pdf');
-drawAutocorrPlot('random_difficult_autocorr.csv', true);
-saveas(gcf, 'random_difficult_autocorr.pdf');
-drawAutocorrPlot('hmc_difficult_autocorr.csv', true);
-saveas(gcf, 'hmc_difficult_autocorr.pdf');
+% drawAutocorrPlot('random_difficult_autocorr.csv', true);
+% saveas(gcf, 'random_difficult_autocorr.pdf');
+% drawAutocorrPlot('hmc_difficult_autocorr.csv', true);
+% saveas(gcf, 'hmc_difficult_autocorr.pdf');
+drawMergedAutocorrPair('hmc_difficult_autocorr.csv', 'random_difficult_autocorr.csv');
+pbaspect([2 1 1]);
+saveas(gcf, 'difficult_autocorr.pdf');
 close;
 
 % Note: to trim the whitespace on these, use pdfcrop on the command line.
