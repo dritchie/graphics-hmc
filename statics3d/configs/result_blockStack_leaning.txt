@@ -1,0 +1,19 @@
+numSamps              200
+numBurnInSamps        100
+
+# saveBurnIn            true
+numHMCSteps           1000
+gaussianBandwidth     0.002
+
+# forwardSample         true
+
+imgRes                720
+deleteImages		  false
+
+genAverageImg         true
+computeAutocorr		  true
+
+
+
+outputdir			  ../renders/figs/result_blockStack_leaning
+exampleToRun          examples.result_blockStack_leaning

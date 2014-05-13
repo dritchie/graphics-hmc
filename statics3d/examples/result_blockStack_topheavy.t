@@ -24,8 +24,8 @@ return probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
-	local frelTol = 0.015
-	local trelTol = 0.015
+	local frelTol = 0.005
+	local trelTol = 0.005
 
 	local mm = macro(function(x)
 		return `0.001*x
@@ -48,14 +48,14 @@ return probcomp(function()
 		return boxShape
 	end)
 
-	local numBlocks = 5
+	local numBlocks = 6
 	return terra()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
-		var camdist = mm(350.0)
-		camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
-		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
+		var camdist = mm(450.0)
+		camera.eye = Vec3d.stackAlloc(0.75*camdist, -camdist, 0.5*camdist)
+		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(150.0))
 		camera.up = upVector
 		camera.znear = 0.01
 		camera.zfar = 10.0
@@ -68,7 +68,7 @@ return probcomp(function()
 		var maxDim = mm(80.0)
 		var minAng = -radians(30.0)
 		var maxAng = radians(30.0)
-		var margin = mm(3.0)
+		var margin = mm(10.0)
 
 		-- Set up stuff in the scene --
 
@@ -99,25 +99,18 @@ return probcomp(function()
 		-- Stablity
 		renderScene.scene:encourageStability(frelTol, trelTol)
 
-		-- -- Encourage desired shape (leaning)
-		-- var shapeFactorSoftness = mm(10.0)
-		-- var leanTheta = radians(-20.0)
-		-- var leanPhi = radians(45.0)
-		-- var lineLen = mm(1000000.0)
-		-- var lineStart = boxShape:botFace():centroid()
-		-- var lineEnd = lineStart + Vec3.fromSpherical(lineLen, leanTheta, leanPhi)
-		-- for i=1,renderScene.scene.bodies.size do
-		-- 	var dist = ad.math.sqrt(renderScene.scene.bodies(i):centerOfMass():distSqToLineSeg(lineStart, lineEnd))
-		-- 	factor(softeq(dist, 0.0, shapeFactorSoftness))
-		-- end
 
-		-- -- 'Conditioning on downstream evidence' by constraining the position of the top block
-		-- var posFactorSoftness = mm(5.0)
-		-- var targetPos = Vec3.stackAlloc(0.0, 0.0, 0.24)
-		-- var topBlockPos = renderScene.scene.bodies:back():centerOfMass()
-		-- factor(softeq(topBlockPos(0), targetPos(0), posFactorSoftness))
-		-- factor(softeq(topBlockPos(1), targetPos(1), posFactorSoftness))
-		-- factor(softeq(topBlockPos(2), targetPos(2), posFactorSoftness))
+		-- Top-heaviness: Encourage each block to be bigger than the block below it
+		-- Maximum volume ratio we can achieve is 1:64 (dim 20 vs. dim 80)
+		-- Conveniently, we have 6 blocks, so we'll just hit this limit if we say every block should be
+		--    twice as big as the block below it
+		for i=2,renderScene.scene.bodies.size do
+			var currShape = renderScene.scene.bodies(i).shape
+			var prevShape = renderScene.scene.bodies(i-1).shape
+			var currVol = currShape:volume()
+			var prevVol = prevShape:volume()
+			factor(softeq(currVol/prevVol, 2.0, 0.1))
+		end
 
 
 		return renderScene
