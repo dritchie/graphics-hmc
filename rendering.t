@@ -20,7 +20,7 @@ local function renderSamples(samples, initFn, drawFn, moviename, rendersDir)
 	io.write("Rendering video...")
 	io.flush()
 	local numsamps = samples.size
-	local frameSkip = math.ceil(numsamps / 1000.0)
+	local frameSkip = math.ceil(numsamps / 1000.0)--1000.0)
 	local terra renderFrames()
 		var im = RGBImage.stackAlloc()
 		[initFn(samples, im)]

@@ -29,7 +29,7 @@ inline double fmax(double a, double b)
 #endif
 ]]
 
-local useRGB = false
+local useRGB = true
 
 local gaussian_logprob = rand.gaussian_logprob
 
@@ -137,6 +137,58 @@ local LABtoRGB = templatize(function(real)
 end)
 
 
+local LABtoRGBNoClamp = templatize(function(real)
+	local Color = Vec(real, 3)
+	return terra(lab:Color)
+	    var gamma = 2.2
+	    var e = 216 / 24389.0
+	    var k = 24389 / 27.0
+
+	    var XR = 0.95047
+	    var YR = 1.0
+	    var ZR = 1.08883
+
+	    var cieL = lab(0)
+	    var cieA = lab(1)
+	    var cieB = lab(2)
+
+	    var fy = (cieL + 16) / 116.0
+	    var fx = (cieA / 500.0) + fy
+	    var fz = fy - cieB / 200.0
+
+	    var M = array(array(3.2404542, -1.5371385, -0.4985314),
+	        array(-0.9692660, 1.8760108, 0.0415560),
+	        array(0.0556434, -0.2040259, 1.0572252))
+	    var xR = ad.math.pow(fx, 3.0)
+	    var zR = ad.math.pow(fz, 3.0)
+
+	    if (xR <= e) then
+	    	xR = (116 * fx - 16) / k
+	    end
+
+	    var yR = 0.0
+	    if (cieL > (k * e))  then yR = ad.math.pow((cieL + 16) / 116.0, 3.0) else yR = cieL / k end
+	    
+	    if (zR <= e) then zR = (116 * fz - 16) / k end
+
+	    var x = xR * XR
+	    var y = yR * YR
+	    var z = zR * ZR
+
+	    var r = M[0][0] * x + M[0][1] * y + M[0][2] * z
+	    var g = M[1][0] * x + M[1][1] * y + M[1][2] * z
+	    var b = M[2][0] * x + M[2][1] * y + M[2][2] * z
+
+	    var red = ad.math.pow(r, 1.0 / gamma)
+	    var green = ad.math.pow(g, 1.0 / gamma)
+	    var blue = ad.math.pow(b, 1.0 / gamma)
+
+	    var result = Color.stackAlloc(red, green, blue)
+	    return result
+	end
+end)
+
+
 --Prefer lightness, bimodal lightness for backgrounds
 local UnaryLightnessConstraint = templatize(function(real)
 	local RealPattern = Pattern(real)
@@ -196,6 +248,27 @@ local UnarySaturationConstraint = templatize(function(real)
 			end
 		end
 		return totalScore
+	end
+end)
+
+local BGSaturation = templatize(function(real)
+	local Color = Vec(real, 3)
+	return terra(color: Color)
+		var high = 0.7
+		var low = 0.3
+		var sigma = 1.0
+		var totalScore = real(0.0)
+
+		var lab = color
+		if (useRGB) then
+			lab = [RGBtoLAB(real)](color)
+		end
+		var chroma = lab(1)*lab(1) + lab(2)*lab(2)
+		var saturation = real(0.0)
+		if ((chroma + lab(0)*lab(0)) > 0.0) then
+			saturation = ad.math.sqrt(chroma)/ad.math.sqrt(chroma + lab(0)*lab(0))
+		end
+		return saturation		
 	end
 end)
 
@@ -281,11 +354,13 @@ end)
 return {
 	LABtoRGB = LABtoRGB,
 	RGBtoLAB = RGBtoLAB,
+	LABtoRGBNoClamp = LABtoRGBNoClamp,
 	UnaryLightnessConstraint = UnaryLightnessConstraint,
 	UnarySaturationConstraint = UnarySaturationConstraint,
 	BinaryPerceptualConstraint = BinaryPerceptualConstraint,
 	BinaryLightnessConstraint = BinaryLightnessConstraint,
-	useRGB = useRGB
+	useRGB = useRGB,
+	BGSaturation = BGSaturation;
 }
 
 

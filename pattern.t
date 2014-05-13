@@ -23,7 +23,9 @@ local Pattern = templatize(function(real)
 		adjacencies: Adjacencies,
 		templateId: uint,
 		numGroups: uint,
-		sizes: Vector(double)
+		sizes: Vector(double),
+		l_indices: Adjacencies,
+		h_indices: Adjacencies
 	}
 	PatternInfo.Color = Color
 	PatternInfo.Adjacencies = Adjacencies
@@ -34,6 +36,8 @@ local Pattern = templatize(function(real)
 		self.templateId = 0
 		self.backgroundId = 0
 		self.numGroups = 0
+		m.init(self.h_indices)
+		m.init(self.l_indices)
 	end
 
 	terra PatternInfo:getVarPtr(x: uint)
@@ -56,13 +60,14 @@ local Pattern = templatize(function(real)
 	end
 	util.inline(PatternInfo.methods.setVar)
 
-	terra PatternInfo:__construct(numGroups:uint, adj:Adjacencies, bid:uint, tid:uint, sizes:Vector(double))
+	terra PatternInfo:__construct(numGroups:uint, adj:Adjacencies, bid:uint, tid:uint, sizes:Vector(double), l_indices:Adjacencies, h_indices:Adjacencies)
 		--C.printf("%d, %d, %d, %d", numGroups, adj.size(), bid, tid)
 		self.backgroundId = bid
 
 		self.adjacencies = m.copy(adj)
 		self.sizes = m.copy(sizes)
-
+		self.l_indices = m.copy(l_indices)
+		self.h_indices = m.copy(h_indices)
 		self.templateId = tid
 		self.numGroups = numGroups
 		self.vars = [&Color](C.malloc(self.numGroups * sizeof(Color)))
@@ -87,6 +92,8 @@ local Pattern = templatize(function(real)
 		self.templateId = other.templateId
 		self.backgroundId = other.backgroundId
 		self.sizes = m.copy(other.sizes)
+		self.l_indices = m.copy(other.l_indices)
+		self.h_indices = m.copy(other.h_indices)
 	end
 
 	m.addConstructors(PatternInfo)
