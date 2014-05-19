@@ -1,4 +1,4 @@
-numSamps              2000
+numSamps              200
 numBurnInSamps        100
 
 # saveBurnIn            true

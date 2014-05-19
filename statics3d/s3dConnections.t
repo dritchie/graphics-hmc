@@ -190,7 +190,9 @@ local RectContactFace = Face(4)
 --    one for each vertex of the contact polygon.
 local struct RectRectContact
 {
-	contactPoints: (&ContactPoint)[4]
+	contactPoints: (&ContactPoint)[4],
+	face1: &RectContactFace,
+	face2: &RectContactFace
 }
 inheritance.dynamicExtend(Connection, RectRectContact)
 
@@ -269,6 +271,9 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	self.contactPoints[1] = ContactPoint.heapAlloc(body1, body2, cp2, n, t1, t2)
 	self.contactPoints[2] = ContactPoint.heapAlloc(body1, body2, cp3, n, t1, t2)
 	self.contactPoints[3] = ContactPoint.heapAlloc(body1, body2, cp4, n, t1, t2)
+
+	self.face1 = face1
+	self.face2 = face2
 end
 
 terra RectRectContact:__destruct() : {}

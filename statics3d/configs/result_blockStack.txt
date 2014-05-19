@@ -1,5 +1,5 @@
 numSamps              200
-numBurnInSamps        80
+numBurnInSamps        100
 
 # saveBurnIn            true
 numHMCSteps           1000

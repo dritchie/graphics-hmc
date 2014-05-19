@@ -242,6 +242,55 @@ if real == double then
 	inheritance.virtual(QuadHex, "render")
 end
 
+-- Various methods to check if the shape is a planar extrusion along different
+--    axes
+
+local planarExtrudeThresh = 1e-8
+
+terra QuadHex:isFrontBackPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fBack] ]:centroid() - self.faces[ [QuadHex.fFront] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackBotLeft] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackBotRight] ] - (self.verts[ [QuadHex.vFrontBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vFrontTopRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopLeft] ] - (self.verts[ [QuadHex.vFrontTopLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+terra QuadHex:isLeftRightPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fRight] ]:centroid() - self.faces[ [QuadHex.fLeft] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackBotRight] ] - (self.verts[ [QuadHex.vBackBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontBotRight] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopRight] ] - (self.verts[ [QuadHex.vFrontTopLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vBackTopLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+terra QuadHex:isBotTopPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fTop] ]:centroid() - self.faces[ [QuadHex.fBot] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackTopLeft] ] - (self.verts[ [QuadHex.vBackBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vBackBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopRight] ] - (self.verts[ [QuadHex.vFrontBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopLeft] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+-- Assumes self is stacked on top of a another QuadHex.
+-- Rotates self about its normal so that its bottom face is aligned with
+--    the top face of the QuadHex that it is stacked on.
+-- Assumes the two faces are rectangular, so it only aligns along one axis
+terra QuadHex:alignStacked(box: &QuadHex)
+	var botCenter = self:botFace():centroid()
+	var myAxis = self:botFace():vertex(1) - self:botFace():vertex(0); myAxis:normalize()
+	var otherAxis = box:topFace():vertex(1) - box:topFace():vertex(0); myAxis:normalize()
+	var xform = Mat4.translate(botCenter) *
+				Mat4.face(myAxis, otherAxis) *
+				Mat4.translate(-botCenter)
+	self:transform(&xform)
+end
+
 -- Transform self such that its bottom face sits on the top face of box,
 --    and the centroid of its bottom face is located at point.
 terra QuadHex:stack(box: &QuadHex, point: Vec3) : {}

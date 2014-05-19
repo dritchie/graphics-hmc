@@ -3,6 +3,7 @@
 
 -- Parameters are:
 --   * exampleToRun (default="Please specify 'exampleToRun'"): which example to run
+--   * doComparison (default=true): do two runs comparing HMC to SVMH, or just one?
 --   * forwardSample (default=false): true if we should just run a forward sample pass (for simple testing/debugging)
 --   * doHMC (default=true): whether we should run HMC or gaussian drift MH
 --   * numSamps (default=1000): how many samples to collect
@@ -11,7 +12,7 @@
 --   * numBurnInSamps (default=0): how many samples to burn in for
 --   * saveBurnIn (default=false): whether burn-in samples are considered for further output/analysis
 --   * outputdir (default=../renders): the directory where output gets written
---   * name (default=output): the basename for all output files
+--   * name (default="output"): the basename for all output files
 --   * renderMovie (default=true): true if we should render visual output
 --   * imgRes (default=500): x resolution of rendered images
 --   * deleteImages (default=true): true if we should delete frames after the .mp4 is created.
@@ -23,6 +24,7 @@ local Params =
 {
 	-- Store defaults here
 	exampleToRun = "Please specify 'exampleToRun'",
+	doComparison = true,
 	forwardSample = false,
 	doHMC = true,
 	numSamps = 1000,
@@ -31,7 +33,7 @@ local Params =
 	numBurnInSamps = 0,
 	saveBurnIn = false,
 	outputdir = "../renders",
-	name = "",
+	name = "output",
 	renderMovie = true,
 	imgRes = 500,
 	deleteImages = true,
@@ -76,6 +78,7 @@ function Params:loadFile(filename)
 			if cmd:sub(1,1) ~= "#" then
 				if
 					cmd == "exampleToRun" then self.exampleToRun = arg elseif
+					cmd == "doComparison" then self.doComparison = str2bool(arg) elseif
 					cmd == "forwardSample" then self.forwardSample = str2bool(arg) elseif
 					cmd == "doHMC" then self.doHMC = str2bool(arg) elseif
 					cmd == "numSamps" then self.numSamps = tonumber(arg) elseif

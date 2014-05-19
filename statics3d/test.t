@@ -246,7 +246,11 @@ end
 
 local params = Params.new():loadFile(arg[1] or "config.txt")
 params:print()
-doHMCvsSVMHcomparison(params)
+if params.doComparison then
+	doHMCvsSVMHcomparison(params)
+else
+	doRun(params)
+end
 
 
 

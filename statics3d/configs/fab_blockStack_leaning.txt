@@ -1,0 +1,21 @@
+numSamps              1
+numBurnInSamps        100
+
+# saveBurnIn            true
+numHMCSteps           1000
+gaussianBandwidth     0.002
+
+doComparison          false
+
+forwardSample         true
+
+imgRes                720
+deleteImages		  false
+
+genAverageImg         false
+computeAutocorr		  false
+saveBlueprints		  true
+
+
+outputdir			  ../renders/figs/fab_blockStack_leaning
+exampleToRun          examples.fab_blockStack_leaning
