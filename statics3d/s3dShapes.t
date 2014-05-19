@@ -9,6 +9,10 @@ local s3dCore = terralib.require("s3dCore")
 local s3dRendering = terralib.require("s3dRendering")
 local s3dConnections = terralib.require("s3dConnections")
 
+local C = terralib.includecstring [[
+#include "stdio.h"
+]]
+
 
 return probmodule(function(pcomp)
 
@@ -283,8 +287,9 @@ end
 -- Assumes the two faces are rectangular, so it only aligns along one axis
 terra QuadHex:alignStacked(box: &QuadHex)
 	var botCenter = self:botFace():centroid()
-	var myAxis = self:botFace():vertex(1) - self:botFace():vertex(0); myAxis:normalize()
-	var otherAxis = box:topFace():vertex(1) - box:topFace():vertex(0); myAxis:normalize()
+	var myAxis = self:botFrontEdge(); myAxis:normalize()
+	var otherAxis = box:topFrontEdge(); otherAxis:normalize()
+	-- C.printf("myAxis: "); myAxis:print(); C.printf("  |  otherAxis: "); otherAxis:print(); C.printf("\n")
 	var xform = Mat4.translate(botCenter) *
 				Mat4.face(myAxis, otherAxis) *
 				Mat4.translate(-botCenter)

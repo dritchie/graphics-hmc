@@ -154,11 +154,19 @@ local function saveBlueprints(pcomp)
 			var bbox = getFaceViewport(f, ppi)
 			overallbbox:unionWith(&bbox)
 		end
+		-- Also expand for all the contact faces
+		for i=0,scene.connections.size do
+			var contact = [&RectRectContact](scene.connections(i))
+			var bbox = getFaceViewport(contact.face1, ppi)
+			overallbbox:unionWith(&bbox)
+			bbox = getFaceViewport(contact.face2, ppi)
+			overallbbox:unionWith(&bbox)
+		end
 		return align32(overallbbox.maxs(0)), align32(overallbbox.maxs(1))
 	end
 
-	-- Render the image for a single body
-	local terra renderBodyBlueprint(body: &Body, body2id: &HashMap(&Body, uint), img: &RGBImage, ppi: uint)
+	-- Render the cutout image for a single body
+	local terra renderBodyCutout(body: &Body, body2id: &HashMap(&Body, uint), img: &RGBImage, ppi: uint, directory: rawstring, index: uint)
 		var shape = [&QuadHex](body.shape)
 		var face = getCutFace(shape)
 		var face2d = projectFace(face)
@@ -186,7 +194,7 @@ local function saveBlueprints(pcomp)
 
 		-- Draw the id label for this block
 		-- Also draw the axis that the normal points along
-		var buf : int8[32]
+		var buf : int8[1024]
 		var id = body2id(body)
 		var axisName = normalAxisName(face, shape)
 		C.sprintf(buf, "%u (%s)", id, axisName)
@@ -241,6 +249,86 @@ local function saveBlueprints(pcomp)
 		gl.glFlush()
 		gl.glReadPixels(0, 0, img.width, img.height,
 			gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), img.data)
+
+		-- Save to image
+		C.sprintf(buf, "%s_ppi=%u/%u_cutout.png", directory, ppi, index)
+		img:save(image.Format.PNG, buf)
+	end
+
+
+	-- Render 'top-down' contact images for a body
+	local function genRenderContactDiagram(which, body, body2id, face2contact, img, ppi, directory, index)
+		local getFace = nil
+		if which == "Bot" then
+			getFace = `([&QuadHex](body.shape)):botFace()
+		elseif which == "Top" then
+			getFace = `([&QuadHex](body.shape)):topFace()
+		else
+			error(string.format("genRenderContactDiagram - invalid 'which' parameter '%s'", which))
+		end
+		return quote
+			var face = [getFace]
+			var contact: &RectRectContact
+			-- Only render a contact diagram if this face is actually in contact with something
+			if face2contact:get(face, &contact) then
+				var face2d = projectFace(face)
+				var bounds = boundFace(face)
+				var viewport = getFaceViewport(face, ppi)
+				gl.glClearColor([colors.White], 1.0)
+				gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
+				gl.glViewport(viewport.mins(0), viewport.mins(1), viewport.maxs(0), viewport.maxs(1))
+				gl.glMatrixMode(gl.mGL_PROJECTION())
+				gl.glLoadIdentity()
+				gl.gluOrtho2D(bounds.mins(0), bounds.maxs(0), bounds.mins(1), bounds.maxs(1))
+				gl.glMatrixMode(gl.mGL_MODELVIEW())
+				gl.glLoadIdentity()
+
+				-- Draw a filled polygon for the contact region
+				gl.glColor3d([contactColor])
+				gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
+				gl.glLineWidth(metersToPixels(lineThickness, ppi))
+				gl.glBegin(gl.mGL_QUADS())
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[0].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[1].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[2].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[3].point))])
+				gl.glEnd()
+
+				-- Draw the polygon outline
+				gl.glColor3d([outlineColor])
+				gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
+				gl.glLineWidth(metersToPixels(lineThickness, ppi))
+				gl.glBegin(gl.mGL_QUADS())
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[0])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[1])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[2])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[3])])
+				gl.glEnd()
+
+				-- Draw the id label for this block
+				-- Also draw the name of the face ("Bot" or "Top")
+				var buf : int8[1024]
+				var id = body2id(body)
+				C.sprintf(buf, "%u (%s)", id, which)
+				gl.glRasterPos2d([Vec2d.elements(`projectPointByFace(face, face:centroid()))])
+				displayString(gl.mGLUT_BITMAP_TIMES_ROMAN_24(), buf)
+
+				-- Copy framebuffer to image
+				img:resize(viewport.maxs(0), viewport.maxs(1))
+				gl.glFlush()
+				gl.glReadPixels(0, 0, img.width, img.height,
+					gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), img.data)
+
+				-- Save to image
+				C.sprintf(buf, "%s_ppi=%u/%u_contact_%s.png", directory, ppi, index, which)
+				img:save(image.Format.PNG, buf)
+			end
+		end
+	end
+	local terra renderBodyContacts(body: &Body, body2id: &HashMap(&Body, uint), face2contact: &HashMap(&Face(4), &RectRectContact),
+								   img: &RGBImage, ppi: uint, directory: rawstring, index: uint)
+		[genRenderContactDiagram("Bot", body, body2id, face2contact, img, ppi, directory, index)]
+		[genRenderContactDiagram("Top", body, body2id, face2contact, img, ppi, directory, index)]
 	end
 
 
@@ -260,20 +348,30 @@ local function saveBlueprints(pcomp)
 			body2id:put(scene.bodies(i), i)
 		end
 
-		-- For each body, render an image
-		var buf : int8[1024]
+		-- Build a hashmap of contact face --> contact
+		-- (for rendering contact diagrams)
+		var face2contact = [HashMap(&Face(4), &RectRectContact)].stackAlloc()
+		for i=0,scene.connections.size do
+			var contact = [&RectRectContact](scene.connections(i))
+			face2contact:put(contact.face1, contact)
+			face2contact:put(contact.face2, contact)
+		end
+
+		-- For each body, render:
+		--  * An image describing the block cut-out
+		--  * Images (1 or 2) describing block contacts
 		var img = RGBImage.stackAlloc()
 		img:resize(maxXres, maxYres)
 		-- Skip ground at index 0
 		for i=1,scene.bodies.size do
 			var body = scene.bodies(i)
-			renderBodyBlueprint(body, &body2id, &img, ppi)
-			C.sprintf(buf, "%s_ppi=%u/%u.png", directory, ppi, i)
-			img:save(image.Format.PNG, buf)
+			renderBodyCutout(body, &body2id, &img, ppi, directory, i)
+			renderBodyContacts(body, &body2id, &face2contact, &img, ppi, directory, i)
 		end
 		m.destruct(img)
 
 		m.destruct(body2id)
+		m.destruct(face2contact)
 	end
 end
 
