@@ -91,6 +91,7 @@ return probcomp(function()
 			var prevShape = [&QuadHex](prevBody.shape)
 			var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, i)
 			boxShape:stackRandom(prevShape, margin, false)
+			boxShape:alignStacked(prevShape)	-- IMPORTANT!
 			boxBody = Body.oak(boxShape)
 			renderScene.scene.bodies:push(boxBody)
 			renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), false))

@@ -1,4 +1,4 @@
-numSamps              200
+numSamps              2000
 numBurnInSamps        100
 
 # saveBurnIn            true
@@ -6,6 +6,7 @@ numHMCSteps           1000
 gaussianBandwidth     0.002
 
 # forwardSample         true
+doComparison          false
 
 imgRes                720
 deleteImages		  false

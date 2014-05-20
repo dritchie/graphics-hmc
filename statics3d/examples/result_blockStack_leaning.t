@@ -91,6 +91,7 @@ return probcomp(function()
 			var prevShape = [&QuadHex](prevBody.shape)
 			var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, i)
 			boxShape:stackRandom(prevShape, margin, false)
+			boxShape:alignStacked(prevShape)	-- IMPORTANT!
 			boxBody = Body.oak(boxShape)
 			renderScene.scene.bodies:push(boxBody)
 			renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), false))
@@ -98,6 +99,18 @@ return probcomp(function()
 
 		-- Stablity
 		renderScene.scene:encourageStability(frelTol, trelTol)
+
+		-- -- Encourage desired shape (leaning w/ circular symmetry)
+		-- var shapeFactorSoftness = radians(4.0)
+		-- var leanTheta = radians(20.0)
+		-- -- C.printf("target theta: %g\n", leanTheta)
+		-- var lineStart = boxShape:botFace():centroid()
+		-- for i=1,renderScene.scene.bodies.size do
+		-- 	var lineEnd = renderScene.scene.bodies(i):centerOfMass()
+		-- 	var r, theta, phi = (lineEnd - lineStart):toSpherical()
+		-- 	-- C.printf("theta: %g\n", ad.val(theta))
+		-- 	factor(softeq(theta, leanTheta, shapeFactorSoftness))
+		-- end
 
 		-- Encourage desired shape (leaning)
 		var shapeFactorSoftness = mm(10.0)
