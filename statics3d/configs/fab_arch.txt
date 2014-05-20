@@ -17,5 +17,5 @@ computeAutocorr		  false
 #saveBlueprints		  true
 
 
-outputdir			  ../renders/figs/fab_blockStack_leaning
-exampleToRun          examples.fab_blockStack_leaning
+outputdir			  ../renders/figs/fab_arch
+exampleToRun          examples.fab_arch
