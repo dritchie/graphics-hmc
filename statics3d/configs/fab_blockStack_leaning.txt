@@ -15,7 +15,7 @@ deleteImages		  false
 genAverageImg         false
 computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  4
+saveBlueprints		  36
 
 
 outputdir			  ../renders/figs/fab_blockStack_leaning
