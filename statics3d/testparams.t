@@ -1,6 +1,4 @@
 
--- TODO: Abstract this to work anywhere, not just on statics3d/test.t
-
 -- Parameters are:
 --   * exampleToRun (default="Please specify 'exampleToRun'"): which example to run
 --   * doComparison (default=true): do two runs comparing HMC to SVMH, or just one?
@@ -13,12 +11,13 @@
 --   * saveBurnIn (default=false): whether burn-in samples are considered for further output/analysis
 --   * outputdir (default=../renders): the directory where output gets written
 --   * name (default="output"): the basename for all output files
+--   * saveSceneDescriptions (default=false): output plaintext scene descriptions for all scenes
 --   * renderMovie (default=true): true if we should render visual output
 --   * imgRes (default=500): x resolution of rendered images
 --   * deleteImages (default=true): true if we should delete frames after the .mp4 is created.
 --   * genAverageImg (default=false): true if we should generate an average image (requires 'renderMovie=true' and 'deleteImages=false')
 --   * computeAutocorr (default=false): true if we should compute autocorrelation
---   * saveBlueprints (default=false): true if we should save construction schematics for sampled structures
+--   * saveBlueprints (default=-1): number of scene description file we should save blueprints for.
 
 local Params =
 {
@@ -34,12 +33,13 @@ local Params =
 	saveBurnIn = false,
 	outputdir = "../renders",
 	name = "output",
+	saveSceneDescriptions = false,
 	renderMovie = true,
 	imgRes = 500,
 	deleteImages = true,
 	genAverageImg = false,
 	computeAutocorr = false,
-	saveBlueprints = false
+	saveBlueprints = -1
 }
 Params.__index = Params
 
@@ -88,12 +88,13 @@ function Params:loadFile(filename)
 					cmd == "saveBurnIn" then self.saveBurnIn = str2bool(arg) elseif
 					cmd == "outputdir" then self.outputdir = arg elseif
 					cmd == "name" then self.name = arg elseif
+					cmd == "saveSceneDescriptions" then self.saveSceneDescriptions = str2bool(arg) elseif
 					cmd == "renderMovie" then self.renderMovie = str2bool(arg) elseif
 					cmd == "imgRes" then self.imgRes = tonumber(arg) elseif
 					cmd == "deleteImages" then self.deleteImages = str2bool(arg) elseif
 					cmd == "genAverageImg" then self.genAverageImg = str2bool(arg) elseif
 					cmd == "computeAutocorr" then self.computeAutocorr = str2bool(arg) elseif
-					cmd == "saveBlueprints" then self.saveBlueprints = str2bool(arg)
+					cmd == "saveBlueprints" then self.saveBlueprints = tonumber(arg)
 				end
 			end
 		end

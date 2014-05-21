@@ -5,12 +5,15 @@ local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local inheritance = terralib.require("inheritance")
 local templatize = terralib.require("templatize")
+local Vector = terralib.require("vector")
 local s3dCore = terralib.require("s3dCore")
 local s3dRendering = terralib.require("s3dRendering")
 local s3dConnections = terralib.require("s3dConnections")
 
 local C = terralib.includecstring [[
 #include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
 ]]
 
 
@@ -209,6 +212,16 @@ terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
 	self.verts[ [QuadHex.vBackTopLeft] ] = center + Vec3.stackAlloc(-w2, d2, h2)
 end
 
+terra QuadHex:getQuadFaces(outvec: &Vector(&QuadFace)) : {}
+	outvec:push(self:botFace())
+	outvec:push(self:topFace())
+	outvec:push(self:leftFace())
+	outvec:push(self:rightFace())
+	outvec:push(self:frontFace())
+	outvec:push(self:backFace())
+end
+inheritance.virtual(QuadHex, "getQuadFaces")
+
 -- Volume of a convex hexahedron is just the sum of the volumes
 --    of the six pyramids formed by connecting each face to the centroid
 -- Face areas are just one half the norm of the cross product of the diagonals
@@ -249,7 +262,7 @@ end
 -- Various methods to check if the shape is a planar extrusion along different
 --    axes
 
-local planarExtrudeThresh = 1e-8
+local planarExtrudeThresh = 1e-7
 
 terra QuadHex:isFrontBackPlanarExtrusion()
 	var disp = self.faces[ [QuadHex.fBack] ]:centroid() - self.faces[ [QuadHex.fFront] ]:centroid()
@@ -596,6 +609,59 @@ terra QuadHex:assertFacePlanarity()
 	end)()]
 end
 
+terra QuadHex:saveContentsToFile(file: &C.FILE)
+	-- C.fprintf(file, "%g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g\n",
+		C.fprintf(file, "%1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f\n",
+		self.verts[0](0), self.verts[0](1), self.verts[0](2),
+		self.verts[1](0), self.verts[1](1), self.verts[1](2),
+		self.verts[2](0), self.verts[2](1), self.verts[2](2),
+		self.verts[3](0), self.verts[3](1), self.verts[3](2),
+		self.verts[4](0), self.verts[4](1), self.verts[4](2),
+		self.verts[5](0), self.verts[5](1), self.verts[5](2),
+		self.verts[6](0), self.verts[6](1), self.verts[6](2),
+		self.verts[7](0), self.verts[7](1), self.verts[7](2))
+end
+
+terra QuadHex:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "QuadHex\n")
+	self:saveContentsToFile(file)
+end
+inheritance.virtual(QuadHex, "saveToFile")
+
+terra QuadHex:loadFromFile(file: &C.FILE)
+	var buf : int8[1024]
+	C.fgets(buf, 1023, file)
+	self.verts[0](0) = C.atof(C.strtok(buf, " "))
+	self.verts[0](1) = C.atof(C.strtok(nil, " "))
+	self.verts[0](2) = C.atof(C.strtok(nil, " "))
+	self.verts[1](0) = C.atof(C.strtok(nil, " "))
+	self.verts[1](1) = C.atof(C.strtok(nil, " "))
+	self.verts[1](2) = C.atof(C.strtok(nil, " "))
+	self.verts[2](0) = C.atof(C.strtok(nil, " "))
+	self.verts[2](1) = C.atof(C.strtok(nil, " "))
+	self.verts[2](2) = C.atof(C.strtok(nil, " "))
+	self.verts[3](0) = C.atof(C.strtok(nil, " "))
+	self.verts[3](1) = C.atof(C.strtok(nil, " "))
+	self.verts[3](2) = C.atof(C.strtok(nil, " "))
+	self.verts[4](0) = C.atof(C.strtok(nil, " "))
+	self.verts[4](1) = C.atof(C.strtok(nil, " "))
+	self.verts[4](2) = C.atof(C.strtok(nil, " "))
+	self.verts[5](0) = C.atof(C.strtok(nil, " "))
+	self.verts[5](1) = C.atof(C.strtok(nil, " "))
+	self.verts[5](2) = C.atof(C.strtok(nil, " "))
+	self.verts[6](0) = C.atof(C.strtok(nil, " "))
+	self.verts[6](1) = C.atof(C.strtok(nil, " "))
+	self.verts[6](2) = C.atof(C.strtok(nil, " "))
+	self.verts[7](0) = C.atof(C.strtok(nil, " "))
+	self.verts[7](1) = C.atof(C.strtok(nil, " "))
+	self.verts[7](2) = C.atof(C.strtok(nil, " "))
+end
+
+Shape.addLoader("QuadHex", terra(file: &C.FILE) : &Shape
+	var qhex = QuadHex.heapAlloc()
+	qhex:loadFromFile(file)
+	return qhex
+end)
 
 m.addConstructors(QuadHex)
 
@@ -615,6 +681,18 @@ terra Box:volume() : real
 		   (self.verts[ [QuadHex.vBackBotLeft] ] - self.verts[ [QuadHex.vFrontBotLeft] ]):norm()
 end
 inheritance.virtual(Box, "volume")
+
+terra Box:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "Box\n")
+	self:saveContentsToFile(file)
+end
+inheritance.virtual(Box, "saveToFile")
+
+Shape.addLoader("Box", terra(file: &C.FILE) : &Shape
+	var box = Box.heapAlloc()
+	box:loadFromFile(file)
+	return box
+end)
 
 m.addConstructors(Box)
 

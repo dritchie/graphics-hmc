@@ -166,6 +166,20 @@ local function doRun(params)
 		print("done.")
 	end
 
+	-- Save scene descriptions
+	if params.saveSceneDescriptions then
+		local terra saveScenes()
+			var buf : int8[1024]
+			for i=0,samples.size do
+				C.sprintf(buf, "%s/%s_%06d.txt", params.outputdir, params.name, i)
+				samples(i).value.scene:saveToFile(buf)
+			end
+		end
+		print("Saving scene descriptions...")
+		saveScenes()
+		print("done.")
+	end
+
 	-- Render sample trace as movie
 	if params.renderMovie then
 		rendering.renderSamples(samples, makeRenderInitFn(params.imgRes), makeRenderDrawFn(testcomp), params.name, params.outputdir, params.deleteImages)
@@ -212,22 +226,6 @@ local function doRun(params)
 		makeAverageImage()
 		print("done.")
 	end
-
-	-- Save blueprints for fabrication!
-	if params.saveBlueprints then
-		local ppi = 300
-		local terra saveBlueprints()
-			util.systemf("mkdir %s/%s_blueprints", params.outputdir, params.name)
-			var buf : int8[1024]
-			for i=0,samples.size do
-				C.sprintf(buf, "%s/%s_blueprints/%u", params.outputdir, params.name, i)
-				[fab.saveBlueprints(testcomp)](&samples(i).value.scene, buf, ppi)
-			end
-		end
-		print("Saving fab schematics...")
-		saveBlueprints()
-		print("done.")
-	end
 end
 
 local function doHMCvsSVMHcomparison(params)
@@ -246,7 +244,27 @@ end
 
 local params = Params.new():loadFile(arg[1] or "config.txt")
 params:print()
-if params.doComparison then
+
+-- Save blueprints for fabrication!
+if params.saveBlueprints ~= -1 then
+	local testcomp = terralib.require(params.exampleToRun)
+	local ppi = 300
+	local terra saveBlueprints()
+		util.systemf("mkdir %s/%s_blueprints", params.outputdir, params.name)
+		var buf : int8[1024]
+		C.sprintf(buf, "%s/%s_%06d.txt", params.outputdir, params.name, params.saveBlueprints)
+		var scene = [s3dLib(testcomp).Scene].loadFromFile(buf)
+
+		C.sprintf(buf, "%s/%s_blueprints/%u", params.outputdir, params.name, params.saveBlueprints)
+		[fab.saveBlueprints(testcomp)](&scene, buf, ppi)
+		m.destruct(scene)
+	end
+	print("Saving fab schematics...")
+	saveBlueprints()
+	print("done.")
+
+-- Otherwise, do some sampling
+elseif params.doComparison then
 	doHMCvsSVMHcomparison(params)
 else
 	doRun(params)

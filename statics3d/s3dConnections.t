@@ -12,6 +12,8 @@ local s3dCore = terralib.require("s3dCore")
 
 local C = terralib.includecstring [[
 #include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
 ]]
 
 local Vec3d = Vec(double, 3)
@@ -292,6 +294,49 @@ terra RectRectContact:applyForcesImpl() : {}
 end
 inheritance.virtual(RectRectContact, "applyForcesImpl")
 
+
+local terra faceToIndex(body: &Body, face: &RectContactFace)
+	var faces = [Vector(&RectContactFace)].stackAlloc()
+	body.shape:getQuadFaces(&faces)
+	var index = -1
+	for i=0,faces.size do
+		if faces(i) == face then
+			index = i
+			break
+		end
+	end
+	m.destruct(faces)
+	return index
+end
+terra RectRectContact:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "RectRectContact\n")
+	var body1 = self.contactPoints[0].body1
+	var body2 = self.contactPoints[0].body2
+	C.fprintf(file, "%d %d   %d %d\n",
+		body1.index, faceToIndex(body1, self.face1),
+		body2.index, faceToIndex(body2, self.face2))
+end
+inheritance.virtual(RectRectContact, "saveToFile")
+
+Connection.addLoader("RectRectContact", terra(file: &C.FILE, bodies: &Vector(&Body)) : &Connection
+	var buf : int8[1024]
+	C.fgets(buf, 1023, file)
+	var index1 = C.atoi(C.strtok(buf, " "))
+	var faceIndex1 = C.atoi(C.strtok(nil, " "))
+	var index2 = C.atoi(C.strtok(nil, " "))
+	var faceIndex2 = C.atoi(C.strtok(nil, " "))
+	var body1 = bodies(index1)
+	var body2 = bodies(index2)
+	var faces = [Vector(&RectContactFace)].stackAlloc()
+	body1.shape:getQuadFaces(&faces)
+	var face1 = faces(faceIndex1)
+	faces:clear()
+	body2.shape:getQuadFaces(&faces)
+	var face2 = faces(faceIndex2)
+	m.destruct(faces)
+	return RectRectContact.heapAlloc(body1, body2, face1, face2, false)
+end)
+
 -- LP stability stuff
 if real == double then
 
@@ -341,8 +386,8 @@ if real == double then
 
 end
 
-
 m.addConstructors(RectRectContact)
+
 
 
 -- TODO: PolyRectContact (i.e. one face is rectangular and the other is not,

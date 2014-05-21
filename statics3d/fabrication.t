@@ -157,10 +157,15 @@ local function saveBlueprints(pcomp)
 		-- Also expand for all the contact faces
 		for i=0,scene.connections.size do
 			var contact = [&RectRectContact](scene.connections(i))
-			var bbox = getFaceViewport(contact.face1, ppi)
-			overallbbox:unionWith(&bbox)
-			bbox = getFaceViewport(contact.face2, ppi)
-			overallbbox:unionWith(&bbox)
+			var bbox : BBox2u
+			if contact.contactPoints[0].body1 ~= scene.bodies(0) then
+				bbox = getFaceViewport(contact.face1, ppi)
+				overallbbox:unionWith(&bbox)
+			end
+			if contact.contactPoints[0].body2 ~= scene.bodies(0) then
+				bbox = getFaceViewport(contact.face2, ppi)
+				overallbbox:unionWith(&bbox)
+			end
 		end
 		return align32(overallbbox.maxs(0)), align32(overallbbox.maxs(1))
 	end
