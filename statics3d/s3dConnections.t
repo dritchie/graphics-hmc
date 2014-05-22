@@ -278,6 +278,23 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	self.face2 = face2
 end
 
+terra RectRectContact:recalculate() : {}
+	var face1 = self.face1
+	var face2 = self.face2
+
+	var cp1, cp2, cp3, cp4 = RectRectContact.contactPoints(face1, face2)
+	var n = face1:normal()
+	var t1 = face1:vertex(1) - face1:vertex(0); t1:normalize()
+	var t2 = face1:vertex(3) - face1:vertex(0); t2:normalize()
+
+	self.contactPoints[0].point = cp1; self.contactPoints[0].normal = n; self.contactPoints[0].tangent1 = t1; self.contactPoints[0].tangent2 = t2
+	self.contactPoints[1].point = cp2; self.contactPoints[1].normal = n; self.contactPoints[1].tangent1 = t1; self.contactPoints[1].tangent2 = t2
+	self.contactPoints[2].point = cp3; self.contactPoints[2].normal = n; self.contactPoints[2].tangent1 = t1; self.contactPoints[2].tangent2 = t2
+	self.contactPoints[3].point = cp4; self.contactPoints[3].normal = n; self.contactPoints[3].tangent1 = t1; self.contactPoints[3].tangent2 = t2
+
+end
+inheritance.virtual(RectRectContact, "recalculate")
+
 terra RectRectContact:__destruct() : {}
 	m.delete(self.contactPoints[0])
 	m.delete(self.contactPoints[1])

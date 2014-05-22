@@ -1,0 +1,22 @@
+numSamps              200
+numBurnInSamps        100
+
+# saveBurnIn            true
+numHMCSteps           1000
+gaussianBandwidth     0.002
+
+doComparison          false
+
+#forwardSample         true
+
+imgRes                720
+deleteImages		  false
+
+genAverageImg         false
+computeAutocorr		  false
+saveSceneDescriptions true
+#saveBlueprints		  143
+
+
+outputdir			  ../renders/figs/fab_arch_tilt
+exampleToRun          examples.fab_arch_tilt

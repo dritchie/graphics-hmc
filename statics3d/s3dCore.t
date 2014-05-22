@@ -473,6 +473,7 @@ end)
 --    for computing some internal forces between those bodies
 local struct Connection {}
 inheritance.purevirtual(Connection, "__destruct", {}->{})
+inheritance.purevirtual(Connection, "recalculate", {}->{})
 inheritance.purevirtual(Connection, "saveToFile", {&C.FILE}->{})
 inheritance.purevirtual(Connection, "applyForcesImpl", {}->{})
 -- This indirection is needed because we don't (yet?) have a way to support virtual pmethods.
@@ -698,6 +699,17 @@ terra Scene:toVector()
 	end
 	m.destruct(v)
 	return vc
+end
+
+terra Scene:tiltX(rads: real)
+	var rotCenter = self.bodies(0):centerOfMass()
+	var mat = Mat4.rotate(Vec3.stackAlloc(0.0, 1.0, 0.0), rads, rotCenter)
+	for i=0,self.bodies.size do
+		self.bodies(i).shape:transform(&mat)
+	end
+	for i=0,self.connections.size do
+		self.connections(i):recalculate()
+	end
 end
 
 terra Scene:saveToFile(filename: rawstring)

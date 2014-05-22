@@ -20,7 +20,9 @@ local C = terralib.includecstring [[
 #include "string.h"
 ]]
 
-
+local radians = macro(function(deg)
+	return `deg*[math.pi]/180.0
+end)
 
 local lerp = macro(function(a, b, t)
 	return `(1.0-t)*a + t*b
@@ -64,12 +66,30 @@ local renderForces = false
 local unstableColor = colors.Tableau10.Red
 local function makeRenderDrawFn(testcomp)
 	local RenderSettings = s3dLib(testcomp).RenderSettings
+	local Scene = s3dLib(testcomp).Scene
+
+	local terra sceneIsStable(scene: &Scene)
+		return scene:isStable()
+
+		-- var tiltAmt = radians(20.0)
+		-- var numSteps = 10
+		-- var tiltIncr = 2.0*tiltAmt/numSteps
+		-- scene:tiltX(-tiltAmt)
+		-- var isstable = scene:isStable()
+		-- for i=0,numSteps do
+		-- 	scene:tiltX(tiltIncr)
+		-- 	isstable = isstable and scene:isStable()
+		-- end
+		-- scene:tiltX(-tiltAmt)
+		-- return isstable
+	end
+
 	return function(sample, im, sampleindex)
 		return quote
 			var renderSettings = RenderSettings.stackAlloc()
 			renderSettings.renderForces = renderForces
 			var renderScene = &sample.value
-			if not renderScene.scene:isStable() then
+			if not sceneIsStable(&renderScene.scene) then
 				renderSettings.activeBodyColor = [Vec(double, 4)].stackAlloc([unstableColor], 1.0)
 			end
 			renderScene:render(&renderSettings)
