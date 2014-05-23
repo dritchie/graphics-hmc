@@ -1,8 +1,11 @@
 numSamps              200
-numBurnInSamps        100
+#numBurnInSamps        100
+numBurnInSamps        50
+#doHMC                 false
 
 # saveBurnIn            true
 numHMCSteps           1000
+#numHMCSteps           4000
 gaussianBandwidth     0.002
 
 doComparison          false
@@ -12,11 +15,8 @@ doComparison          false
 imgRes                720
 deleteImages		  false
 
-genAverageImg         false
-computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  80
 
 
-outputdir			  ../renders/figs/fab_arch_tilt
-exampleToRun          examples.fab_arch_tilt
+outputdir			  ../renders/figs/result_arch_symm
+exampleToRun          examples.result_arch_symm

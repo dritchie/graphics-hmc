@@ -104,6 +104,32 @@ QuadHex.vBackBotRight = 5
 QuadHex.vBackTopRight = 6
 QuadHex.vBackTopLeft = 7
 
+-- Vert accessors for client code
+QuadHex.methods.frontBotLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontBotLeft] ]
+end)
+QuadHex.methods.frontBotRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontBotRight] ]
+end)
+QuadHex.methods.frontTopRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontTopRight] ]
+end)
+QuadHex.methods.frontTopLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontTopLeft] ]
+end)
+QuadHex.methods.backBotLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackBotLeft] ]
+end)
+QuadHex.methods.backBotRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackBotRight] ]
+end)
+QuadHex.methods.backTopRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackTopRight] ]
+end)
+QuadHex.methods.backTopLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackTopLeft] ]
+end)
+
 -- Face accessors for client code
 QuadHex.methods.frontFace = macro(function(self)
 	return `&self.faces[ [QuadHex.fFront] ]

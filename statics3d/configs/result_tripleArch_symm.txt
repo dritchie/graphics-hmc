@@ -1,5 +1,6 @@
-numSamps              200
-numBurnInSamps        100
+numSamps              300
+numBurnInSamps        120
+#doHMC                 false
 
 # saveBurnIn            true
 numHMCSteps           1000
@@ -12,11 +13,8 @@ doComparison          false
 imgRes                720
 deleteImages		  false
 
-genAverageImg         false
-computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  80
 
 
-outputdir			  ../renders/figs/fab_arch_tilt
-exampleToRun          examples.fab_arch_tilt
+outputdir			  ../renders/figs/result_tripleArch_symm
+exampleToRun          examples.result_tripleArch_symm
