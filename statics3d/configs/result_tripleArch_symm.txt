@@ -1,9 +1,12 @@
-numSamps              300
-numBurnInSamps        120
+numSamps              200
+numBurnInSamps        200
+#numBurnInSamps		   1
+#numSamps               1
 #doHMC                 false
 
 # saveBurnIn            true
 numHMCSteps           1000
+#numHMCSteps            1
 gaussianBandwidth     0.002
 
 doComparison          false

@@ -147,8 +147,8 @@ terra CurveNetwork:__construct(groundHeight: double, groundWidth: double)
 	-- Ground is just a straight line bezier curve
 	self.ground = BezCurve2d.heapAlloc(Vec2d.stackAlloc(-0.5*groundWidth, groundHeight),
 									   Vec2d.stackAlloc(0.5*groundWidth, groundHeight),
-									   Vec2d.stackAlloc(0.9*groundWidth, 0.0),
-									   Vec2d.stackAlloc(-0.9*groundWidth, 0.0))
+									   Vec2d.stackAlloc((1.0/3)*groundWidth, 0.0),
+									   Vec2d.stackAlloc(-(1.0/3)*groundWidth, 0.0))
 	m.init(self.curves)
 	m.init(self.connections)
 	m.init(self.curve2conn)
@@ -217,20 +217,24 @@ terra CurveNetwork:addConnectionToGround(fromIndex: int, whereFrom: uint, whereT
 	self:addConnection(conn)
 end
 
-terra CurveNetwork:fixEndpoints()
-	for i=0,self.curves.size do
-		var curve = self.curves(i)
-		var conns = self.curve2conn:getPointer(i)
-		for j=0,conns.size do
-			var connIndex = conns(j)
-			var conn = self.connections(connIndex)
-			if conn.connectToEnd then
-				curve.points[conn.whereFrom] = conn.to.points[conn.toEndpoint]
-			else
-				var point, tangent = conn.to:eval(conn.whereTo)
-				curve.points[conn.whereFrom] = point
-			end
+terra CurveNetwork:fixEndpoints(i: uint) : {}
+	var curve = self.curves(i)
+	var conns = self.curve2conn:getPointer(i)
+	for j=0,conns.size do
+		var connIndex = conns(j)
+		var conn = self.connections(connIndex)
+		if conn.connectToEnd then
+			curve.points[conn.whereFrom] = conn.to.points[conn.toEndpoint]
+		else
+			var point, tangent = conn.to:eval(conn.whereTo)
+			curve.points[conn.whereFrom] = point
 		end
+	end
+end
+
+terra CurveNetwork:fixEndpoints() : {}
+	for i=0,self.curves.size do
+		self:fixEndpoints(i)
 	end
 end
 
@@ -242,24 +246,36 @@ m.addConstructors(CurveNetwork)
 -- Global instance of a curve network that all inference will use
 local curvenet = global(CurveNetwork)
 local terra initGlobalCurveNet()
-	curvenet = CurveNetwork.stackAlloc(0.0, mm(1000.0))
+	var groundWidth = mm(1000.0)
+	curvenet = CurveNetwork.stackAlloc(0.0, groundWidth)
 
-	--------------------------------------------------------------------
+	-- -- Ensuring that the ground interpolates as linear interpolation
+	-- var p0, t0 = curvenet.ground:eval(0.0)
+	-- var pq1, tq1 = curvenet.ground:eval(0.25)
+	-- var phalf, thalf = curvenet.ground:eval(0.5)
+	-- var pq3, tq3 = curvenet.ground:eval(0.75)
+	-- var p1, t1 = curvenet.ground:eval(1.0)
+	-- C.printf("ground(0): %g  (should be %g)\n", p0(0), -0.5*groundWidth)
+	-- C.printf("ground(0.25): %g  (should be %g)\n", pq1(0), -0.25*groundWidth)
+	-- C.printf("ground(0.5): %g  (should be %g)\n", phalf(0), 0.0)
+	-- C.printf("ground(0.75): %g  (should be %g)\n", pq3(0), 0.25*groundWidth)
+	-- C.printf("ground(1): %g  (should be %g)\n", p1(0), 0.5*groundWidth)
+
 	-- TRIPLE ARCH
 
 	-- 0: A small arch on the ground
 	curvenet:addCurve(BezCurve2d.heapAlloc(Vec2d.stackAlloc(0.0, mm(300.0)),
 										  Vec2d.stackAlloc(0.0, mm(300.0))),
 					  9)
-	curvenet:addConnectionToGround(0, 0, 0.05)
-	curvenet:addConnectionToGround(0, 1, 0.25)
+	curvenet:addConnectionToGround(0, 0, 0.18)
+	curvenet:addConnectionToGround(0, 1, 0.43)
 
 	-- 1: Another small arch on the ground
 	curvenet:addCurve(BezCurve2d.heapAlloc(Vec2d.stackAlloc(0.0, mm(300.0)),
 										  Vec2d.stackAlloc(0.0, mm(300.0))),
 					  9)
-	curvenet:addConnectionToGround(1, 0, 0.6)
-	curvenet:addConnectionToGround(1, 1, 0.9)
+	curvenet:addConnectionToGround(1, 0, 0.57)
+	curvenet:addConnectionToGround(1, 1, 0.82)
 
 	-- 2: A small arch sitting on top of the first two
 	curvenet:addCurve(BezCurve2d.heapAlloc(Vec2d.stackAlloc(0.0, mm(300.0)),
@@ -268,7 +284,6 @@ local terra initGlobalCurveNet()
 	curvenet:addConnectionToCurve(2, 0, 0, 0.5)
 	curvenet:addConnectionToCurve(2, 1, 1, 0.5)
 
-	--------------------------------------------------------------------
 
 	curvenet:fixEndpoints()
 end
@@ -622,8 +637,8 @@ return probcomp(function()
 		-- camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
 		-- camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
 		var camdist = mm(1000.0)
-		camera.eye = Vec3d.stackAlloc(mm(-50.0), -camdist, mm(250.0))
-		camera.target = Vec3d.stackAlloc(mm(-50.0), 0.0, mm(250.0))
+		camera.eye = Vec3d.stackAlloc(mm(0.0), -camdist, mm(250.0))
+		camera.target = Vec3d.stackAlloc(mm(0.0), 0.0, mm(250.0))
 		camera.up = upVector
 		camera.znear = 0.01
 		camera.zfar = 10.0
