@@ -41,7 +41,7 @@ return probcomp(function()
 	local maxHeight = `mm(75.0)
 	local minWidth = `mm(15.0)
 	local maxWidth = `mm(75.0)
-	local depth = `mm(38.1)
+	local depth = `mm(38.0)
 	local maxAng = `radians(30.0)
 	local margin = `mm(10.0)	
 

@@ -15,7 +15,7 @@ deleteImages		  false
 genAverageImg         false
 computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  176
+#saveBlueprints		  129
 
 
 outputdir			  ../renders/figs/fab_blockStack_tilt

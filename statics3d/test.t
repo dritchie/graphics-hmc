@@ -71,7 +71,8 @@ local function makeRenderDrawFn(testcomp)
 	local terra sceneIsStable(scene: &Scene)
 		return scene:isStable()
 
-		-- var tiltAmt = radians(20.0)
+		-- -- TILT STABILITY
+		-- var tiltAmt = radians(10.0)
 		-- var numSteps = 10
 		-- var tiltIncr = 2.0*tiltAmt/numSteps
 		-- scene:tiltX(-tiltAmt)

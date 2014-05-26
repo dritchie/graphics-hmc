@@ -35,7 +35,7 @@ return probcomp(function()
 	end)
 
 	-- Parameters
-	local depth = `mm(31.75)
+	local depth = `mm(38.0)
 	local margin = `mm(8.0)
 	-- local minHeight = `mm(15.0)
 	local minHeight = `mm(30.0)

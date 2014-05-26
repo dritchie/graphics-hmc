@@ -558,13 +558,13 @@ return probcomp(function()
 	-- Parameters
 	local groundDepth = `mm(1000.0)
 	local groundThickness = `mm(10.0)
-	local depth = `mm(31.75)
+	local depth = `mm(38.0)
 	local minWidth = `mm(15.0)
 	local maxWidth = `mm(70.0)
 	local maxHeightChange = `0.3
 	local margin = `mm(8.0)
 	local maxAng = `radians(30.0)
-	local tiltAmt = `radians(20.0)	
+	local tiltAmt = `radians(10.0)	
 
 
 
@@ -588,7 +588,7 @@ return probcomp(function()
 
 		-- Set up stuff in the scene --
 		var bcn = BlockCurveNetwork.stackAlloc(&curvenet, groundDepth, groundThickness, depth,
-											   minWidth, maxWidth, maxHeightChange, margin, maxAng, Body.oak)
+											   minWidth, maxWidth, maxHeightChange, margin, maxAng, Body.poplar)
 		bcn:addToScene(&renderScene.scene)
 		m.destruct(bcn)
 

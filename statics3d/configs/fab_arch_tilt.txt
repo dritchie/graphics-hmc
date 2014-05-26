@@ -15,7 +15,7 @@ deleteImages		  false
 genAverageImg         false
 computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  80
+#saveBlueprints		  115
 
 
 outputdir			  ../renders/figs/fab_arch_tilt

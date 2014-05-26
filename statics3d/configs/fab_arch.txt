@@ -15,7 +15,7 @@ deleteImages		  false
 genAverageImg         false
 computeAutocorr		  false
 saveSceneDescriptions true
-saveBlueprints		  143
+#saveBlueprints		  130
 
 
 outputdir			  ../renders/figs/fab_arch
