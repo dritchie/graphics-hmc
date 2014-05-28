@@ -12,6 +12,8 @@ local s3dCore = terralib.require("s3dCore")
 
 local C = terralib.includecstring [[
 #include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
 ]]
 
 local Vec3d = Vec(double, 3)
@@ -178,7 +180,7 @@ m.addConstructors(ContactPoint)
 
 
 
-local alignThresh = 1e-12
+local alignThresh = 1e-7
 local RectContactFace = Face(4)
 
 -- A RectRectContact joins two bodies at two coincident faces.
@@ -190,7 +192,9 @@ local RectContactFace = Face(4)
 --    one for each vertex of the contact polygon.
 local struct RectRectContact
 {
-	contactPoints: (&ContactPoint)[4]
+	contactPoints: (&ContactPoint)[4],
+	face1: &RectContactFace,
+	face2: &RectContactFace
 }
 inheritance.dynamicExtend(Connection, RectRectContact)
 
@@ -204,9 +208,12 @@ RectRectContact.methods.isValidContact = terra(face1: &RectContactFace, face2: &
 	var e2b = face2:vertex(2) - face2:vertex(1); e2b:normalize()
 	var aligned = ad.math.fabs(e1:dot(e2a)) < alignThresh or
 		   		  ad.math.fabs(e1:dot(e2b)) < alignThresh
+	-- C.printf("alignment: %g   |   %g\n", e1:dot(e2a), e1:dot(e2b))
 	if not aligned then return false end
 	-- Check coplanarity
 	var n = e2a:cross(e2b)
+	-- var e = face1:vertex(0) - face2:vertex(0); e:normalize()
+	-- var d = e:dot(n); C.printf("plane eqn: %g\n", d)
 	if not face1:vertex(0):inPlane(face2:vertex(0), n) then return false end
 	return true
 end
@@ -257,7 +264,7 @@ end
 terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContactFace, face2: &RectContactFace, validCheck: bool)
 	if validCheck then
 		util.assert(RectRectContact.isValidContact(face1, face2),
-			"Can only create Contact between two coplanar, aligned, parallelogram faces\n")
+			"Can only create RectRectContact between two coplanar, aligned, parallelogram faces\n")
 	end
 
 	-- Compute contact polygon, create 4 contact points
@@ -269,7 +276,27 @@ terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContac
 	self.contactPoints[1] = ContactPoint.heapAlloc(body1, body2, cp2, n, t1, t2)
 	self.contactPoints[2] = ContactPoint.heapAlloc(body1, body2, cp3, n, t1, t2)
 	self.contactPoints[3] = ContactPoint.heapAlloc(body1, body2, cp4, n, t1, t2)
+
+	self.face1 = face1
+	self.face2 = face2
 end
+
+terra RectRectContact:recalculate() : {}
+	var face1 = self.face1
+	var face2 = self.face2
+
+	var cp1, cp2, cp3, cp4 = RectRectContact.contactPoints(face1, face2)
+	var n = face1:normal()
+	var t1 = face1:vertex(1) - face1:vertex(0); t1:normalize()
+	var t2 = face1:vertex(3) - face1:vertex(0); t2:normalize()
+
+	self.contactPoints[0].point = cp1; self.contactPoints[0].normal = n; self.contactPoints[0].tangent1 = t1; self.contactPoints[0].tangent2 = t2
+	self.contactPoints[1].point = cp2; self.contactPoints[1].normal = n; self.contactPoints[1].tangent1 = t1; self.contactPoints[1].tangent2 = t2
+	self.contactPoints[2].point = cp3; self.contactPoints[2].normal = n; self.contactPoints[2].tangent1 = t1; self.contactPoints[2].tangent2 = t2
+	self.contactPoints[3].point = cp4; self.contactPoints[3].normal = n; self.contactPoints[3].tangent1 = t1; self.contactPoints[3].tangent2 = t2
+
+end
+inheritance.virtual(RectRectContact, "recalculate")
 
 terra RectRectContact:__destruct() : {}
 	m.delete(self.contactPoints[0])
@@ -286,6 +313,49 @@ terra RectRectContact:applyForcesImpl() : {}
 	self.contactPoints[3]:applyForcesImpl()
 end
 inheritance.virtual(RectRectContact, "applyForcesImpl")
+
+
+local terra faceToIndex(body: &Body, face: &RectContactFace)
+	var faces = [Vector(&RectContactFace)].stackAlloc()
+	body.shape:getQuadFaces(&faces)
+	var index = -1
+	for i=0,faces.size do
+		if faces(i) == face then
+			index = i
+			break
+		end
+	end
+	m.destruct(faces)
+	return index
+end
+terra RectRectContact:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "RectRectContact\n")
+	var body1 = self.contactPoints[0].body1
+	var body2 = self.contactPoints[0].body2
+	C.fprintf(file, "%d %d   %d %d\n",
+		body1.index, faceToIndex(body1, self.face1),
+		body2.index, faceToIndex(body2, self.face2))
+end
+inheritance.virtual(RectRectContact, "saveToFile")
+
+Connection.addLoader("RectRectContact", terra(file: &C.FILE, bodies: &Vector(&Body)) : &Connection
+	var buf : int8[1024]
+	C.fgets(buf, 1023, file)
+	var index1 = C.atoi(C.strtok(buf, " "))
+	var faceIndex1 = C.atoi(C.strtok(nil, " "))
+	var index2 = C.atoi(C.strtok(nil, " "))
+	var faceIndex2 = C.atoi(C.strtok(nil, " "))
+	var body1 = bodies(index1)
+	var body2 = bodies(index2)
+	var faces = [Vector(&RectContactFace)].stackAlloc()
+	body1.shape:getQuadFaces(&faces)
+	var face1 = faces(faceIndex1)
+	faces:clear()
+	body2.shape:getQuadFaces(&faces)
+	var face2 = faces(faceIndex2)
+	m.destruct(faces)
+	return RectRectContact.heapAlloc(body1, body2, face1, face2, false)
+end)
 
 -- LP stability stuff
 if real == double then
@@ -336,8 +406,8 @@ if real == double then
 
 end
 
-
 m.addConstructors(RectRectContact)
+
 
 
 -- TODO: PolyRectContact (i.e. one face is rectangular and the other is not,

@@ -5,9 +5,16 @@ local m = terralib.require("mem")
 local ad = terralib.require("ad")
 local inheritance = terralib.require("inheritance")
 local templatize = terralib.require("templatize")
+local Vector = terralib.require("vector")
 local s3dCore = terralib.require("s3dCore")
 local s3dRendering = terralib.require("s3dRendering")
 local s3dConnections = terralib.require("s3dConnections")
+
+local C = terralib.includecstring [[
+#include "stdio.h"
+#include "string.h"
+#include "stdlib.h"
+]]
 
 
 return probmodule(function(pcomp)
@@ -96,6 +103,32 @@ QuadHex.vBackBotLeft = 4
 QuadHex.vBackBotRight = 5
 QuadHex.vBackTopRight = 6
 QuadHex.vBackTopLeft = 7
+
+-- Vert accessors for client code
+QuadHex.methods.frontBotLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontBotLeft] ]
+end)
+QuadHex.methods.frontBotRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontBotRight] ]
+end)
+QuadHex.methods.frontTopRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontTopRight] ]
+end)
+QuadHex.methods.frontTopLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vFrontTopLeft] ]
+end)
+QuadHex.methods.backBotLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackBotLeft] ]
+end)
+QuadHex.methods.backBotRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackBotRight] ]
+end)
+QuadHex.methods.backTopRightVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackTopRight] ]
+end)
+QuadHex.methods.backTopLeftVert = macro(function(self)
+	return `self.verts[ [QuadHex.vBackTopLeft] ]
+end)
 
 -- Face accessors for client code
 QuadHex.methods.frontFace = macro(function(self)
@@ -205,6 +238,16 @@ terra QuadHex:makeBox(center: Vec3, width: real, depth: real, height: real)
 	self.verts[ [QuadHex.vBackTopLeft] ] = center + Vec3.stackAlloc(-w2, d2, h2)
 end
 
+terra QuadHex:getQuadFaces(outvec: &Vector(&QuadFace)) : {}
+	outvec:push(self:botFace())
+	outvec:push(self:topFace())
+	outvec:push(self:leftFace())
+	outvec:push(self:rightFace())
+	outvec:push(self:frontFace())
+	outvec:push(self:backFace())
+end
+inheritance.virtual(QuadHex, "getQuadFaces")
+
 -- Volume of a convex hexahedron is just the sum of the volumes
 --    of the six pyramids formed by connecting each face to the centroid
 -- Face areas are just one half the norm of the cross product of the diagonals
@@ -242,6 +285,63 @@ if real == double then
 	inheritance.virtual(QuadHex, "render")
 end
 
+-- Various methods to check if the shape is a planar extrusion along different
+--    axes
+
+local planarExtrudeThresh = 1e-7
+
+terra QuadHex:isFrontBackPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fBack] ]:centroid() - self.faces[ [QuadHex.fFront] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackBotLeft] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackBotRight] ] - (self.verts[ [QuadHex.vFrontBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vFrontTopRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopLeft] ] - (self.verts[ [QuadHex.vFrontTopLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+terra QuadHex:isLeftRightPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fRight] ]:centroid() - self.faces[ [QuadHex.fLeft] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackBotRight] ] - (self.verts[ [QuadHex.vBackBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontBotRight] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopRight] ] - (self.verts[ [QuadHex.vFrontTopLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vBackTopLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+terra QuadHex:isBotTopPlanarExtrusion()
+	var disp = self.faces[ [QuadHex.fTop] ]:centroid() - self.faces[ [QuadHex.fBot] ]:centroid()
+	var err = real(0.0)
+	err = err + (self.verts[ [QuadHex.vBackTopLeft] ] - (self.verts[ [QuadHex.vBackBotLeft] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vBackTopRight] ] - (self.verts[ [QuadHex.vBackBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopRight] ] - (self.verts[ [QuadHex.vFrontBotRight] ] + disp)):norm()
+	err = err + (self.verts[ [QuadHex.vFrontTopLeft] ] - (self.verts[ [QuadHex.vFrontBotLeft] ] + disp)):norm()
+	return err < planarExtrudeThresh
+end
+
+-- Assumes self is stacked on top of a another QuadHex.
+-- Rotates self about its normal so that its bottom face is aligned with
+--    the top face of the QuadHex that it is stacked on.
+-- Assumes the two faces are rectangular, so it only aligns along one axis
+terra QuadHex:alignStacked(box: &QuadHex)
+	var botCenter = self:botFace():centroid()
+	var myAxis = self:botFrontEdge(); myAxis:normalize()
+	-- Figure out which edge is closest and snap to that one
+	var otherAxis1 = box:topFrontEdge(); otherAxis1:normalize()
+	if otherAxis1:dot(myAxis) < 0.0 then otherAxis1 = -otherAxis1 end
+	var otherAxis2 = box:topLeftEdge(); otherAxis2:normalize()
+	if otherAxis2:dot(myAxis) < 0.0 then otherAxis2 = -otherAxis2 end
+	var otherAxis = otherAxis1
+	if myAxis:dot(otherAxis2) > myAxis:dot(otherAxis1) then
+		otherAxis = otherAxis2
+	end
+	var xform = Mat4.translate(botCenter) *
+				Mat4.face(myAxis, otherAxis) *
+				Mat4.translate(-botCenter)
+	self:transform(&xform)
+end
+
 -- Transform self such that its bottom face sits on the top face of box,
 --    and the centroid of its bottom face is located at point.
 terra QuadHex:stack(box: &QuadHex, point: Vec3) : {}
@@ -257,7 +357,7 @@ end
 --    and the centroid of its bottom face is located at the (xcoord, ycoord)
 --    in the local coordinate system of box's top face
 -- If relativeCoords is true, then xcoord,ycoord are interpreted as percentages along
---    their respective edges. Otherwise, they are interpreted as absolute physical unites
+--    their respective edges. Otherwise, they are interpreted as absolute physical units
 terra QuadHex:stack(box: &QuadHex, xcoord: real, ycoord: real, relativeCoords: bool) : {}
 	var origin = box.verts[ [QuadHex.vFrontTopLeft] ]
 	var xedge = box.verts[ [QuadHex.vFrontTopRight] ] - origin
@@ -542,6 +642,59 @@ terra QuadHex:assertFacePlanarity()
 	end)()]
 end
 
+terra QuadHex:saveContentsToFile(file: &C.FILE)
+	-- C.fprintf(file, "%g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g   %g %g %g\n",
+		C.fprintf(file, "%1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f   %1.10f %1.10f %1.10f\n",
+		self.verts[0](0), self.verts[0](1), self.verts[0](2),
+		self.verts[1](0), self.verts[1](1), self.verts[1](2),
+		self.verts[2](0), self.verts[2](1), self.verts[2](2),
+		self.verts[3](0), self.verts[3](1), self.verts[3](2),
+		self.verts[4](0), self.verts[4](1), self.verts[4](2),
+		self.verts[5](0), self.verts[5](1), self.verts[5](2),
+		self.verts[6](0), self.verts[6](1), self.verts[6](2),
+		self.verts[7](0), self.verts[7](1), self.verts[7](2))
+end
+
+terra QuadHex:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "QuadHex\n")
+	self:saveContentsToFile(file)
+end
+inheritance.virtual(QuadHex, "saveToFile")
+
+terra QuadHex:loadFromFile(file: &C.FILE)
+	var buf : int8[1024]
+	C.fgets(buf, 1023, file)
+	self.verts[0](0) = C.atof(C.strtok(buf, " "))
+	self.verts[0](1) = C.atof(C.strtok(nil, " "))
+	self.verts[0](2) = C.atof(C.strtok(nil, " "))
+	self.verts[1](0) = C.atof(C.strtok(nil, " "))
+	self.verts[1](1) = C.atof(C.strtok(nil, " "))
+	self.verts[1](2) = C.atof(C.strtok(nil, " "))
+	self.verts[2](0) = C.atof(C.strtok(nil, " "))
+	self.verts[2](1) = C.atof(C.strtok(nil, " "))
+	self.verts[2](2) = C.atof(C.strtok(nil, " "))
+	self.verts[3](0) = C.atof(C.strtok(nil, " "))
+	self.verts[3](1) = C.atof(C.strtok(nil, " "))
+	self.verts[3](2) = C.atof(C.strtok(nil, " "))
+	self.verts[4](0) = C.atof(C.strtok(nil, " "))
+	self.verts[4](1) = C.atof(C.strtok(nil, " "))
+	self.verts[4](2) = C.atof(C.strtok(nil, " "))
+	self.verts[5](0) = C.atof(C.strtok(nil, " "))
+	self.verts[5](1) = C.atof(C.strtok(nil, " "))
+	self.verts[5](2) = C.atof(C.strtok(nil, " "))
+	self.verts[6](0) = C.atof(C.strtok(nil, " "))
+	self.verts[6](1) = C.atof(C.strtok(nil, " "))
+	self.verts[6](2) = C.atof(C.strtok(nil, " "))
+	self.verts[7](0) = C.atof(C.strtok(nil, " "))
+	self.verts[7](1) = C.atof(C.strtok(nil, " "))
+	self.verts[7](2) = C.atof(C.strtok(nil, " "))
+end
+
+Shape.addLoader("QuadHex", terra(file: &C.FILE) : &Shape
+	var qhex = QuadHex.heapAlloc()
+	qhex:loadFromFile(file)
+	return qhex
+end)
 
 m.addConstructors(QuadHex)
 
@@ -561,6 +714,18 @@ terra Box:volume() : real
 		   (self.verts[ [QuadHex.vBackBotLeft] ] - self.verts[ [QuadHex.vFrontBotLeft] ]):norm()
 end
 inheritance.virtual(Box, "volume")
+
+terra Box:saveToFile(file: &C.FILE) : {}
+	C.fprintf(file, "Box\n")
+	self:saveContentsToFile(file)
+end
+inheritance.virtual(Box, "saveToFile")
+
+Shape.addLoader("Box", terra(file: &C.FILE) : &Shape
+	var box = Box.heapAlloc()
+	box:loadFromFile(file)
+	return box
+end)
 
 m.addConstructors(Box)
 

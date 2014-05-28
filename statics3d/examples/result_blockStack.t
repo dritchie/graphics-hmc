@@ -38,12 +38,14 @@ return probcomp(function()
 		var boxShape = QuadHex.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0),
 			boundedUniform(minDim, maxDim), boundedUniform(minDim, maxDim), boundedUniform(minDim, maxDim))
 		if index % 2 == 0 then
+			boxShape:shearY(boundedUniform(minAng, maxAng))
 			boxShape:topShearX(boundedUniform(minAng, maxAng))
+			boxShape:shearX(boundedUniform(minAng, maxAng))
 		else
+			boxShape:shearX(boundedUniform(minAng, maxAng))
 			boxShape:topShearY(boundedUniform(minAng, maxAng))
+			boxShape:shearY(boundedUniform(minAng, maxAng))
 		end
-		boxShape:shearX(boundedUniform(minAng, maxAng))
-		boxShape:shearY(boundedUniform(minAng, maxAng))
 		-- boxShape:assertFacePlanarity()
 		return boxShape
 	end)
@@ -91,9 +93,11 @@ return probcomp(function()
 			var prevShape = [&QuadHex](prevBody.shape)
 			var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, i)
 			boxShape:stackRandom(prevShape, margin, false)
+			boxShape:alignStacked(prevShape)	-- IMPORTANT!
 			boxBody = Body.oak(boxShape)
 			renderScene.scene.bodies:push(boxBody)
 			renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), false))
+			-- renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), true))
 		end
 
 		-- Stablity

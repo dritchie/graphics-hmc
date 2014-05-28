@@ -5,15 +5,18 @@ numBurnInSamps        100
 numHMCSteps           1000
 gaussianBandwidth     0.002
 
+doComparison          false
+
 #forwardSample         true
 
 imgRes                720
 deleteImages		  false
 
-genAverageImg         true
-computeAutocorr		  true
+genAverageImg         false
+computeAutocorr		  false
+saveSceneDescriptions true
+#saveBlueprints		  130
 
 
-
-outputdir			  ../renders/figs/result_blockStack_leaning
-exampleToRun          examples.result_blockStack_leaning
+outputdir			  ../renders/figs/fab_arch
+exampleToRun          examples.fab_arch

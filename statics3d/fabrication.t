@@ -57,63 +57,70 @@ local function saveBlueprints(pcomp)
 	local s3d = s3dLib(pcomp)
 	util.importAll(s3d)
 
-	local v3tov2 = macro(function(vec)
-		return `Vec2d.stackAlloc(vec(0), vec(2))
-	end)
-
 	local metersToPixels = macro(function(m, ppi)
 		return `uint(C.ceil(m*39.3701*ppi))
 	end)
 
-	-- Get the face that we'll actually render for a single shape
-	local terra getRenderFace(shape: &QuadHex)
-		for i=0,6 do
-			if -shape.faces[i]:normal()(1) > 0.999 then
-				return &shape.faces[i]
-			end
+	-- Get the face that we'll actually need to cut out for a single shape
+	local terra getCutFace(shape: &QuadHex)
+		if shape:isFrontBackPlanarExtrusion() then
+			return shape:frontFace()
+		elseif shape:isLeftRightPlanarExtrusion() then
+			return shape:leftFace()
+		elseif shape:isBotTopPlanarExtrusion() then
+			return shape:botFace()
+		else
+			util.fatalError("getCutFace - block is not a planar extrusion\n")
 		end
-		util.fatalError("getRenderFace - no face aligned with y\n")
 	end
 
-	-- Get the depth of a block
-	local terra getDepth(shape: &QuadHex) : double
-		-- Find face whose normal is perpendicular to y, check the length of
-		--    the edge of that face that points along y
-		var y = Vec3.stackAlloc(0.0, 1.0, 0.0)
-		for i=0,6 do
-			if C.fabs(shape.faces[i]:normal()(1)) < 0.0001 then
-				var f = &shape.faces[i]
-				var e1 = f:vertex(1) - f:vertex(0)
-				if e1:collinear(y) then return e1:norm() end
-				var e2 = f:vertex(2) - f:vertex(1)
-				util.assert(e2:collinear(y), "getDepth - no edge on the y-perp face was collinear with y\n")
-				return e2:norm()
-			end
+	-- Returns the name of the cardinal axis (x, y, z) that locally aligns with
+	--    the normal of this face
+	local terra normalAxisName(face: &Face(4), shape: &QuadHex)
+		if face == shape:leftFace() or face == shape:rightFace() then
+			return "X"
+		elseif face == shape:frontFace() or face == shape:backFace() then
+			return "Y"
+		elseif face == shape:botFace() or face == shape:topFace() then
+			return "Z"
+		else
+			util.fatalError("normalAxisName - This should be impossible.\n")
 		end
-		util.fatalError("getDepth - no face aligned with normal perpendicular to y\n")
 	end
 
-	-- Get the block depth being used for the scene. Throws an error if
-	--    blocks have different depths
-	terra getDepth(scene: &Scene) : double
-		-- Skip ground at index 0
-		var depth = getDepth([&QuadHex](scene.bodies(1).shape))
-		for i=2,scene.bodies.size do
-			var d = getDepth([&QuadHex](scene.bodies(i).shape))
-			util.assert(C.fabs(d - depth) < 1e-6,
-				"getDepth - Found blocks with different depths: should be %g, was %g\n",
-				depth, d)
-		end
-		return depth
+	local struct QuadFace2D
+	{
+		verts: Vec2d[4]
+	}
+
+	-- Project any point according to the face projection transform
+	local terra projectPointByFace(face: &Face(4), p: Vec3)
+		var n = face:normal()
+		var p0 = face:vertex(0)
+		p = p:projectToPlane(p0, n)
+		var xaxis = (face:vertex(1) - face:vertex(0)); xaxis:normalize()
+		var yaxis = n:cross(xaxis)
+		return Vec2d.stackAlloc((p-p0):dot(xaxis), (p-p0):dot(yaxis))
+	end
+
+	-- Project the face into 2D along its normal.
+	local terra projectFace(face: &Face(4))
+		var face2d : QuadFace2D
+		face2d.verts[0] = projectPointByFace(face, face:vertex(0))
+		face2d.verts[1] = projectPointByFace(face, face:vertex(1))
+		face2d.verts[2] = projectPointByFace(face, face:vertex(2))
+		face2d.verts[3] = projectPointByFace(face, face:vertex(3))
+		return face2d
 	end
 
 	-- Bound a face
 	local terra boundFace(face: &Face(4))
+		var face2d = projectFace(face)
 		var bbox = BBox2d.stackAlloc()
-		bbox:expand(v3tov2(face:vertex(0)))
-		bbox:expand(v3tov2(face:vertex(1)))
-		bbox:expand(v3tov2(face:vertex(2)))
-		bbox:expand(v3tov2(face:vertex(3)))
+		bbox:expand(face2d.verts[0])
+		bbox:expand(face2d.verts[1])
+		bbox:expand(face2d.verts[2])
+		bbox:expand(face2d.verts[3])
 		bbox:expand(bboxExpand)
 		return bbox
 	end
@@ -143,17 +150,31 @@ local function saveBlueprints(pcomp)
 		var overallbbox = BBox2u.stackAlloc()
 		-- Skip ground at index 0
 		for i=1,scene.bodies.size do
-			var f = getRenderFace([&QuadHex](scene.bodies(i).shape))
+			var f = getCutFace([&QuadHex](scene.bodies(i).shape))
 			var bbox = getFaceViewport(f, ppi)
 			overallbbox:unionWith(&bbox)
+		end
+		-- Also expand for all the contact faces
+		for i=0,scene.connections.size do
+			var contact = [&RectRectContact](scene.connections(i))
+			var bbox : BBox2u
+			if contact.contactPoints[0].body1 ~= scene.bodies(0) then
+				bbox = getFaceViewport(contact.face1, ppi)
+				overallbbox:unionWith(&bbox)
+			end
+			if contact.contactPoints[0].body2 ~= scene.bodies(0) then
+				bbox = getFaceViewport(contact.face2, ppi)
+				overallbbox:unionWith(&bbox)
+			end
 		end
 		return align32(overallbbox.maxs(0)), align32(overallbbox.maxs(1))
 	end
 
-	-- Render the image for a single body
-	local terra renderBodyBlueprint(body: &Body, body2id: &HashMap(&Body, uint), img: &RGBImage, ppi: uint)
+	-- Render the cutout image for a single body
+	local terra renderBodyCutout(body: &Body, body2id: &HashMap(&Body, uint), img: &RGBImage, ppi: uint, directory: rawstring, index: uint)
 		var shape = [&QuadHex](body.shape)
-		var face = getRenderFace(shape)
+		var face = getCutFace(shape)
+		var face2d = projectFace(face)
 		var bounds = boundFace(face)
 		var viewport = getFaceViewport(face, ppi)
 		gl.glClearColor([colors.White], 1.0)
@@ -170,17 +191,19 @@ local function saveBlueprints(pcomp)
 		gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
 		gl.glLineWidth(metersToPixels(lineThickness, ppi))
 		gl.glBegin(gl.mGL_QUADS())
-		gl.glVertex2d([Vec2d.elements(`v3tov2(face:vertex(0)))])
-		gl.glVertex2d([Vec2d.elements(`v3tov2(face:vertex(1)))])
-		gl.glVertex2d([Vec2d.elements(`v3tov2(face:vertex(2)))])
-		gl.glVertex2d([Vec2d.elements(`v3tov2(face:vertex(3)))])
+		gl.glVertex2d([Vec2d.elements(`face2d.verts[0])])
+		gl.glVertex2d([Vec2d.elements(`face2d.verts[1])])
+		gl.glVertex2d([Vec2d.elements(`face2d.verts[2])])
+		gl.glVertex2d([Vec2d.elements(`face2d.verts[3])])
 		gl.glEnd()
 
 		-- Draw the id label for this block
-		var buf : int8[32]
+		-- Also draw the axis that the normal points along
+		var buf : int8[1024]
 		var id = body2id(body)
-		C.sprintf(buf, "%u", id)
-		gl.glRasterPos2d([Vec2d.elements(`v3tov2(face:centroid()))])
+		var axisName = normalAxisName(face, shape)
+		C.sprintf(buf, "%u (%s)", id, axisName)
+		gl.glRasterPos2d([Vec2d.elements(`projectPointByFace(face, face:centroid()))])
 		displayString(gl.mGLUT_BITMAP_TIMES_ROMAN_24(), buf)
 
 		-- We only ended up storing what contact *points* were involved with each body,
@@ -208,16 +231,16 @@ local function saveBlueprints(pcomp)
 			-- Simplest way to get the contact region is to just draw a quad
 			--   for the 3d region, projected into 2d
 			gl.glBegin(gl.mGL_QUADS())
-			gl.glVertex2d([Vec2d.elements(`v3tov2(cps(0).point))])
-			gl.glVertex2d([Vec2d.elements(`v3tov2(cps(1).point))])
-			gl.glVertex2d([Vec2d.elements(`v3tov2(cps(2).point))])
-			gl.glVertex2d([Vec2d.elements(`v3tov2(cps(3).point))])
+			gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, cps(0).point))])
+			gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, cps(1).point))])
+			gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, cps(2).point))])
+			gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, cps(3).point))])
 			gl.glEnd()
 
 			-- Draw the other body's id at the center of the contact region
-			id = body2id(otherBody)
+			var id = body2id(otherBody)
 			C.sprintf(buf, "%u", id)
-			var center = v3tov2(0.25 * (cps(0).point + cps(1).point + cps(2).point + cps(3).point))
+			var center = projectPointByFace(face, 0.25 * (cps(0).point + cps(1).point + cps(2).point + cps(3).point))
 			center(1) = center(1) + bboxExpand*0.05
 			gl.glRasterPos2d([Vec2d.elements(center)])
 			displayString(gl.mGLUT_BITMAP_TIMES_ROMAN_24(), buf)
@@ -231,13 +254,92 @@ local function saveBlueprints(pcomp)
 		gl.glFlush()
 		gl.glReadPixels(0, 0, img.width, img.height,
 			gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), img.data)
+
+		-- Save to image
+		C.sprintf(buf, "%s_ppi=%u/%u_cutout.png", directory, ppi, index)
+		img:save(image.Format.PNG, buf)
+	end
+
+
+	-- Render 'top-down' contact images for a body
+	local function genRenderContactDiagram(which, body, body2id, face2contact, img, ppi, directory, index)
+		local getFace = nil
+		if which == "Bot" then
+			getFace = `([&QuadHex](body.shape)):botFace()
+		elseif which == "Top" then
+			getFace = `([&QuadHex](body.shape)):topFace()
+		else
+			error(string.format("genRenderContactDiagram - invalid 'which' parameter '%s'", which))
+		end
+		return quote
+			var face = [getFace]
+			var contact: &RectRectContact
+			-- Only render a contact diagram if this face is actually in contact with something
+			if face2contact:get(face, &contact) then
+				var face2d = projectFace(face)
+				var bounds = boundFace(face)
+				var viewport = getFaceViewport(face, ppi)
+				gl.glClearColor([colors.White], 1.0)
+				gl.glClear(gl.mGL_COLOR_BUFFER_BIT())
+				gl.glViewport(viewport.mins(0), viewport.mins(1), viewport.maxs(0), viewport.maxs(1))
+				gl.glMatrixMode(gl.mGL_PROJECTION())
+				gl.glLoadIdentity()
+				gl.gluOrtho2D(bounds.mins(0), bounds.maxs(0), bounds.mins(1), bounds.maxs(1))
+				gl.glMatrixMode(gl.mGL_MODELVIEW())
+				gl.glLoadIdentity()
+
+				-- Draw a filled polygon for the contact region
+				gl.glColor3d([contactColor])
+				gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_FILL())
+				gl.glLineWidth(metersToPixels(lineThickness, ppi))
+				gl.glBegin(gl.mGL_QUADS())
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[0].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[1].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[2].point))])
+				gl.glVertex2d([Vec2d.elements(`projectPointByFace(face, contact.contactPoints[3].point))])
+				gl.glEnd()
+
+				-- Draw the polygon outline
+				gl.glColor3d([outlineColor])
+				gl.glPolygonMode(gl.mGL_FRONT_AND_BACK(), gl.mGL_LINE())
+				gl.glLineWidth(metersToPixels(lineThickness, ppi))
+				gl.glBegin(gl.mGL_QUADS())
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[0])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[1])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[2])])
+				gl.glVertex2d([Vec2d.elements(`face2d.verts[3])])
+				gl.glEnd()
+
+				-- Draw the id label for this block
+				-- Also draw the name of the face ("Bot" or "Top")
+				var buf : int8[1024]
+				var id = body2id(body)
+				C.sprintf(buf, "%u (%s)", id, which)
+				gl.glRasterPos2d([Vec2d.elements(`projectPointByFace(face, face:centroid()))])
+				displayString(gl.mGLUT_BITMAP_TIMES_ROMAN_24(), buf)
+
+				-- Copy framebuffer to image
+				img:resize(viewport.maxs(0), viewport.maxs(1))
+				gl.glFlush()
+				gl.glReadPixels(0, 0, img.width, img.height,
+					gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), img.data)
+
+				-- Save to image
+				C.sprintf(buf, "%s_ppi=%u/%u_contact_%s.png", directory, ppi, index, which)
+				img:save(image.Format.PNG, buf)
+			end
+		end
+	end
+	local terra renderBodyContacts(body: &Body, body2id: &HashMap(&Body, uint), face2contact: &HashMap(&Face(4), &RectRectContact),
+								   img: &RGBImage, ppi: uint, directory: rawstring, index: uint)
+		[genRenderContactDiagram("Bot", body, body2id, face2contact, img, ppi, directory, index)]
+		[genRenderContactDiagram("Top", body, body2id, face2contact, img, ppi, directory, index)]
 	end
 
 
 	return terra(scene: &Scene, directory: rawstring, ppi: uint)
 		-- Ensure directory exists
-		var depth = getDepth(scene)
-		util.systemf("mkdir %s_depth=%g_ppi=%u", directory, depth, ppi)
+		util.systemf("mkdir %s_ppi=%u", directory, ppi)
 
 		-- Init OpenGL stuff
 		var maxXres, maxYres = getFramebufferRes(scene, ppi)
@@ -251,20 +353,30 @@ local function saveBlueprints(pcomp)
 			body2id:put(scene.bodies(i), i)
 		end
 
-		-- For each body, render an image
-		var buf : int8[1024]
+		-- Build a hashmap of contact face --> contact
+		-- (for rendering contact diagrams)
+		var face2contact = [HashMap(&Face(4), &RectRectContact)].stackAlloc()
+		for i=0,scene.connections.size do
+			var contact = [&RectRectContact](scene.connections(i))
+			face2contact:put(contact.face1, contact)
+			face2contact:put(contact.face2, contact)
+		end
+
+		-- For each body, render:
+		--  * An image describing the block cut-out
+		--  * Images (1 or 2) describing block contacts
 		var img = RGBImage.stackAlloc()
 		img:resize(maxXres, maxYres)
 		-- Skip ground at index 0
 		for i=1,scene.bodies.size do
 			var body = scene.bodies(i)
-			renderBodyBlueprint(body, &body2id, &img, ppi)
-			C.sprintf(buf, "%s_depth=%g_ppi=%u/%u.png", directory, depth, ppi, i)
-			img:save(image.Format.PNG, buf)
+			renderBodyCutout(body, &body2id, &img, ppi, directory, i)
+			renderBodyContacts(body, &body2id, &face2contact, &img, ppi, directory, i)
 		end
 		m.destruct(img)
 
 		m.destruct(body2id)
+		m.destruct(face2contact)
 	end
 end
 

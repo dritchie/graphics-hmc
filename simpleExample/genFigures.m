@@ -18,23 +18,26 @@ difficult_softness = 0.005;
 % drawIsoline(@figureEightFieldFunction, xrange, yrange, targetIsoval);
 % saveas(gcf, 'isoline.pdf');
 
-% drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, easy_softness);
-% saveas(gcf, 'isoridge_easy.pdf');
-% drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, difficult_softness);
-% saveas(gcf, 'isoridge_difficult.pdf');
-drawSamplingTrace('random_easy.csv', axisBounds);
-saveas(gcf, 'randomSamps_easy.pdf');
-drawSamplingTrace('random_difficult.csv', axisBounds);
-saveas(gcf, 'randomSamps_difficult.pdf');
-drawSamplingTrace('hmc_difficult.csv', axisBounds);
-saveas(gcf, 'hmcSamps_difficult.pdf');
-% drawAutocorrPlot('random_difficult_autocorr.csv', true);
-% saveas(gcf, 'random_difficult_autocorr.pdf');
-% drawAutocorrPlot('hmc_difficult_autocorr.csv', true);
-% saveas(gcf, 'hmc_difficult_autocorr.pdf');
 drawMergedAutocorrPair('hmc_difficult_autocorr.csv', 'random_difficult_autocorr.csv');
 pbaspect([2 1 1]);
 saveas(gcf, 'difficult_autocorr.pdf');
+
+drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, easy_softness);
+setFigSizeInInches(3,3);
+saveas(gcf, 'isoridge_easy.pdf');
+drawIsoRidge(@figureEightFieldFunction, xrange, yrange, targetIsoval, difficult_softness);
+setFigSizeInInches(3,3);
+saveas(gcf, 'isoridge_difficult.pdf');
+drawSamplingTrace('random_easy.csv', axisBounds);
+setFigSizeInInches(3,3);
+saveas(gcf, 'randomSamps_easy.pdf');
+drawSamplingTrace('random_difficult.csv', axisBounds);
+setFigSizeInInches(3,3);
+saveas(gcf, 'randomSamps_difficult.pdf');
+drawSamplingTrace('hmc_difficult.csv', axisBounds);
+setFigSizeInInches(3,3);
+saveas(gcf, 'hmcSamps_difficult.pdf');
+
 close;
 
 % Note: to trim the whitespace on these, use pdfcrop on the command line.

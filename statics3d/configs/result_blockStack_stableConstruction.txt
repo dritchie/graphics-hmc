@@ -5,7 +5,8 @@ numBurnInSamps        100
 numHMCSteps           1000
 gaussianBandwidth     0.002
 
-# forwardSample         true
+#forwardSample         true
+doComparison          false
 
 imgRes                720
 deleteImages		  false

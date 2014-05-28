@@ -152,7 +152,7 @@ local function doInference(difficulty, doHMC)
 		kernel = HMC({numSteps=numHMCsteps})
 	else
 		lag = 2*numHMCsteps
-		kernel = GaussianDrift({bandwidth=(difficulty == "easy" and easy_bandwidth or difficult_bandwidth)})
+		kernel = GaussianDrift({bandwidth=(difficulty == "easy" and easy_bandwidth or difficult_bandwidth), bandwidthAdapt=false})
 	end
 	local model = genFigureEightModel(difficulty == "easy" and easy_softness or difficult_softness)
 	local terra doInference()

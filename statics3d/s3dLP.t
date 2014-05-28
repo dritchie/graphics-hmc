@@ -124,6 +124,14 @@ end
 ----- SCENES
 
 terra Scene:isStable()
+	-- Clear forces, apply gravity (so we just have external forces present)
+	for i=0,self.bodies.size do
+		self.bodies(i).forces:clear()
+		if self.bodies(i).active then
+			self.bodies(i):applyGravityForce(self.gravityConst, self.upVector)
+		end
+	end
+
 	-- Figure out how many vars we have and set up the base var ids
 	--    for each connection
 	var numVars = 0

@@ -35,22 +35,26 @@ return probcomp(function()
 	end)
 
 	-- Parameters
-	local minDim = `mm(20.0)
-	local maxDim = `mm(80.0)
-	local minHeight = `mm(40.0)
-	local maxHeight = `mm(75.0)
+	local depth = `mm(38.0)
+	local margin = `mm(8.0)
+	-- local minHeight = `mm(15.0)
+	local minHeight = `mm(30.0)
+	local maxHeight = `mm(70.0)
 	local minWidth = `mm(15.0)
-	local maxWidth = `mm(75.0)
-	local depth = `mm(38.1)
-	local maxAng = `radians(30.0)
-	local margin = `mm(10.0)	
+	local maxWidth = `mm(70.0)
+	local minAng = `radians(-30.0)
+	local maxAng = `radians(30.0)		
 
-	local genRandomBlockShape = pfn(terra()
+	local genRandomBlockShape = pfn(terra(index: uint)
 		var height = boundedUniform(minHeight, maxHeight)
 		var width = boundedUniform(minWidth, maxWidth)
 		var boxShape = QuadHex.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), width, depth, height)
-		boxShape:topShearX(boundedUniform(-maxAng, maxAng))
-		boxShape:shearX(boundedUniform(-maxAng, maxAng))
+		boxShape:topShearX(boundedUniform(minAng, maxAng))
+		boxShape:shearX(boundedUniform(minAng, maxAng))
+		if index % 2 ~= 0 then
+			var mat = Mat4.rotateZ([math.pi/2])
+			boxShape:transform(&mat)
+		end
 		return boxShape
 	end)
 
@@ -77,7 +81,7 @@ return probcomp(function()
 		renderScene.scene.bodies:push(groundBody)
 
 		-- First block
-		var boxShape = genRandomBlockShape()
+		var boxShape = genRandomBlockShape(0)
 		boxShape:stack(groundShape, 0.5, 0.5, true)
 		var boxBody = Body.poplar(boxShape)
 		renderScene.scene.bodies:push(boxBody)
@@ -88,11 +92,28 @@ return probcomp(function()
 			var bodyIndex = i+1
 			var prevBody = renderScene.scene.bodies(bodyIndex-1)
 			var prevShape = [&QuadHex](prevBody.shape)
-			var boxShape = genRandomBlockShape()
-			boxShape:stackRandomX(prevShape, margin, false)
+			var boxShape = genRandomBlockShape(i)
+
+			boxShape:stackRandom(prevShape, margin, false)
+			boxShape:alignStacked(prevShape)	-- SUPER IMPORTANT!!!!
+
 			boxBody = Body.poplar(boxShape)
 			renderScene.scene.bodies:push(boxBody)
+
 			renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), false))
+			-- renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), true))
+		end
+
+		-- Encourage desired shape (leaning)
+		var shapeFactorSoftness = mm(10.0)
+		var leanTheta = radians(-20.0)
+		var leanPhi = radians(45.0)
+		var lineLen = mm(1000000.0)
+		var lineStart = boxShape:botFace():centroid()
+		var lineEnd = lineStart + Vec3.fromSpherical(lineLen, leanTheta, leanPhi)
+		for i=1,renderScene.scene.bodies.size do
+			var dist = ad.math.sqrt(renderScene.scene.bodies(i):centerOfMass():distSqToLineSeg(lineStart, lineEnd))
+			factor(softeq(dist, 0.0, shapeFactorSoftness))
 		end
 
 		-- Stablity

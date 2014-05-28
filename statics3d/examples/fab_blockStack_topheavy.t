@@ -24,8 +24,8 @@ return probcomp(function()
 	local upVector = global(Vec3d)
 	upVector:getpointer():__construct(0.0, 0.0, 1.0)
 
-	local frelTol = 0.005
-	local trelTol = 0.005
+	local frelTol = 0.01
+	local trelTol = 0.01
 
 	local mm = macro(function(x)
 		return `0.001*x
@@ -34,19 +34,26 @@ return probcomp(function()
 		return `deg*[math.pi]/180.0
 	end)
 
-	local genRandomBlockShape = pfn(terra(minDim: double, maxDim: double, minAng: double, maxAng: double, index: int)
-		var boxShape = QuadHex.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0),
-			boundedUniform(minDim, maxDim), boundedUniform(minDim, maxDim), boundedUniform(minDim, maxDim))
-		if index % 2 == 0 then
-			boxShape:shearY(boundedUniform(minAng, maxAng))
-			boxShape:topShearX(boundedUniform(minAng, maxAng))
-			boxShape:shearX(boundedUniform(minAng, maxAng))
-		else
-			boxShape:shearX(boundedUniform(minAng, maxAng))
-			boxShape:topShearY(boundedUniform(minAng, maxAng))
-			boxShape:shearY(boundedUniform(minAng, maxAng))
+	-- Parameters
+	local depth = `mm(38.0)
+	local margin = `mm(8.0)
+	local minHeight = `mm(15.0)
+	local maxHeight = `mm(70.0)
+	local minWidth = `mm(15.0)
+	local maxWidth = `mm(70.0)
+	local minAng = `radians(-30.0)
+	local maxAng = `radians(30.0)		
+
+	local genRandomBlockShape = pfn(terra(index: uint)
+		var height = boundedUniform(minHeight, maxHeight)
+		var width = boundedUniform(minWidth, maxWidth)
+		var boxShape = QuadHex.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), width, depth, height)
+		boxShape:topShearX(boundedUniform(minAng, maxAng))
+		boxShape:shearX(boundedUniform(minAng, maxAng))
+		if index % 2 ~= 0 then
+			var mat = Mat4.rotateZ([math.pi/2])
+			boxShape:transform(&mat)
 		end
-		-- boxShape:assertFacePlanarity()
 		return boxShape
 	end)
 
@@ -56,8 +63,8 @@ return probcomp(function()
 		var scene = Scene.stackAlloc(gravityConst, upVector)
 		var camera = Camera.stackAlloc()
 		var camdist = mm(450.0)
-		camera.eye = Vec3d.stackAlloc(0.75*camdist, -camdist, 0.5*camdist)
-		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(150.0))
+		camera.eye = Vec3d.stackAlloc(camdist, -camdist, camdist)
+		camera.target = Vec3d.stackAlloc(0.0, 0.0, mm(120.0))
 		camera.up = upVector
 		camera.znear = 0.01
 		camera.zfar = 10.0
@@ -65,24 +72,17 @@ return probcomp(function()
 		var light = Light.stackAlloc()
 		renderScene:addLight(light)
 
-		-- Parameters
-		var minDim = mm(20.0)
-		var maxDim = mm(80.0)
-		var minAng = -radians(30.0)
-		var maxAng = radians(30.0)
-		var margin = mm(10.0)
-
 		-- Set up stuff in the scene --
 
 		-- Ground
 		var groundShape = Box.heapAlloc(); groundShape:makeBox(Vec3.stackAlloc(0.0, 0.0, -mm(35.0)), mm(1000.0), mm(1000.0), mm(10.0))
-		var groundBody = Body.oak(groundShape); groundBody.active = false
+		var groundBody = Body.poplar(groundShape); groundBody.active = false
 		renderScene.scene.bodies:push(groundBody)
 
 		-- First block
-		var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, 0)
+		var boxShape = genRandomBlockShape(0)
 		boxShape:stack(groundShape, 0.5, 0.5, true)
-		var boxBody = Body.oak(boxShape)
+		var boxBody = Body.poplar(boxShape)
 		renderScene.scene.bodies:push(boxBody)
 		renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, groundBody, boxShape:botFace(), groundShape:topFace(), false))
 
@@ -91,17 +91,30 @@ return probcomp(function()
 			var bodyIndex = i+1
 			var prevBody = renderScene.scene.bodies(bodyIndex-1)
 			var prevShape = [&QuadHex](prevBody.shape)
-			var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, i)
+			var boxShape = genRandomBlockShape(i)
+
 			boxShape:stackRandom(prevShape, margin, false)
-			boxShape:alignStacked(prevShape)	-- IMPORTANT!
-			boxBody = Body.oak(boxShape)
+			boxShape:alignStacked(prevShape)	-- SUPER IMPORTANT!!!!
+
+			boxBody = Body.poplar(boxShape)
 			renderScene.scene.bodies:push(boxBody)
+
 			renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), false))
 			-- renderScene.scene.connections:push(RectRectContact.heapAlloc(boxBody, prevBody, boxShape:botFace(), prevShape:topFace(), true))
-
-			-- Enforce stability at every intermediate state of construction.
-			renderScene.scene:encourageStability(frelTol, trelTol)
 		end
+
+		-- Top-heaviness: Encourage each block to be bigger than the block below it
+		for i=2,renderScene.scene.bodies.size do
+			var currShape = renderScene.scene.bodies(i).shape
+			var prevShape = renderScene.scene.bodies(i-1).shape
+			var currVol = currShape:volume()
+			var prevVol = prevShape:volume()
+			factor(softeq(currVol/prevVol, 1.5, 0.1))
+		end
+
+		-- Stablity
+		renderScene.scene:encourageStability(frelTol, trelTol)
+
 
 		return renderScene
 	end

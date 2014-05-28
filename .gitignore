@@ -12,3 +12,4 @@ renders/
 stateSpaceViz/
 *.csv
 *.pdf
+config.txt

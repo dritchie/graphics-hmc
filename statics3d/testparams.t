@@ -1,8 +1,7 @@
 
--- TODO: Abstract this to work anywhere, not just on statics3d/test.t
-
 -- Parameters are:
 --   * exampleToRun (default="Please specify 'exampleToRun'"): which example to run
+--   * doComparison (default=true): do two runs comparing HMC to SVMH, or just one?
 --   * forwardSample (default=false): true if we should just run a forward sample pass (for simple testing/debugging)
 --   * doHMC (default=true): whether we should run HMC or gaussian drift MH
 --   * numSamps (default=1000): how many samples to collect
@@ -11,18 +10,20 @@
 --   * numBurnInSamps (default=0): how many samples to burn in for
 --   * saveBurnIn (default=false): whether burn-in samples are considered for further output/analysis
 --   * outputdir (default=../renders): the directory where output gets written
---   * name (default=output): the basename for all output files
+--   * name (default="output"): the basename for all output files
+--   * saveSceneDescriptions (default=true): output plaintext scene descriptions for all scenes
 --   * renderMovie (default=true): true if we should render visual output
 --   * imgRes (default=500): x resolution of rendered images
 --   * deleteImages (default=true): true if we should delete frames after the .mp4 is created.
 --   * genAverageImg (default=false): true if we should generate an average image (requires 'renderMovie=true' and 'deleteImages=false')
 --   * computeAutocorr (default=false): true if we should compute autocorrelation
---   * saveBlueprints (default=false): true if we should save construction schematics for sampled structures
+--   * saveBlueprints (default=-1): number of scene description file we should save blueprints for.
 
 local Params =
 {
 	-- Store defaults here
 	exampleToRun = "Please specify 'exampleToRun'",
+	doComparison = true,
 	forwardSample = false,
 	doHMC = true,
 	numSamps = 1000,
@@ -31,13 +32,14 @@ local Params =
 	numBurnInSamps = 0,
 	saveBurnIn = false,
 	outputdir = "../renders",
-	name = "",
+	name = "output",
+	saveSceneDescriptions = true,
 	renderMovie = true,
 	imgRes = 500,
 	deleteImages = true,
 	genAverageImg = false,
 	computeAutocorr = false,
-	saveBlueprints = false
+	saveBlueprints = -1
 }
 Params.__index = Params
 
@@ -76,6 +78,7 @@ function Params:loadFile(filename)
 			if cmd:sub(1,1) ~= "#" then
 				if
 					cmd == "exampleToRun" then self.exampleToRun = arg elseif
+					cmd == "doComparison" then self.doComparison = str2bool(arg) elseif
 					cmd == "forwardSample" then self.forwardSample = str2bool(arg) elseif
 					cmd == "doHMC" then self.doHMC = str2bool(arg) elseif
 					cmd == "numSamps" then self.numSamps = tonumber(arg) elseif
@@ -85,12 +88,13 @@ function Params:loadFile(filename)
 					cmd == "saveBurnIn" then self.saveBurnIn = str2bool(arg) elseif
 					cmd == "outputdir" then self.outputdir = arg elseif
 					cmd == "name" then self.name = arg elseif
+					cmd == "saveSceneDescriptions" then self.saveSceneDescriptions = str2bool(arg) elseif
 					cmd == "renderMovie" then self.renderMovie = str2bool(arg) elseif
 					cmd == "imgRes" then self.imgRes = tonumber(arg) elseif
 					cmd == "deleteImages" then self.deleteImages = str2bool(arg) elseif
 					cmd == "genAverageImg" then self.genAverageImg = str2bool(arg) elseif
 					cmd == "computeAutocorr" then self.computeAutocorr = str2bool(arg) elseif
-					cmd == "saveBlueprints" then self.saveBlueprints = str2bool(arg)
+					cmd == "saveBlueprints" then self.saveBlueprints = tonumber(arg)
 				end
 			end
 		end
