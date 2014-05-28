@@ -917,9 +917,9 @@ local shapeModel = probcomp(function()
 
 		-- Encourage symmetry
 		-- var symmetrySqError = mesh:symmetrySqError()
-		-- var symmetrySqError = mesh:symmetrySqErrorCorrespondence()
+		var symmetrySqError = mesh:symmetrySqErrorCorrespondence()
 		-- factor(softeq(symmetrySqError, 0.0, 0.5))
-		-- factor(softeq(symmetrySqError, 0.0, 0.1))
+		factor(softeq(symmetrySqError, 0.0, 0.1))
 
 		-- Encourage symmetry axes that are spaced far enough apart
 		-- for i=0,mesh.symmetries.size do

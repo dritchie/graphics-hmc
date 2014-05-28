@@ -36,7 +36,12 @@ local function renderSamples(samples, initFn, drawFn, moviename, rendersDir, doD
 		end
 	end
 	renderFrames()
-	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
+
+	-- For handling non powers of 2 size images
+	util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p -start_number 0 -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" %s 2>&1", movieframebasename, moviefilename))
+	-- util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p %s 2>&1", movieframebasename, moviefilename))
+
+
 	-- Use this line instead for higher video quality (hasn't been very necessary in my experiments thus far)
 	-- util.wait(string.format("ffmpeg -threads 0 -y -r 30 -i %s -c:v libx264 -r 30 -pix_fmt yuv420p -b:v 20M %s 2>&1", movieframebasename, moviefilename))
 	if doDeleteImages then
@@ -73,6 +78,8 @@ local function displaySampleInfo(location)
 		gl.glLoadIdentity()
 		var str : int8[64]
 		C.sprintf(str, "[%u] lp: %g", sampleindex, lp)
+		-- Windows...
+		-- C.sprintf(str, "[%d] lp: %d", sampleindex, lp)
 		gl.glColor3f([lpcolor])
 		[util.optionally(location == "TopLeft", function() return quote
 			gl.glRasterPos2f(viewport[0] + 0.02*viewport[2], viewport[1] + 0.9*viewport[3])

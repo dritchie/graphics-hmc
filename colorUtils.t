@@ -30,6 +30,7 @@ inline double fmax(double a, double b)
 ]]
 
 local useRGB = true
+local unconvertedRGB = false
 
 local gaussian_logprob = rand.gaussian_logprob
 
@@ -200,7 +201,7 @@ local UnaryLightnessConstraint = templatize(function(real)
 		var totalScore = real(0.0)
 		for i=0,pattern.numGroups do
 			var L = real(0.0)
-			if (useRGB) then
+			if (unconvertedRGB) then
 				L = [RGBtoLAB(real)](pattern(i))(0)/100.0
 			else
 				L = pattern(i)(0)/100.0
@@ -228,7 +229,7 @@ local UnarySaturationConstraint = templatize(function(real)
 		var totalScore = real(0.0)
 		for i=0,pattern.numGroups do
 			var lab = pattern(i)
-			if (useRGB) then
+			if (unconvertedRGB) then
 				lab = [RGBtoLAB(real)](pattern(i))
 			end
 			var chroma = lab(1)*lab(1) + lab(2)*lab(2)
@@ -260,7 +261,7 @@ local BGSaturation = templatize(function(real)
 		var totalScore = real(0.0)
 
 		var lab = color
-		if (useRGB) then
+		if (unconvertedRGB) then
 			lab = [RGBtoLAB(real)](color)
 		end
 		var chroma = lab(1)*lab(1) + lab(2)*lab(2)
@@ -295,7 +296,7 @@ local BinaryPerceptualConstraint = templatize(function(real)
 			var first = pattern(adj:get(0))
 			var second = pattern(adj:get(1))
 			
-			if (useRGB) then
+			if (unconvertedRGB) then
 				first = [RGBtoLAB(real)](first)
 				second = [RGBtoLAB(real)](second)
 			end
@@ -327,7 +328,7 @@ local BinaryLightnessConstraint = templatize(function(real)
 			var first = real(0.0)
 			var second = real(0.0)
 				
-			if (useRGB) then
+			if (unconvertedRGB) then
 				first = [RGBtoLAB(real)](pattern(adj:get(0)))(0)
 				second = [RGBtoLAB(real)](pattern(adj:get(1)))(0)
 			else

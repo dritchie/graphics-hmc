@@ -1,5 +1,8 @@
 -- Include quicksand
+package.path = "../?.t;" .. package.path 
 local rand = terralib.require("prob.random")
+local inf = terralib.require("prob.inference")
+local trace = terralib.require("prob.trace")
 terralib.require("prob")
 
 -- Other libraries we'll need
@@ -12,6 +15,11 @@ local Pattern = terralib.require("pattern")
 local ColorUtils = terralib.require('colorUtils')
 local ad = terralib.require("ad")
 local templatize = terralib.require("templatize")
+local image = terralib.require("image")
+local rendering = terralib.require("rendering")
+local gl = terralib.require("gl")
+local colors = terralib.require("colors")
+
 
 -- C standard library stuff
 local C = terralib.includecstring [[
@@ -171,10 +179,10 @@ local GetPatternLogProb = templatize(function(real)
 			for i=0,endIdx do
 				var light = pattern(l_indices(g):get(i))
 				var dark = pattern(l_indices(g):get(i+1))
-				if (useRGB) then
-					light = [ColorUtils.RGBtoLAB(real)](light)
-					dark = [ColorUtils.RGBtoLAB(real)](dark)
-				end
+				-- if (useRGB) then
+				-- 	light = [ColorUtils.RGBtoLAB(real)](light)
+				-- 	dark = [ColorUtils.RGBtoLAB(real)](dark)
+				-- end
 
 				var ldiff = (light(0)-dark(0))/maxldiff
 				var target = 20/maxldiff
@@ -194,10 +202,10 @@ local GetPatternLogProb = templatize(function(real)
 			for i=0,endIdx do
 				var light = pattern(h_indices:get(g):get(i))
 				var dark = pattern(h_indices:get(g):get(i+1))
-				if (useRGB) then
-					light = [ColorUtils.RGBtoLAB(real)](light)
-					dark = [ColorUtils.RGBtoLAB(real)](dark)
-				end
+				-- if (useRGB) then
+				-- 	light = [ColorUtils.RGBtoLAB(real)](light)
+				-- 	dark = [ColorUtils.RGBtoLAB(real)](dark)
+				-- end
 
 				var adiff = light(1)-dark(1)
 				var bdiff = light(2)-dark(2)
@@ -205,9 +213,26 @@ local GetPatternLogProb = templatize(function(real)
 				var target = 0.0/maxhdiff--0.0/maxhdiff
 
 				--constrain hue
-				--factor(softEq(hdiff, target, h_range/maxhdiff))
+				factor(softEq(hdiff, target, h_range/maxhdiff))
 				result = result + softEq(hdiff, target, h_range/maxhdiff)
-			end
+
+				-- var hdiff2 = (light(1)*dark(1) + light(2)*dark(2))
+				-- var lightMag = light(1)*light(1)+light(2)*light(2)
+				-- var darkMag = dark(1)*dark(1)+dark(2)*dark(2)
+				-- if (lightMag > 0 and darkMag > 0) then
+				-- 	hdiff2 = hdiff2/(lightMag*darkMag)
+				-- else
+				-- 	hdiff2 = 0.0
+				-- end
+
+
+				-- result = result + softEq(hdiff2, 1.0, 0.2)
+
+				-- var ldiff = light(0)-dark(0)
+				-- var hdiff3 = (adiff*adiff + bdiff*bdiff)/(adiff*adiff+bdiff*bdiff+ldiff*ldiff)
+				-- result = result + softEq(hdiff3, 0.0, 0.1)
+
+			end 
 			-- var totalhdiff = 20.0/maxhdiff * endIdx
 			-- --also add a restriction on the first hue to the last hue to encourage one direction
 			-- var light = pattern(h_indices:get(g):get(0))
@@ -230,13 +255,12 @@ local GetPatternLogProb = templatize(function(real)
 		var lightness = 0.0--0.9*lightnessFn(pattern) --Unary lightness might be more arbitrary
 		var saturation = saturationFn(pattern)--1.3*saturationFn(pattern)
 		var diff = diffFn(pattern)--1.4*diffFn(pattern)
-		var lightnessDiff = 0.0--0.5*lightnessDiffFn(pattern) 
+		var lightnessDiff = lightnessDiffFn(pattern) --0.5*lightnessDiffFn(pattern) 
 
 		--Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2)
 		var glowScore = glowConstraint(pattern, pattern.l_indices, pattern.h_indices, glowRange, hueRange)
 		
 		var score = adjustmentFactor* ((lightness+saturation+diff+lightnessDiff) + glowScore)
-		--var score = compatScale*(lightness+saturation+diff+lightnessDiff)/temp + glowScore
 		return score
 	end
 end)
@@ -244,11 +268,6 @@ end)
 local function GetModel(curPattern)
 
 	local function colorCompatModel()
-		local temp = 1
-		local glowRange = 1--5
-		local hueRange = 2
-		local compatScale = 0.01 -- scaling compatibility to other factors...
-
 		local RealPattern = Pattern(real)
 		
 		local lightnessFn = ColorUtils.UnaryLightnessConstraint(real)
@@ -266,20 +285,6 @@ local function GetModel(curPattern)
 
 		return terra()
 			var numGroups = curPattern.numGroups
-			--------BIRD PATTERN
-			-- var adjacencies = Vector.fromItems(Vector.fromItems(0,1), 
-			-- 									Vector.fromItems(0,2), 
-			-- 									Vector.fromItems(0,3), 
-			-- 									Vector.fromItems(0,4), 
-			-- 									Vector.fromItems(1,2), 
-			-- 									Vector.fromItems(1,3), 
-			-- 									Vector.fromItems(1,4),
-			-- 									Vector.fromItems(2,3),
-			-- 									Vector.fromItems(2,4),
-			-- 									Vector.fromItems(3,4))
-			-- var sizes = Vector.fromItems(0.623075, 0.04915, 0.0777, 0.09085, 0.159225)
-			-- var tid = 105065 --bird pattern
-			-- var backgroundId = 0
 			var pattern:RealPattern = RealPattern.stackAlloc(curPattern.numGroups, curPattern.adjacencies, curPattern.backgroundId, curPattern.templateId, curPattern.sizes, curPattern.l_indices, curPattern.h_indices)
 
 			-- Priors
@@ -300,8 +305,10 @@ local function GetModel(curPattern)
 						end
 					end
 				end
-				-- Convert to LAB
-				-- Random should be 2*hmcNumSteps correction
+				-- Convert to LAB, for scoring
+				if (useRGB) then
+					pattern(i) = [ColorUtils.RGBtoLAB(real)](pattern(i))
+				end
 			end
 
 			-- Constraints
@@ -324,16 +331,9 @@ end
 
 local terra ToByte(num:double)
 	var value = [int](C.floor(C.fmax(C.fmin(num*255+0.5, 255), 0)))
-	--if (num < 0 or num > 1) then
-	--	C.printf("%f\n", num)
-	--end
-	--if (value > 255 or value < 0) then
-	--	C.printf("%d\n", value)
-	--end
 	return value
 end
 
-print("savetofile")
 local function SaveToFile(name, samples, curPattern)
 	local outsamples = string.format("%s.txt",name)
 	local outhtml = string.format("%s.html",name)
@@ -414,36 +414,35 @@ local function SaveToFile(name, samples, curPattern)
 				end
 			end
 
-	    	var same = true
-	    	for c=0,curPattern.numGroups do
-	    		if (not(pattern(c)(0) == previous(c)(0)) or not(pattern(c)(1) == previous(c)(1)) or not(pattern(c)(2) == previous(c)(2))) then
-	    			same = false
-	    		end
-	    	end
-	    	if (samples(i).logprob > scoreThresh and not same) then  	
-		    	C.fprintf(html_ptr, "<img src='http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png' title='%f'/>\n", tid,
-		    			  ToByte(colors(0)(0)), ToByte(colors(0)(1)), ToByte(colors(0)(2)),
-		    			  ToByte(colors(1)(0)), ToByte(colors(1)(1)), ToByte(colors(1)(2)),
-		    			  ToByte(colors(2)(0)), ToByte(colors(2)(1)), ToByte(colors(2)(2)),		  
-		    			  ToByte(colors(3)(0)), ToByte(colors(3)(1)), ToByte(colors(3)(2)),
-		    			  ToByte(colors(4)(0)), ToByte(colors(4)(1)), ToByte(colors(4)(2)),
-		    			  samples(i).logprob 			  
-		    	)
-				--C.fprintf(file_ptr, "<div style='width:50px;height:50px;background-color:#%02x%02x%02x;color:#%02x%02x%02x' >XXXX</div>,%f\n", ToByte(colors(0)(0)), ToByte(colors(0)(1)), ToByte(colors(0)(2)), samples(i).logprob, samples(i).logprob)
-	    	end
-	    	previous = pattern
+	   --  	var same = true
+	   --  	for c=0,curPattern.numGroups do
+	   --  		if (not(pattern(c)(0) == previous(c)(0)) or not(pattern(c)(1) == previous(c)(1)) or not(pattern(c)(2) == previous(c)(2))) then
+	   --  			same = false
+	   --  		end
+	   --  	end
+	   --  	if (samples(i).logprob > scoreThresh and not same) then  	
+		  --   	C.fprintf(html_ptr, "<img src='http://www.colourlovers.com/patternPreview/%d/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x/%02x%02x%02x.png' title='%f'/>\n", tid,
+		  --   			  ToByte(colors(0)(0)), ToByte(colors(0)(1)), ToByte(colors(0)(2)),
+		  --   			  ToByte(colors(1)(0)), ToByte(colors(1)(1)), ToByte(colors(1)(2)),
+		  --   			  ToByte(colors(2)(0)), ToByte(colors(2)(1)), ToByte(colors(2)(2)),		  
+		  --   			  ToByte(colors(3)(0)), ToByte(colors(3)(1)), ToByte(colors(3)(2)),
+		  --   			  ToByte(colors(4)(0)), ToByte(colors(4)(1)), ToByte(colors(4)(2)),
+		  --   			  samples(i).logprob 			  
+		  --   	)
+				-- --C.fprintf(file_ptr, "<div style='width:50px;height:50px;background-color:#%02x%02x%02x;color:#%02x%02x%02x' >XXXX</div>,%f\n", ToByte(colors(0)(0)), ToByte(colors(0)(1)), ToByte(colors(0)(2)), samples(i).logprob, samples(i).logprob)
+	   --  	end
+	   --  	previous = pattern
 	    end
 	    C.printf("Out of bounds %d\n", oobCount)
 	    C.fclose(file_ptr)
 
 
-		C.fprintf(html_ptr, "</body></html>\n")
-	    C.fclose(html_ptr)
+		-- C.fprintf(html_ptr, "</body></html>\n")
+	    -- C.fclose(html_ptr)
 	end
 	SaveToFile()
 end
 
-print("eval")
 local function Eval(randomSamples, hmcSamples, hmcNumSteps, pid, curPattern)
 	local numGroups = curPattern.numGroups
 	local dims = numGroups*3
@@ -502,96 +501,13 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps, pid, curPattern)
 		return patternValues
 	end
 
-	local terra EstimateTrueStats()
-		C.printf("Estimating true stats...\n")
-		--var numsamps = 1000000
-		var numsamps = estimateNumSamps
-		-- var samples = RealPatternList.stackAlloc()
-		-- for i=0,numsamps do
-		-- 	var sample = [CreateFireflies(real)]()
-		-- 	for g=0,numGroups do
-		-- 		sample(g)(0) = rand.random()
-		-- 		sample(g)(1) = rand.random()
-		-- 		sample(g)(2) = rand.random()
-
-		-- 		if (not useRGB) then
-		-- 			sample(g)(0) = sample(g)(0) * 100
-		-- 			sample(g)(1) = sample(g)(1) * 200 - 100
-		-- 			sample(g)(2) = sample(g)(2) * 200 - 100
-		-- 		end
-
-		-- 	end
-		-- 	samples:push(sample)
-		-- 	C.printf("sample:%d\r",i)
-		-- end
-		--var samples = [mcmc(colorCompatModel,  HMC({numSteps=hmcNumSteps}) , {numsamps=estimateNumSamps, verbose=true})]
-		var samples = [mcmc(GetModel(curPattern),  RandomWalk() , {numsamps=estimateNumSamps, verbose=true})]
-
-		var patternValues = SampleValueList.stackAlloc()
-		for i=0,numsamps do
-			--var pattern = samples(i)
-			var pattern = samples(i).value
-			var patternValue = SampleValue.stackAlloc()
-			for g=0,numGroups do
-				patternValue(3*g) = pattern(g)(0)
-				patternValue(3*g+1) = pattern(g)(1)
-				patternValue(3*g+2) = pattern(g)(2)
-			end
-			patternValues:push(patternValue)
-		end
-
-		-- var mean = SampleValue.stackAlloc()
-		-- var totalScore = 0.0
-		-- for i=0,numsamps do
-		-- 	var score = C.exp([GetPatternLogProb(real)](&samples(i)))
-		-- 	mean = mean + score*patternValues(i)
-		-- 	totalScore = totalScore + score
-		-- end
-		-- if (totalScore > 0) then
-		-- 	mean = mean/totalScore
-		-- end
-
-		-- var variance = 0.0
-		-- for i=0,numsamps do
-		-- 	--var logscore = [GetPatternLogProb(real)](&samples(i))
-		-- 	var score = C.exp([GetPatternLogProb(real)](&samples(i)))
-		-- 	variance = variance + score*(mean:distSq(patternValues(i)))
-		-- 	--C.printf("dist %f score %f\n", mean:distSq(patternValues(i)), logscore)
-		-- end
-		-- if (totalScore > 0) then
-		-- 	variance = variance/totalScore
-		-- end
-		var mean = ComputeMean(&patternValues)
-		var variance = ComputeVariance(&patternValues, mean)
-
-		C.printf("estimated mean:\n")
-		for i=0,dims do
-			C.printf("%f\t", mean(i))
-		end
-		C.printf("\nestimated variance: %f\n", variance)
-
-
-		C.printf("done!\n")
-		return mean, variance
-	end
 
 	-- compute autocorrelation of samples
-	local function AutoCorrelation(fname, samples, patternValues, pid)
+	local function AutoCorrelation(fname, samples, pid)
 		print("Computing autocorrelation...")
 
 		local terra AutoCorrelation()
-			-- var mean = ComputeMean(&patternValues)
-			-- var variance = ComputeVariance(&patternValues, mean)
-
-			-- C.printf("variance %f\n", variance)
 			var numsamps = samples.size
-			-- var file_ptr = C.fopen(fname, "w")
-			-- C.fprintf(file_ptr, "tid,timeLag,autocorrelation")
-			-- --for d=0,dims do
-			-- --	C.fprintf(file_ptr,",dim%d",d)
-			-- --end
-			-- C.fprintf(file_ptr,"\n")
-
 			var patternValues = SampleValueList.stackAlloc()
 
 			--convert patterns to vectors
@@ -606,56 +522,37 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps, pid, curPattern)
 				patternValues:push(patternValue)
 			end
 
+			var hmcValues = SampleValueList.stackAlloc()
 
-			var trueMean = expectation(patternValues)
-			var trueVar = variance(patternValues, trueMean)
+			--Get the hmc samples as vectors
+			for i=0,numsamps do
+				var pattern = hmcSamples(i).value
+				var patternValue = SampleValue.stackAlloc()
+				for g=0,numGroups do
+					patternValue(3*g) = pattern(g)(0)
+					patternValue(3*g+1) = pattern(g)(1)
+					patternValue(3*g+2) = pattern(g)(2)
+				end
+				hmcValues:push(patternValue)
+			end
+
+			var trueMean = expectation(hmcValues)
+			var trueVar = variance(hmcValues, trueMean)
+
 
 			var ac = autocorrelation(patternValues, trueMean, trueVar)
 			var buf : int8[1024]
 			C.sprintf(buf, "%s",  fname)
 			saveAutocorrelation(&ac, buf)
-			m.destruct(vals)
+			m.destruct(patternValues)
 			m.destruct(ac)
-
-			--compute the mean
-			--var mean = stats(0)--ComputeMean(&patternValues)
-
-			--compute the variance
-			--var variance = stats(1)--ComputeVariance(&patternValues, mean)
-
-			--compute the autocorrelation at different times t
-			--write to file
-			-- var area = 0.0
-			-- for t=0,numsamps do
-			-- 	var autoCorrelation = 0.0--SampleValue.stackAlloc()
-			-- 	for i=0,(numsamps-t) do
-			-- 		autoCorrelation = autoCorrelation + (patternValues(i)-mean):dot(patternValues(i+t)-mean)
-			-- 		--autoCorrelation = autoCorrelation + (patternValues(i)):dot(patternValues(i+t))
-			-- 	end
-			-- 	if (numsamps-t > 0) then
-			-- 		autoCorrelation = autoCorrelation/(numsamps-t)
-			-- 		autoCorrelation = autoCorrelation/(variance)
-			-- 		C.fprintf(file_ptr,"%d,",pid)
-			-- 		C.fprintf(file_ptr, "%d",t)
-			-- 		C.fprintf(file_ptr,",%f", autoCorrelation)
-			-- 		C.fprintf(file_ptr,"\n")
-			-- 		area = area + C.fabs(autoCorrelation)
-			-- 	end
-			-- end
-
-			-- C.fclose(file_ptr)
-			-- C.printf("Area %f\n", area)
-			-- C.printf("Average area %f\n", area/(numsamps))
+			m.destruct(hmcValues)
 
 		end
 		AutoCorrelation()
 		print("done!\n")
 
 	end
-
-
-
-
 
 
 	local function ESJD(samples, numSteps)
@@ -814,66 +711,168 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps, pid, curPattern)
 
 	--local mean, variance = CombineStats(hmean, rmean, hvariance, rvariance)
 	--local mean, variance = EstimateTrueStats()
-	local patternValues = SampleValues()
-
-	
-
-	
+	-- local patternValues = SampleValues()
 
 	C.printf("HMC ESJD\n")
 	ESJD(hmcSamples,1)
 	C.printf("Random ESJD\n")
-	ESJD(randomSamples, hmcNumSteps)
-	C.printf("Random ESJD step 1\n")
 	ESJD(randomSamples, 1)
 
-
+	util.wait(string.format("mkdir Stats"))
 	C.printf("HMC:\n")
-	AutoCorrelation(string.format("Stats/%d_HMCAutoCorrelation.csv",pid), hmcSamples, patternValues, pid)
+	AutoCorrelation(string.format("Stats/%d_HMCAutoCorrelation.csv",pid), hmcSamples, pid)
 	C.printf("Random:\n")
-	AutoCorrelation(string.format("Stats/%d_randomAutoCorrelation.csv", pid), randomSamples, patternValues, pid)
+	AutoCorrelation(string.format("Stats/%d_randomAutoCorrelation.csv", pid), randomSamples, pid)
 	HighScoreVariance(randomSamples, hmcSamples, pid)
 
 end
 
+-------------------------------------
+local function renderInitFn(samples, im)
+	local dirname = "imageMeshes"
+	local RGBImage = image.Image(uint8, 3)
+	return quote
+		--get image dimensions
+		var pattern = &samples(0).value
+		var filename : int8[1024]
+		C.sprintf(filename, "%s/%d_template.png", dirname, pattern.templateId)
+		var template = RGBImage.load(image.Format.PNG, filename)
+
+		--init opengl for writing log prob
+		-- var argc = 0
+		-- gl.glutInit(&argc, nil)
+		-- gl.glutInitWindowSize(template.width, template.height)
+		-- gl.glutInitDisplayMode(gl.mGLUT_RGB() or gl.mGLUT_SINGLE())
+		-- gl.glutCreateWindow("Render")
+		-- gl.glViewport(0, 0, template.width, template.height)
+		im:resize(template.width, template.height)
+	end
+end
+
+local function renderDrawFn(sample, im, idx)
+	local dirname = "imageMeshes"
+	local RGBImage = image.Image(uint8, 3)
+	return quote
+		var pattern = &sample.value
+
+		--load the image...
+		var filename : int8[1024]
+		C.sprintf(filename, "%s/%d_template.png", dirname, pattern.templateId)
+		var template = RGBImage.load(image.Format.PNG, filename)
+
+		for i=0,template.width do
+			for j=0,template.height do
+				var num = template(i,j)(0)
+				im(i,j) = pattern(num)*255
+			end
+		end
+
+		-- gl.glDrawPixels(im.width,im.height,gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
+		-- gl.glFlush()
+		-- [rendering.displaySampleInfo("TopLeft")](idx, sample.logprob)
+
+		-- gl.glFlush()
+		-- gl.glReadPixels(0, 0, im.width, im.height, gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
+	end
+end
+
+
+---------------------------------START SCRIPT
+
 print("script")
 -- Do HMC inference on the model
 local hmcNumSteps = 100
-local numsamps = 1000--10000--10000
+local numsamps = 1000
 local verbose = true
-local mymodel = GetModel(LoadPattern(real)(16))
+local burnInSamps = 100
+local hmcLag = 1
+local hmcKernel = HMC({numSteps = hmcNumSteps})
+local randomKernel = GaussianDrift({bandwidthAdapt=true})
 
-local terra doHMCInference()
-	return [mcmc(mymodel,  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, verbose=verbose})]
-end
+
+-- Pattern ids to process, id correspondences in comments below
+local ids = {809}
+--house: 40053
+--bug: 809
+--robot: 7080
+--rocket: 777
+
+
 
 local function HMCInference(curPattern)
+	local lag = 2*hmcNumSteps
+
+	local model = probcomp(function()
+		return GetModel(curPattern)()
+	end)
 
 	return terra()
-	 		--- mcmc returns Vector(Sample), where Sample has 'value' and 'logprob' fields
-	 		--return [mcmc(colorCompatModel, kernel, {numsamps=numsamps, verbose=verbose})]
-	 	C.printf("before mcmc\n")
-	 	var x = [mcmc(GetModel(curPattern),  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, verbose=verbose})]
-	 	C.printf("done with mcmc\n")
+	 	var x = [mcmc(GetModel(curPattern),  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, lag=hmcLag, verbose=verbose})]()
 	 	return x
+	 	-- C.printf("HMC\n")
+	 	
+	 -- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
+		-- var samps = [SampleVectorType(model)].stackAlloc()
+		-- C.printf("burn in\n")
+		-- -- Burn in using SSMH
+		-- var burnInKern = [randomKernel()]
+		-- var burnInSamps : &SampleVectorType(model) = [(`nil)]
+		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, lag=lag, verbose=true})](currTrace, burnInKern, burnInSamps)
+		-- m.delete(burnInKern)
+		-- C.printf("mix\n")
+		-- -- Continue mixing using whatever kernel we asked for
+		-- var mixKern = [hmcKernel()]
+		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=true})](currTrace, mixKern, &samps)
+		-- m.delete(mixKern)
+		-- m.delete(currTrace)
+		-- return samps
 	end
 
 end
 
 local function RandomInference(curPattern)
-	 return terra()
-	 	return [mcmc(GetModel(curPattern), RandomWalk(), {numsamps=hmcNumSteps*numsamps, verbose=verbose})]	
+	local lag = 2*hmcNumSteps*hmcLag
+
+	local model = probcomp(function()
+		return GetModel(curPattern)()
+	end)
+
+	 return terra()	 	
+	 	return [mcmc(GetModel(curPattern), GaussianDrift({bandwidthAdapt=true}), {numsamps=numsamps, lag=lag, verbose=verbose})]()
+		-- C.printf("Random\n")
+	 -- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
+		-- var samps = [SampleVectorType(model)].stackAlloc()
+		
+		-- -- Burn in using SSMH
+		-- C.printf("burn in\n")
+		-- var burnInKern = [randomKernel()]
+		-- var burnInSamps : &SampleVectorType(model) = [(`nil)]
+		-- currTrace = [inf.mcmcSample(model, {numsamps=burnInSamps, lag=lag, verbose=true})](currTrace, burnInKern, burnInSamps)
+		-- m.delete(burnInKern)
+		
+		-- -- Continue mixing using whatever kernel we asked for
+		-- C.printf("mix\n")
+		-- var mixKern = [randomKernel()]
+		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, lag=lag, verbose=true})](currTrace, mixKern, &samps)
+		-- m.delete(mixKern)
+		-- m.delete(currTrace)
+		-- return samps
 	 end
 end
 
+local function ConvertBackToRGB(samples)
+	return terra()
+ 		for i=0,numsamps do
+			var pattern = samples(i).value
+			for g=0,pattern.numGroups do
+				--convert back to RGB after converting to LAB for scoring
+				pattern(g) = [ColorUtils.LABtoRGB(real)](pattern(g))
+			end
+			samples(i).value = pattern
+		end
+	end
+end
 
--- Garbage collect the returned vector of samples
---    (i.e. free the memory when it is safe to do so)
---{16,36751,65902,118651,141307,145778,299475,335417,341031,
---16,36751,65902,118651,141307,145778,299475,335417,341031,345645,369094
-local ids = {7080}--{335417,16,141307}--{40053}--{20,57,98}
---local hmcfn = HMCInference(LoadPattern(real)(16))
---hmcfn:compile()
 
 
 for pid=1,#ids do
@@ -883,34 +882,43 @@ for pid=1,#ids do
 	local hmcfn = HMCInference(curPattern)
 	local randfn = RandomInference(curPattern)
 
-	--local mymodel = GetModel(curPattern)
-
 	print (curPattern.templateId)
 	print(curPattern.numGroups)
 
 	io.write("\nHMC.\n")
 	io.flush()
-	--local hmcSamples = m.gc(HMCInference(curPattern)())--mcmc(mymodel,  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, verbose=verbose})
 	local hmcSamples = m.gc(hmcfn())--m.gc(HMCInference(curPattern)())
 
 	print("doneHMC")
+	if (useRGB) then
+		ConvertBackToRGB(hmcSamples)()
+	end
+
+	moviename = arg[1] or "movie-hmc"
+	rendering.renderSamples(hmcSamples, renderInitFn, renderDrawFn, moviename, "renders", true)
 
 	-- Write out links to the colorlovers images
 	SaveToFile(string.format("Stats/%d_HMCColorSamples", patternId), hmcSamples, curPattern)
 
-	hmcSamples:__destruct()
-
-
 	io.write("Random.\n")
 	io.flush()
 	local randomSamples = m.gc(randfn())
+	if (useRGB) then
+		ConvertBackToRGB(randomSamples)()
+	end
+
+	moviename = arg[2] or "movie-rand"
+	rendering.renderSamples(randomSamples, renderInitFn, renderDrawFn, moviename, "renders", true)
+
 	SaveToFile(string.format("Stats/%d_RandomColorSamples", patternId), randomSamples, curPattern)
 
-	--Eval(randomSamples, hmcSamples, hmcNumSteps, patternId, curPattern)
+	-- Autocorrelation
+	Eval(randomSamples, hmcSamples, hmcNumSteps, patternId, curPattern)
 
-	--m.gc(hmcSamples)
-	--m.gc(randomSamples)
+	m.gc(hmcSamples)
+	m.gc(randomSamples)
 
+	hmcSamples:__destruct()
 	randomSamples:__destruct()
 
 
