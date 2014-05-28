@@ -167,6 +167,7 @@ local GetPatternLogProb = templatize(function(real)
 		return `[rand.gaussian_logprob(real)](x, target, softness)
 	end)
 
+
 	local terra glowConstraint(pattern:&RealPattern, l_indices:Vector(Vector(int)), h_indices:Vector(Vector(int)), l_range:double, h_range:double)
 		var result = real(0.0)
 		--return result
@@ -185,10 +186,10 @@ local GetPatternLogProb = templatize(function(real)
 				-- end
 
 				var ldiff = (light(0)-dark(0))/maxldiff
-				var target = 20/maxldiff
+				-- var target = 20/maxldiff
+				var target = 15/maxldiff
 
 				--constrain lightness
-				--factor(softEq(ldiff, target, l_range/maxldiff))
 				result = result + softEq(ldiff, target, l_range/maxldiff)
 
 			end
@@ -213,7 +214,6 @@ local GetPatternLogProb = templatize(function(real)
 				var target = 0.0/maxhdiff--0.0/maxhdiff
 
 				--constrain hue
-				factor(softEq(hdiff, target, h_range/maxhdiff))
 				result = result + softEq(hdiff, target, h_range/maxhdiff)
 
 				-- var hdiff2 = (light(1)*dark(1) + light(2)*dark(2))
@@ -791,7 +791,7 @@ local randomKernel = GaussianDrift({bandwidthAdapt=true})
 
 
 -- Pattern ids to process, id correspondences in comments below
-local ids = {809}
+local ids = {777}
 --house: 40053
 --bug: 809
 --robot: 7080
