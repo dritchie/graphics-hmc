@@ -295,6 +295,18 @@ terra RectRectContact:recalculate() : {}
 	self.contactPoints[2].point = cp3; self.contactPoints[2].normal = n; self.contactPoints[2].tangent1 = t1; self.contactPoints[2].tangent2 = t2
 	self.contactPoints[3].point = cp4; self.contactPoints[3].normal = n; self.contactPoints[3].tangent1 = t1; self.contactPoints[3].tangent2 = t2
 
+	-- Make sure that body1 and body2 still hold references to all the contact points
+	var body1 = self.contactPoints[0].body1
+	var body2 = self.contactPoints[0].body2
+	body1:ensureConnection(self.contactPoints[0])
+	body1:ensureConnection(self.contactPoints[1])
+	body1:ensureConnection(self.contactPoints[2])
+	body1:ensureConnection(self.contactPoints[3])
+	body2:ensureConnection(self.contactPoints[0])
+	body2:ensureConnection(self.contactPoints[1])
+	body2:ensureConnection(self.contactPoints[2])
+	body2:ensureConnection(self.contactPoints[3])
+
 end
 inheritance.virtual(RectRectContact, "recalculate")
 

@@ -548,6 +548,17 @@ terra Body:addConnection(conn: &Connection)
 	self.connections:push(conn)
 end
 
+terra Body:ensureConnection(conn: &Connection)
+	for i=0,self.connections.size do
+		if self.connections(i) == conn then return end
+	end
+	self.connections:push(conn)
+end
+
+terra Body:clearConnections()
+	self.connections:clear()
+end
+
 -- Calculate residual net force and torque
 terra Body:residuals()
 	var fres = Vec3.stackAlloc(0.0, 0.0, 0.0)

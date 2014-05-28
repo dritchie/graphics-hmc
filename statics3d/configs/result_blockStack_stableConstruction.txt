@@ -1,4 +1,4 @@
-numSamps              2000
+numSamps              1000
 numBurnInSamps        100
 
 # saveBurnIn            true
@@ -11,8 +11,8 @@ doComparison          false
 imgRes                720
 deleteImages		  false
 
-genAverageImg         true
-computeAutocorr		  true
+#genAverageImg         true
+#computeAutocorr		  true
 
 
 

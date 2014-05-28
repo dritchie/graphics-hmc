@@ -67,22 +67,64 @@ local unstableColor = colors.Tableau10.Red
 local function makeRenderDrawFn(testcomp)
 	local RenderSettings = s3dLib(testcomp).RenderSettings
 	local Scene = s3dLib(testcomp).Scene
+	local Body = s3dLib(testcomp).Body
+	local Connection = s3dLib(testcomp).Connection
+
+	local terra normalStability(scene: &Scene)
+		return scene:isStable()
+	end
+
+	local terra tiltStability(scene: &Scene, tiltAmt: double)
+		var numSteps = 10
+		var tiltIncr = 2.0*tiltAmt/numSteps
+		scene:tiltX(-tiltAmt)
+		var isstable = scene:isStable()
+		for i=0,numSteps do
+			scene:tiltX(tiltIncr)
+			isstable = isstable and scene:isStable()
+		end
+		scene:tiltX(-tiltAmt)
+		return isstable
+	end
+
+	local terra constructionStability(scene: &Scene)
+		var bodies = [Vector(&Body)].stackAlloc()
+		var connections = [Vector(&Connection)].stackAlloc()
+
+		var isstable = true
+		var ground = scene.bodies(0)
+		for i=1,scene.bodies.size do  -- Skip ground at index 0
+			scene.bodies(i):clearConnections()
+			bodies:push(scene.bodies(i))
+		end
+		scene.bodies:clear()
+		scene.bodies:push(ground)
+		for i=0,scene.connections.size do
+			connections:push(scene.connections(i))
+		end
+		scene.connections:clear()
+
+		for i=0,bodies.size do
+			scene.bodies:push(bodies(i))
+			scene.connections:push(connections(i))
+			connections(i):recalculate()
+			-- There's some kind of numerical glitch that pops up occasionally with evaluating
+			--    the stability of towers that have a multiple of three number of blocks. It's
+			--    really not worth figuring this out right now, I don't think.
+			if (i+1)%3 ~= 0 then
+				isstable = isstable and scene:isStable()
+			end
+		end
+
+		m.destruct(bodies)
+		m.destruct(connections)
+		return isstable
+	end
 
 	local terra sceneIsStable(scene: &Scene)
-		return scene:isStable()
-
-		-- -- TILT STABILITY
-		-- var tiltAmt = radians(10.0)
-		-- var numSteps = 10
-		-- var tiltIncr = 2.0*tiltAmt/numSteps
-		-- scene:tiltX(-tiltAmt)
-		-- var isstable = scene:isStable()
-		-- for i=0,numSteps do
-		-- 	scene:tiltX(tiltIncr)
-		-- 	isstable = isstable and scene:isStable()
-		-- end
-		-- scene:tiltX(-tiltAmt)
-		-- return isstable
+		return normalStability(scene)
+		-- return tiltStability(scene, radians(10.0))
+		-- return constructionStability(scene)
 	end
 
 	return function(sample, im, sampleindex)

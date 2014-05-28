@@ -157,7 +157,11 @@ terra Scene:isStable()
 	end
 
 	-- Solve LP, check for stability
-	var isstable = (lpsolve.solve(lp) == lpsolve.OPTIMAL)
+	var retcode = lpsolve.solve(lp)
+	-- if retcode == lpsolve.NUMFAILURE then
+	-- 	lpsolve.print_lp(lp)
+	-- end
+	var isstable = (retcode == lpsolve.OPTIMAL)
 	-- lpsolve.print_lp(lp)
 	lpsolve.delete_lp(lp)
 	return isstable

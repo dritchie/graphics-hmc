@@ -80,6 +80,9 @@ local Pattern = templatize(function(real)
 		--C.printf("Destructing\n")
 		C.free(self.vars)
 		m.destruct(self.adjacencies)
+		m.destruct(self.sizes)
+		m.destruct(self.l_indices)
+		m.destruct(self.h_indices)
 	end
 
 	terra PatternInfo:__copy(other: &PatternInfo)
@@ -101,3 +104,5 @@ local Pattern = templatize(function(real)
 end)
 
 return Pattern
+
+

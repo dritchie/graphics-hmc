@@ -201,8 +201,8 @@ local GetPatternLogProb = templatize(function(real)
 			var endIdx = h_indices(g).size-1
 			var maxhdiff = 282.9
 			for i=0,endIdx do
-				var light = pattern(h_indices:get(g):get(i))
-				var dark = pattern(h_indices:get(g):get(i+1))
+				var light = pattern(h_indices(g):get(i))
+				var dark = pattern(h_indices(g):get(i+1))
 				-- if (useRGB) then
 				-- 	light = [ColorUtils.RGBtoLAB(real)](light)
 				-- 	dark = [ColorUtils.RGBtoLAB(real)](dark)
@@ -235,8 +235,8 @@ local GetPatternLogProb = templatize(function(real)
 			end 
 			-- var totalhdiff = 20.0/maxhdiff * endIdx
 			-- --also add a restriction on the first hue to the last hue to encourage one direction
-			-- var light = pattern(h_indices:get(g):get(0))
-			-- var dark = pattern(h_indices:get(g):get(endIdx))
+			-- var light = pattern(h_indices(g):get(0))
+			-- var dark = pattern(h_indices(g):get(endIdx))
 			-- if (useRGB) then
 			-- 	light = [ColorUtils.RGBtoLAB(real)](light)
 			-- 	dark = [ColorUtils.RGBtoLAB(real)](dark)
@@ -257,7 +257,6 @@ local GetPatternLogProb = templatize(function(real)
 		var diff = diffFn(pattern)--1.4*diffFn(pattern)
 		var lightnessDiff = lightnessDiffFn(pattern) --0.5*lightnessDiffFn(pattern) 
 
-		--Vector.fromItems(0,1,2,3,4), Vector.fromItems(0,1,2)
 		var glowScore = glowConstraint(pattern, pattern.l_indices, pattern.h_indices, glowRange, hueRange)
 		
 		var score = adjustmentFactor* ((lightness+saturation+diff+lightnessDiff) + glowScore)
@@ -718,7 +717,7 @@ local function Eval(randomSamples, hmcSamples, hmcNumSteps, pid, curPattern)
 	C.printf("Random ESJD\n")
 	ESJD(randomSamples, 1)
 
-	util.wait(string.format("mkdir Stats"))
+	-- util.wait(string.format("mkdir Stats"))
 	C.printf("HMC:\n")
 	AutoCorrelation(string.format("Stats/%d_HMCAutoCorrelation.csv",pid), hmcSamples, pid)
 	C.printf("Random:\n")
@@ -746,6 +745,7 @@ local function renderInitFn(samples, im)
 		-- gl.glutCreateWindow("Render")
 		-- gl.glViewport(0, 0, template.width, template.height)
 		im:resize(template.width, template.height)
+		m.destruct(template)
 	end
 end
 
@@ -766,6 +766,8 @@ local function renderDrawFn(sample, im, idx)
 				im(i,j) = pattern(num)*255
 			end
 		end
+
+		m.destruct(template)
 
 		-- gl.glDrawPixels(im.width,im.height,gl.mGL_RGB(), gl.mGL_UNSIGNED_BYTE(), im.data)
 		-- gl.glFlush()
@@ -791,7 +793,8 @@ local randomKernel = GaussianDrift({bandwidthAdapt=true})
 
 
 -- Pattern ids to process, id correspondences in comments below
-local ids = {777}
+local ids = {777, 7080, 809, 40053}
+
 --house: 40053
 --bug: 809
 --robot: 7080
@@ -807,25 +810,24 @@ local function HMCInference(curPattern)
 	end)
 
 	return terra()
-	 	var x = [mcmc(GetModel(curPattern),  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, lag=hmcLag, verbose=verbose})]()
-	 	return x
-	 	-- C.printf("HMC\n")
+	 	-- var x = [mcmc(GetModel(curPattern),  HMC({numSteps=hmcNumSteps}) , {numsamps=numsamps, lag=hmcLag, verbose=verbose})]()
+	 	-- return x
 	 	
-	 -- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
-		-- var samps = [SampleVectorType(model)].stackAlloc()
-		-- C.printf("burn in\n")
-		-- -- Burn in using SSMH
-		-- var burnInKern = [randomKernel()]
-		-- var burnInSamps : &SampleVectorType(model) = [(`nil)]
-		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, lag=lag, verbose=true})](currTrace, burnInKern, burnInSamps)
-		-- m.delete(burnInKern)
-		-- C.printf("mix\n")
-		-- -- Continue mixing using whatever kernel we asked for
-		-- var mixKern = [hmcKernel()]
-		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=true})](currTrace, mixKern, &samps)
-		-- m.delete(mixKern)
-		-- m.delete(currTrace)
-		-- return samps
+	 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
+		var samps = [SampleVectorType(model)].stackAlloc()
+		C.printf("burn in\n")
+		-- Burn in using SSMH
+		var burnInKern = [randomKernel()]
+		currTrace = [inf.mcmcSample(model, {numsamps=2000, lag=1, verbose=true})](currTrace, burnInKern, nil)
+		-- currTrace = [inf.mcmcSample(model, {numsamps=2000, lag=1, verbose=true})](currTrace, burnInKern, &samps)
+		m.delete(burnInKern)
+		C.printf("mix\n")
+		-- Continue mixing using whatever kernel we asked for
+		var mixKern = [hmcKernel()]
+		currTrace = [inf.mcmcSample(model, {numsamps=numsamps, verbose=true})](currTrace, mixKern, &samps)
+		m.delete(mixKern)
+		m.delete(currTrace)
+		return samps
 	end
 
 end
@@ -838,31 +840,29 @@ local function RandomInference(curPattern)
 	end)
 
 	 return terra()	 	
-	 	return [mcmc(GetModel(curPattern), GaussianDrift({bandwidthAdapt=true}), {numsamps=numsamps, lag=lag, verbose=verbose})]()
-		-- C.printf("Random\n")
-	 -- 	var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
-		-- var samps = [SampleVectorType(model)].stackAlloc()
-		
-		-- -- Burn in using SSMH
-		-- C.printf("burn in\n")
-		-- var burnInKern = [randomKernel()]
-		-- var burnInSamps : &SampleVectorType(model) = [(`nil)]
-		-- currTrace = [inf.mcmcSample(model, {numsamps=burnInSamps, lag=lag, verbose=true})](currTrace, burnInKern, burnInSamps)
-		-- m.delete(burnInKern)
-		
-		-- -- Continue mixing using whatever kernel we asked for
-		-- C.printf("mix\n")
-		-- var mixKern = [randomKernel()]
-		-- currTrace = [inf.mcmcSample(model, {numsamps=numsamps, lag=lag, verbose=true})](currTrace, mixKern, &samps)
-		-- m.delete(mixKern)
-		-- m.delete(currTrace)
-		-- return samps
+	 	-- return [mcmc(GetModel(curPattern), GaussianDrift({bandwidthAdapt=true}), {numsamps=numsamps, lag=lag, verbose=verbose})]()
+
+	    var currTrace : &trace.BaseTrace(double) = [trace.newTrace(model)]
+		var samps = [SampleVectorType(model)].stackAlloc()
+		-- Burn in using SSMH
+		C.printf("burn in\n")
+		var burnInKern = [randomKernel()]
+		currTrace = [inf.mcmcSample(model, {numsamps=2000, lag=1, verbose=true})](currTrace, burnInKern, nil)
+		-- currTrace = [inf.mcmcSample(model, {numsamps=2000, lag=1, verbose=true})](currTrace, burnInKern, &samps)
+		m.delete(burnInKern)
+		-- Continue mixing using whatever kernel we asked for
+		C.printf("mix\n")
+		var mixKern = [randomKernel()]
+		currTrace = [inf.mcmcSample(model, {numsamps=numsamps, lag=lag, verbose=true})](currTrace, mixKern, &samps)
+		m.delete(mixKern)
+		m.delete(currTrace)
+		return samps
 	 end
 end
 
 local function ConvertBackToRGB(samples)
 	return terra()
- 		for i=0,numsamps do
+ 		for i=0,samples.size do
 			var pattern = samples(i).value
 			for g=0,pattern.numGroups do
 				--convert back to RGB after converting to LAB for scoring
@@ -876,13 +876,15 @@ end
 
 
 for pid=1,#ids do
+	util.wait(string.format("mkdir Stats"))
+	util.wait(string.format("mkdir renders/color"))
 	print ("in loop")
 	patternId = ids[pid]
 	local curPattern = LoadPattern(real)(patternId)
 	local hmcfn = HMCInference(curPattern)
 	local randfn = RandomInference(curPattern)
 
-	print (curPattern.templateId)
+	print(curPattern.templateId)
 	print(curPattern.numGroups)
 
 	io.write("\nHMC.\n")
@@ -894,8 +896,10 @@ for pid=1,#ids do
 		ConvertBackToRGB(hmcSamples)()
 	end
 
-	moviename = arg[1] or "movie-hmc"
-	rendering.renderSamples(hmcSamples, renderInitFn, renderDrawFn, moviename, "renders", true)
+	local moviename = arg[1] or "movie-hmc"
+	local moviedir = string.format("renders/color/%d", patternId)
+	util.wait(string.format("mkdir %s", moviedir))
+	rendering.renderSamples(hmcSamples, renderInitFn, renderDrawFn, moviename, moviedir, true)
 
 	-- Write out links to the colorlovers images
 	SaveToFile(string.format("Stats/%d_HMCColorSamples", patternId), hmcSamples, curPattern)
@@ -908,7 +912,7 @@ for pid=1,#ids do
 	end
 
 	moviename = arg[2] or "movie-rand"
-	rendering.renderSamples(randomSamples, renderInitFn, renderDrawFn, moviename, "renders", true)
+	rendering.renderSamples(randomSamples, renderInitFn, renderDrawFn, moviename, moviedir, true)
 
 	SaveToFile(string.format("Stats/%d_RandomColorSamples", patternId), randomSamples, curPattern)
 

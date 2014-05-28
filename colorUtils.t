@@ -292,7 +292,7 @@ local BinaryPerceptualConstraint = templatize(function(real)
 
 		var maxDist = ad.math.sqrt(100.0*100.0+200.0*200.0+200.0*200.0)
 		for i=0,pattern.adjacencies.size do
-			var adj = pattern.adjacencies:get(i)
+			var adj = pattern.adjacencies:getPointer(i)
 			var first = pattern(adj:get(0))
 			var second = pattern(adj:get(1))
 			
@@ -324,7 +324,7 @@ local BinaryLightnessConstraint = templatize(function(real)
 		var maxDist = 100.0
 		var numAdj = pattern.adjacencies.size
 		for i=0,pattern.adjacencies.size do
-			var adj = pattern.adjacencies:get(i)
+			var adj = pattern.adjacencies:getPointer(i)
 			var first = real(0.0)
 			var second = real(0.0)
 				

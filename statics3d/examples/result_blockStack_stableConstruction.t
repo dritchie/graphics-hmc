@@ -50,7 +50,7 @@ return probcomp(function()
 		return boxShape
 	end)
 
-	local numBlocks = 6
+	local numBlocks = 5
 	return terra()
 		-- Set up scene
 		var scene = Scene.stackAlloc(gravityConst, upVector)
@@ -71,6 +71,11 @@ return probcomp(function()
 		var minAng = -radians(30.0)
 		var maxAng = radians(30.0)
 		var margin = mm(10.0)
+		-- var minDim = mm(39.99)
+		-- var maxDim = mm(40.01)
+		-- var minAng = -radians(0.01)
+		-- var maxAng = radians(0.01)
+		-- var margin = mm(10.0)
 
 		-- Set up stuff in the scene --
 
@@ -92,7 +97,8 @@ return probcomp(function()
 			var prevBody = renderScene.scene.bodies(bodyIndex-1)
 			var prevShape = [&QuadHex](prevBody.shape)
 			var boxShape = genRandomBlockShape(minDim, maxDim, minAng, maxAng, i)
-			boxShape:stackRandom(prevShape, margin, false)
+			boxShape:stack(prevShape, 0.5, 0.5, true)
+			-- boxShape:stackRandom(prevShape, margin, false)
 			boxShape:alignStacked(prevShape)	-- IMPORTANT!
 			boxBody = Body.oak(boxShape)
 			renderScene.scene.bodies:push(boxBody)
