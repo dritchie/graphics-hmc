@@ -327,8 +327,15 @@ end
 terra QuadHex:alignStacked(box: &QuadHex)
 	var botCenter = self:botFace():centroid()
 	var myAxis = self:botFrontEdge(); myAxis:normalize()
-	var otherAxis = box:topFrontEdge(); otherAxis:normalize()
-	-- C.printf("myAxis: "); myAxis:print(); C.printf("  |  otherAxis: "); otherAxis:print(); C.printf("\n")
+	-- Figure out which edge is closest and snap to that one
+	var otherAxis1 = box:topFrontEdge(); otherAxis1:normalize()
+	if otherAxis1:dot(myAxis) < 0.0 then otherAxis1 = -otherAxis1 end
+	var otherAxis2 = box:topLeftEdge(); otherAxis2:normalize()
+	if otherAxis2:dot(myAxis) < 0.0 then otherAxis2 = -otherAxis2 end
+	var otherAxis = otherAxis1
+	if myAxis:dot(otherAxis2) > myAxis:dot(otherAxis1) then
+		otherAxis = otherAxis2
+	end
 	var xform = Mat4.translate(botCenter) *
 				Mat4.face(myAxis, otherAxis) *
 				Mat4.translate(-botCenter)
@@ -350,7 +357,7 @@ end
 --    and the centroid of its bottom face is located at the (xcoord, ycoord)
 --    in the local coordinate system of box's top face
 -- If relativeCoords is true, then xcoord,ycoord are interpreted as percentages along
---    their respective edges. Otherwise, they are interpreted as absolute physical unites
+--    their respective edges. Otherwise, they are interpreted as absolute physical units
 terra QuadHex:stack(box: &QuadHex, xcoord: real, ycoord: real, relativeCoords: bool) : {}
 	var origin = box.verts[ [QuadHex.vFrontTopLeft] ]
 	var xedge = box.verts[ [QuadHex.vFrontTopRight] ] - origin

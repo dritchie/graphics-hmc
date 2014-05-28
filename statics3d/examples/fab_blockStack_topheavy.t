@@ -48,12 +48,11 @@ return probcomp(function()
 		var height = boundedUniform(minHeight, maxHeight)
 		var width = boundedUniform(minWidth, maxWidth)
 		var boxShape = QuadHex.heapAlloc(); boxShape:makeBox(Vec3.stackAlloc(0.0, 0.0, 0.0), width, depth, height)
-		if index % 2 == 0 then
-			boxShape:topShearX(boundedUniform(minAng, maxAng))
-			boxShape:shearX(boundedUniform(minAng, maxAng))
-		else
-			boxShape:topShearY(boundedUniform(minAng, maxAng))
-			boxShape:shearY(boundedUniform(minAng, maxAng))
+		boxShape:topShearX(boundedUniform(minAng, maxAng))
+		boxShape:shearX(boundedUniform(minAng, maxAng))
+		if index % 2 ~= 0 then
+			var mat = Mat4.rotateZ([math.pi/2])
+			boxShape:transform(&mat)
 		end
 		return boxShape
 	end)

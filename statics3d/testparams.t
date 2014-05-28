@@ -11,7 +11,7 @@
 --   * saveBurnIn (default=false): whether burn-in samples are considered for further output/analysis
 --   * outputdir (default=../renders): the directory where output gets written
 --   * name (default="output"): the basename for all output files
---   * saveSceneDescriptions (default=false): output plaintext scene descriptions for all scenes
+--   * saveSceneDescriptions (default=true): output plaintext scene descriptions for all scenes
 --   * renderMovie (default=true): true if we should render visual output
 --   * imgRes (default=500): x resolution of rendered images
 --   * deleteImages (default=true): true if we should delete frames after the .mp4 is created.
@@ -33,7 +33,7 @@ local Params =
 	saveBurnIn = false,
 	outputdir = "../renders",
 	name = "output",
-	saveSceneDescriptions = false,
+	saveSceneDescriptions = true,
 	renderMovie = true,
 	imgRes = 500,
 	deleteImages = true,

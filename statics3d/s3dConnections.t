@@ -180,7 +180,7 @@ m.addConstructors(ContactPoint)
 
 
 
-local alignThresh = 1e-12
+local alignThresh = 1e-7
 local RectContactFace = Face(4)
 
 -- A RectRectContact joins two bodies at two coincident faces.
@@ -208,9 +208,12 @@ RectRectContact.methods.isValidContact = terra(face1: &RectContactFace, face2: &
 	var e2b = face2:vertex(2) - face2:vertex(1); e2b:normalize()
 	var aligned = ad.math.fabs(e1:dot(e2a)) < alignThresh or
 		   		  ad.math.fabs(e1:dot(e2b)) < alignThresh
+	-- C.printf("alignment: %g   |   %g\n", e1:dot(e2a), e1:dot(e2b))
 	if not aligned then return false end
 	-- Check coplanarity
 	var n = e2a:cross(e2b)
+	-- var e = face1:vertex(0) - face2:vertex(0); e:normalize()
+	-- var d = e:dot(n); C.printf("plane eqn: %g\n", d)
 	if not face1:vertex(0):inPlane(face2:vertex(0), n) then return false end
 	return true
 end
@@ -261,7 +264,7 @@ end
 terra RectRectContact:__construct(body1: &Body, body2: &Body, face1: &RectContactFace, face2: &RectContactFace, validCheck: bool)
 	if validCheck then
 		util.assert(RectRectContact.isValidContact(face1, face2),
-			"Can only create Contact between two coplanar, aligned, parallelogram faces\n")
+			"Can only create RectRectContact between two coplanar, aligned, parallelogram faces\n")
 	end
 
 	-- Compute contact polygon, create 4 contact points

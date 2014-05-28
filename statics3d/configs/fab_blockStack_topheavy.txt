@@ -15,7 +15,7 @@ deleteImages		  false
 genAverageImg         false
 computeAutocorr		  false
 saveSceneDescriptions true
-#saveBlueprints		  187
+#saveBlueprints		  78
 
 
 outputdir			  ../renders/figs/fab_blockStack_topheavy
