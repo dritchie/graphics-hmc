@@ -20,7 +20,8 @@ AC2 = M2(:,2);
 plot(Lag1, AC1, Lag2, AC2, 'LineWidth',3);
 ylim([absmin absmax]);
 pbaspect([1 1 1]);
+% pbaspect([2 1 1]);
 xlabel('Lag');
 ylabel('Autocorrelation');
-legend('HMC', 'RWMH', 'Location', 'SouthWest');
+legend('HMC', 'MH', 'Location', 'SouthWest');
 end
