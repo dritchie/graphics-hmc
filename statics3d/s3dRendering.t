@@ -1,16 +1,16 @@
-terralib.require("prob")
+require("prob")
 
-local m = terralib.require("mem")
-local util = terralib.require("util")
-local templatize = terralib.require("templatize")
-local inheritance = terralib.require("inheritance")
-local Vec = terralib.require("linalg").Vec
-local Vector = terralib.require("vector")
-local colors = terralib.require("colors")
-local s3dCore = terralib.require("s3dCore")
-local gl = terralib.require("gl")
+local m = require("mem")
+local util = require("util")
+local templatize = require("templatize")
+local inheritance = require("inheritance")
+local Vec = require("linalg").Vec
+local Vector = require("vector")
+local colors = require("colors")
+local s3dCore = require("s3dCore")
+local gl = require("gl")
 
-local glutils = terralib.require("glutils")
+local glutils = require("glutils")
 util.importEntries(glutils, "Camera", "Light", "Material")
 
 gl.exposeConstants({

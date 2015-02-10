@@ -1,7 +1,7 @@
-local gl = terralib.require("gl")
-local image = terralib.require("image")
-local util = terralib.require("util")
-local colors = terralib.require("colors")
+local gl = require("gl")
+local image = require("image")
+local util = require("util")
+local colors = require("colors")
 
 local C = terralib.includecstring [[
 #include <stdio.h>

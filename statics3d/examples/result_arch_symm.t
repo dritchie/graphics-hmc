@@ -1,16 +1,16 @@
-terralib.require("prob")
+require("prob")
 
 
-local s3dLib = terralib.require("s3dLib")
-local m = terralib.require("mem")
-local util = terralib.require("util")
-local ad = terralib.require("ad")
-local templatize = terralib.require("templatize")
-local AutoPtr = terralib.require("autopointer")
-local Vector = terralib.require("Vector")
-local Vec = terralib.require("linalg").Vec
+local s3dLib = require("s3dLib")
+local m = require("mem")
+local util = require("util")
+local ad = require("ad")
+local templatize = require("templatize")
+local AutoPtr = require("autopointer")
+local Vector = require("Vector")
+local Vec = require("linalg").Vec
 local Vec3d = Vec(double, 3)
-local glutils = terralib.require("glutils")
+local glutils = require("glutils")
 util.importEntries(glutils, "Camera", "Light")
 
 

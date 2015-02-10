@@ -1,6 +1,6 @@
 
-local util = terralib.require("util")
-local Params = terralib.require("testparams")
+local util = require("util")
+local Params = require("testparams")
 
 
 

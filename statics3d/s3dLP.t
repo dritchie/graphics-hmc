@@ -1,12 +1,12 @@
-terralib.require("prob")
+require("prob")
 
-local m = terralib.require("mem")
-local util = terralib.require("util")
-local inheritance = terralib.require("inheritance")
-local Vec = terralib.require("linalg").Vec
-local Vector = terralib.require("vector")
-local s3dCore = terralib.require("s3dCore")
-local lpsolve = terralib.require("lpsolve")
+local m = require("mem")
+local util = require("util")
+local inheritance = require("inheritance")
+local Vec = require("linalg").Vec
+local Vector = require("vector")
+local s3dCore = require("s3dCore")
+local lpsolve = require("lpsolve")
 
 
 local Vec3d = Vec(double, 3)

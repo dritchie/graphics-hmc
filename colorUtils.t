@@ -1,14 +1,14 @@
 -- Include quicksand
-local rand = terralib.require("prob.random")
-terralib.require("prob")
+local rand = require("prob.random")
+require("prob")
 
-local ad = terralib.require("ad")
-local m = terralib.require("mem")
-local templatize = terralib.require("templatize")
-local util = terralib.require("util")
-local Vec = terralib.require("linalg").Vec
-local Vector = terralib.require("vector")
-local Pattern = terralib.require("pattern")
+local ad = require("ad")
+local m = require("mem")
+local templatize = require("templatize")
+local util = require("util")
+local Vec = require("linalg").Vec
+local Vector = require("vector")
+local Pattern = require("pattern")
 local C = terralib.includecstring [[
 #include <stdlib.h>
 #include <stdio.h>

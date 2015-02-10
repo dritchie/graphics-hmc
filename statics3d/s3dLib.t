@@ -1,12 +1,12 @@
-terralib.require("prob")
+require("prob")
 
-local util = terralib.require("util")
-local core = terralib.require("s3dCore")
-local rendering = terralib.require("s3dRendering")
-local lp = terralib.require("s3dLP")
-local materials = terralib.require("s3dMaterials")
-local connections = terralib.require("s3dConnections")
-local shapes = terralib.require("s3dShapes")
+local util = require("util")
+local core = require("s3dCore")
+local rendering = require("s3dRendering")
+local lp = require("s3dLP")
+local materials = require("s3dMaterials")
+local connections = require("s3dConnections")
+local shapes = require("s3dShapes")
 
 return probmodule(function(pcomp)
 	return util.joinTables(

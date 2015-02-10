@@ -1,14 +1,14 @@
-terralib.require("prob")
+require("prob")
 
-local util = terralib.require("util")
-local m = terralib.require("mem")
-local ad = terralib.require("ad")
-local inheritance = terralib.require("inheritance")
-local Vec = terralib.require("linalg").Vec
-local BBox = terralib.require("bbox")
-local Vector = terralib.require("vector")
-local lpsolve = terralib.require("lpsolve")
-local s3dCore = terralib.require("s3dCore")
+local util = require("util")
+local m = require("mem")
+local ad = require("ad")
+local inheritance = require("inheritance")
+local Vec = require("linalg").Vec
+local BBox = require("bbox")
+local Vector = require("vector")
+local lpsolve = require("lpsolve")
+local s3dCore = require("s3dCore")
 
 local C = terralib.includecstring [[
 #include "stdio.h"

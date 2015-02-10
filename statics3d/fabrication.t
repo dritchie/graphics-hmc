@@ -1,16 +1,16 @@
-terralib.require("prob")
+require("prob")
 
-local m = terralib.require("mem")
-local ad = terralib.require("ad")
-local util = terralib.require("util")
-local Vec = terralib.require("linalg").Vec
-local Vector = terralib.require("vector")
-local HashMap = terralib.require("hashmap")
-local gl = terralib.require("gl")
-local image = terralib.require("image")
-local colors = terralib.require("colors")
-local BBox = terralib.require("bbox")
-local s3dLib = terralib.require("s3dLib")
+local m = require("mem")
+local ad = require("ad")
+local util = require("util")
+local Vec = require("linalg").Vec
+local Vector = require("vector")
+local HashMap = require("hashmap")
+local gl = require("gl")
+local image = require("image")
+local colors = require("colors")
+local BBox = require("bbox")
+local s3dLib = require("s3dLib")
 
 
 local C = terralib.includecstring [[

@@ -1,14 +1,14 @@
-terralib.require("prob")
+require("prob")
 
-local util = terralib.require("util")
-local m = terralib.require("mem")
-local ad = terralib.require("ad")
-local inheritance = terralib.require("inheritance")
-local templatize = terralib.require("templatize")
-local Vector = terralib.require("vector")
-local s3dCore = terralib.require("s3dCore")
-local s3dRendering = terralib.require("s3dRendering")
-local s3dConnections = terralib.require("s3dConnections")
+local util = require("util")
+local m = require("mem")
+local ad = require("ad")
+local inheritance = require("inheritance")
+local templatize = require("templatize")
+local Vector = require("vector")
+local s3dCore = require("s3dCore")
+local s3dRendering = require("s3dRendering")
+local s3dConnections = require("s3dConnections")
 
 local C = terralib.includecstring [[
 #include "stdio.h"

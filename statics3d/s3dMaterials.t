@@ -1,7 +1,7 @@
-terralib.require("prob")
+require("prob")
 
-local util = terralib.require("util")
-local s3dCore = terralib.require("s3dCore")
+local util = require("util")
+local s3dCore = require("s3dCore")
 
 
 return probmodule(function(pcomp)

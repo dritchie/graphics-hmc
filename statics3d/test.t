@@ -1,19 +1,19 @@
-terralib.require("prob")
+require("prob")
 
 -- Allow us to include stuff from the parent directory
 package.path = "../?.t;" .. package.path 
 
-local s3dLib = terralib.require("s3dLib")
-local m = terralib.require("mem")
-local util = terralib.require("util")
-local gl = terralib.require("gl")
-local rendering = terralib.require("rendering")
-local Vector = terralib.require("vector")
-local Vec = terralib.require("linalg").Vec
-local colors = terralib.require("colors")
-local fab = terralib.require("fabrication")
-local image = terralib.require("image")
-local Params = terralib.require("testparams")
+local s3dLib = require("s3dLib")
+local m = require("mem")
+local util = require("util")
+local gl = require("gl")
+local rendering = require("rendering")
+local Vector = require("vector")
+local Vec = require("linalg").Vec
+local colors = require("colors")
+local fab = require("fabrication")
+local image = require("image")
+local Params = require("testparams")
 
 local C = terralib.includecstring [[
 #include "stdio.h"
@@ -154,7 +154,7 @@ local trueVar = global(double)
 
 local function doRun(params)
 
-	local testcomp = terralib.require(params.exampleToRun)
+	local testcomp = require(params.exampleToRun)
 
 	local ssmhKernel = GaussianDrift({bandwidth=params.gaussianBandwidth, bandwidthAdapt=true})
 	local hmcKernel = HMC({numSteps=params.numHMCSteps})
@@ -172,8 +172,8 @@ local function doRun(params)
 	if params.forwardSample then
 		go = forwardSample(testcomp, params.numSamps)
 	else
-		local inf = terralib.require("prob.inference")
-		local trace = terralib.require("prob.trace")
+		local inf = require("prob.inference")
+		local trace = require("prob.trace")
 		go = terra()
 			var currTrace : &trace.BaseTrace(double) = [trace.newTrace(testcomp)]
 			var samps = [SampleVectorType(testcomp)].stackAlloc()
@@ -310,7 +310,7 @@ params:print()
 
 -- Save blueprints for fabrication!
 if params.saveBlueprints ~= -1 then
-	local testcomp = terralib.require(params.exampleToRun)
+	local testcomp = require(params.exampleToRun)
 	local ppi = 300
 	local terra saveBlueprints()
 		util.systemf("mkdir %s/%s_blueprints", params.outputdir, params.name)

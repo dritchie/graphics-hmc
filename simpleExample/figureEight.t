@@ -1,14 +1,14 @@
-terralib.require("prob")
+require("prob")
 
-local util = terralib.require("util")
-local m = terralib.require("mem")
-local templatize = terralib.require("templatize")
-local ad = terralib.require("ad")
-local Vector = terralib.require("vector")
-local Vec = terralib.require("linalg").Vec
-local rand = terralib.require("prob.random")
-local gl = terralib.require("gl")
-local image = terralib.require("image")
+local util = require("util")
+local m = require("mem")
+local templatize = require("templatize")
+local ad = require("ad")
+local Vector = require("vector")
+local Vec = require("linalg").Vec
+local rand = require("prob.random")
+local gl = require("gl")
+local image = require("image")
 
 local C = terralib.includecstring [[
 #include <stdio.h>

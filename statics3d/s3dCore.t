@@ -1,16 +1,16 @@
-terralib.require("prob")
+require("prob")
 
-local m = terralib.require("mem")
-local ad = terralib.require("ad")
-local util = terralib.require("util")
-local inheritance = terralib.require("inheritance")
-local templatize = terralib.require("templatize")
-local Vec = terralib.require("linalg").Vec
-local Mat = terralib.require("linalg").Mat
-local Vector = terralib.require("vector")
-local HashMap = terralib.require("hashmap")
-local Hash = terralib.require("hash")
-local Camera = terralib.require("glutils").Camera
+local m = require("mem")
+local ad = require("ad")
+local util = require("util")
+local inheritance = require("inheritance")
+local templatize = require("templatize")
+local Vec = require("linalg").Vec
+local Mat = require("linalg").Mat
+local Vector = require("vector")
+local HashMap = require("hashmap")
+local Hash = require("hash")
+local Camera = require("glutils").Camera
 
 local C = terralib.includecstring [[
 #include "stdio.h"

@@ -1,24 +1,24 @@
 -- Include quicksand
 package.path = "../?.t;" .. package.path 
-local rand = terralib.require("prob.random")
-local inf = terralib.require("prob.inference")
-local trace = terralib.require("prob.trace")
-terralib.require("prob")
+local rand = require("prob.random")
+local inf = require("prob.inference")
+local trace = require("prob.trace")
+require("prob")
 
 -- Other libraries we'll need
---local image = terralib.require("image")
-local m = terralib.require("mem")
-local util = terralib.require("util")
-local Vector = terralib.require("vector")
-local Vec = terralib.require('linalg').Vec
-local Pattern = terralib.require("pattern")
-local ColorUtils = terralib.require('colorUtils')
-local ad = terralib.require("ad")
-local templatize = terralib.require("templatize")
-local image = terralib.require("image")
-local rendering = terralib.require("rendering")
-local gl = terralib.require("gl")
-local colors = terralib.require("colors")
+--local image = require("image")
+local m = require("mem")
+local util = require("util")
+local Vector = require("vector")
+local Vec = require('linalg').Vec
+local Pattern = require("pattern")
+local ColorUtils = require('colorUtils')
+local ad = require("ad")
+local templatize = require("templatize")
+local image = require("image")
+local rendering = require("rendering")
+local gl = require("gl")
+local colors = require("colors")
 
 
 -- C standard library stuff
